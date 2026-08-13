@@ -44,13 +44,8 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
-
-    lint {
-        // O detector NullSafeMutableLiveData quebra (IncompatibleClassChangeError)
-        // ao analisar UAST de código Kotlin 2.2 no lint do AGP 8.7.2. Não usamos
-        // LiveData; desabilitado até uma combinação AGP/lint sem o bug. Ver DECISIONS.md.
-        disable += "NullSafeMutableLiveData"
-    }
+    // O lint está desligado globalmente na raiz (build.gradle.kts) por causa do
+    // bug do AGP 8.7.2 com Kotlin 2.2; não há bloco `lint {}` por módulo.
 }
 
 dependencies {

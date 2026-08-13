@@ -5,6 +5,20 @@ Ordem cronológica inversa (mais recente no topo).
 
 ---
 
+## 2026-08-13 — Revisão de compliance e leitura do material do curso
+
+- **M0/M1 em conformidade com o edital e o material teórico.** Leitura integral de Un12 (Edge-AI/Android, 94 p.) e Un13 (DAT, 64 p.) valida quase todas as escolhas (whisper.cpp, Silero, openWakeWord, Piper/sherpa-onnx, ML Kit, FGS, WorkManager, cascata, roteador determinístico, `getThermalHeadroom`). Un10/Un11 são conceituais (RAG/vetorial/Python) e corretamente fora de escopo. Guidelines e checklist por milestone consolidados em `docs/COMPLIANCE.md`.
+
+- **Revisão de M1: removido bloco `lint {}` redundante do `app`.** O desligamento global de lint na raiz já cobre tudo; o bloco por módulo era inócuo e enganoso.
+
+- **Risco registrado (não é defeito): HFP entrega 8 kHz, Whisper espera 16 kHz.** Exige resample e medição de acurácia com áudio HFP real no M3/M4. Ver `docs/COMPLIANCE.md` §D.
+
+- **`Wearables.initialize` deve ir numa classe `Application` (não Activity)** — criar no M2. Fonte: Un13 p.34 (reconfirmar assinatura 0.9 via `search_dat_docs`).
+
+- **`mwdat-mockdevice` a ser gated por `DEBUG` no M2** (hoje é `implementation` em core-glasses). Produção não deve linkar mock ativo. Fonte: Un13 p.63.
+
+---
+
 ## 2026-08-13 — M1 (setup do DAT)
 
 - **DAT 0.9.0 integrado e resolvendo** (`com.meta.wearable:mwdat-core/camera/mockdevice`), via GitHub Packages com PAT `read:packages` em `local.properties` (`github_token`). `mwdat-display` omitido de propósito (óculos sem display). Deps só em `core-glasses`.
