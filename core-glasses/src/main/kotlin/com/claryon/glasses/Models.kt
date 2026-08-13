@@ -6,22 +6,45 @@ package com.claryon.glasses
  * do toolkit fique contida na implementação de [GlassesFacade].
  */
 
-/** Estado de registro dos óculos junto ao app Meta AI. */
+/**
+ * Estado de registro dos óculos junto ao app Meta AI.
+ * Espelha `RegistrationState` do DAT 0.9 (confirmado no sample oficial):
+ * UNAVAILABLE, REGISTERING, REGISTERED, UNREGISTERING. `UNKNOWN` é o valor
+ * inicial nosso antes da primeira emissão.
+ */
 enum class RegistrationStatus {
     UNKNOWN,
-    AVAILABLE,      // registrável, porém não registrado (ou perdido para outro app)
+    UNAVAILABLE,
     REGISTERING,
     REGISTERED,
-    ERROR,
+    UNREGISTERING,
 }
 
-/** Estado da sessão do DAT. */
+/**
+ * Estado da sessão do DAT. Espelha `DeviceSessionState` 0.9:
+ * IDLE → STARTING → STARTED → PAUSED → STOPPING → STOPPED.
+ */
 enum class SessionStatus {
     IDLE,
     STARTING,
     STARTED,
-    STREAMING,
+    PAUSED,
+    STOPPING,
     STOPPED,
+}
+
+/**
+ * Estado do stream de câmera. Espelha `StreamState` 0.9:
+ * STOPPED → STARTING → STARTED → STREAMING → STOPPING → STOPPED → CLOSED
+ * (PAUSED quando o usuário dá tap na haste). Frames só chegam em STREAMING.
+ */
+enum class StreamStatus {
+    STOPPED,
+    STARTING,
+    STARTED,
+    STREAMING,
+    PAUSED,
+    STOPPING,
     CLOSED,
 }
 
@@ -57,6 +80,13 @@ data class Frame(
 
     override fun hashCode(): Int = timestampNanos.hashCode()
 }
+
+/** Informação leve do último frame — usada no painel de diagnóstico (M2). */
+data class FrameInfo(
+    val width: Int,
+    val height: Int,
+    val count: Long,
+)
 
 /** Foto capturada sob comando (HEIC/Bitmap na implementação real). */
 data class PhotoData(

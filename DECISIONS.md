@@ -5,6 +5,22 @@ Ordem cronológica inversa (mais recente no topo).
 
 ---
 
+## 2026-08-13 — M2 (Mock Device Kit + registro/sessão/câmera)
+
+- **Fonte autoritativa: sample oficial `CameraAccess` (repo `facebook/meta-wearables-dat-android`, tag 0.9.0).** Clonado num diretório irmão e lido para confirmar TODAS as assinaturas 0.9 antes de escrever (Regra Zero, "samples > docs"). Correções vs. material 0.8: `RegistrationState` = {UNAVAILABLE, REGISTERING, REGISTERED, UNREGISTERING} (sem "AVAILABLE"); câmera 0.9 é `session.addCamera(config): DatResult<Camera>` → `Camera.stream` (não `addStream`); `DatResult` usa `.onSuccess/.onFailure { error, _ -> }` (evitar `getOrThrow` em produção); `session.start()` retorna `Unit` (resultado via `session.state`/`session.errors`).
+
+- **`Wearables.initialize` encapsulado em `core-glasses` (`GlassesRuntime.initialize`), chamado no `ClaryonApp: Application`.** O compilador provou a fronteira: o `app` não consegue importar `Wearables` (deps do DAT são `implementation` em core-glasses, não `api`) — o isolamento da fachada é garantido pelo módulo, não só por convenção.
+
+- **Enums do DAT mapeados por NOME** (`enumValueOf<T>(state.name)` com fallback) em vez de referenciar constantes — resiliente a acréscimos no SDK em preview e reduz risco de erro de memória.
+
+- **`DatGlassesFacade`** implementa `GlassesFacade` sobre a 0.9 (registro, sessão, `addCamera`→`Camera`→`stream`, `capturePhoto`) e expõe StateFlows extras (streamState/frameInfo/deviceCount) para o diagnóstico. **`MockDeviceController`** (debug) faz `enable → pairGlasses(RAYBAN_META) → powerOn → don → setCameraFeed(CameraFacing)` (câmera do celular). Painel Compose reflete tudo ao vivo.
+
+- **Aceite de build: `./gradlew :app:assembleDebug` e `:app:assembleDebugAndroidTest` verdes contra o SDK 0.9** (APK ~56 MB, libs nativas do DAT). **Verificação de runtime** (transição de estados + frames) via teste instrumentado `MockDeviceKitStreamTest` + emulador — em andamento (a máquina não tinha emulador; imagem android-35 baixada nesta sessão).
+
+- **Pendência de compliance (registrada):** `mwdat-mockdevice` ainda é `implementation` (não `debugImplementation`) e `MockDeviceController` vive em `src/main` gated por `BuildConfig.DEBUG` no chamador. Mover para `src/debug` no próximo passo.
+
+---
+
 ## 2026-08-13 — Revisão de compliance e leitura do material do curso
 
 - **M0/M1 em conformidade com o edital e o material teórico.** Leitura integral de Un12 (Edge-AI/Android, 94 p.) e Un13 (DAT, 64 p.) valida quase todas as escolhas (whisper.cpp, Silero, openWakeWord, Piper/sherpa-onnx, ML Kit, FGS, WorkManager, cascata, roteador determinístico, `getThermalHeadroom`). Un10/Un11 são conceituais (RAG/vetorial/Python) e corretamente fora de escopo. Guidelines e checklist por milestone consolidados em `docs/COMPLIANCE.md`.
