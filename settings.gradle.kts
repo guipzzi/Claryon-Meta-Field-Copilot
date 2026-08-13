@@ -1,3 +1,5 @@
+import java.util.Properties
+
 pluginManagement {
     repositories {
         google {
@@ -12,29 +14,34 @@ pluginManagement {
     }
 }
 
+// Token do GitHub Packages para os artefatos do DAT. Ordem: env GITHUB_TOKEN,
+// senão a chave `github_token` em local.properties (não versionado). Nunca
+// commitar o valor. Ver DECISIONS.md.
+val githubToken: String = System.getenv("GITHUB_TOKEN")
+    ?: rootDir.resolve("local.properties").takeIf { it.exists() }
+        ?.let { Properties().apply { it.inputStream().use(::load) }.getProperty("github_token") }
+    ?: ""
+
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
         google()
         mavenCentral()
 
-        // ── M1 (Setup do DAT) ─────────────────────────────────────────────
-        // Artefatos do Meta Wearables DAT (com.meta.wearable:mwdat-*, versão
-        // 0.9.0 — confirmada via search_dat_docs em 2026-08-13) são distribuídos
-        // via GitHub Packages e exigem um PAT clássico com escopo `read:packages`.
-        // NÃO habilitado no M0: depende de credencial (Regra Zero). Forma oficial
-        // da credencial: username vazio + chave `github_token` em local.properties
-        // (ou env GITHUB_TOKEN). Nunca versionar o token. Ver DECISIONS.md.
-        //
-        // val githubToken = providers.environmentVariable("GITHUB_TOKEN")
-        //     .orElse(providers.gradleProperty("github_token"))
-        // maven {
-        //     url = uri("https://maven.pkg.github.com/facebook/meta-wearables-dat-android")
-        //     credentials {
-        //         username = "" // não necessário
-        //         password = githubToken.get()
-        //     }
-        // }
+        // Meta Wearables Device Access Toolkit (com.meta.wearable:mwdat-*, 0.9.0).
+        // Distribuído via GitHub Packages; exige PAT clássico read:packages.
+        // Filtro de grupo: só este repo serve com.meta.wearable, evitando bater
+        // no GitHub para todas as dependências.
+        maven {
+            url = uri("https://maven.pkg.github.com/facebook/meta-wearables-dat-android")
+            credentials {
+                username = "" // não necessário (forma oficial da doc do DAT)
+                password = githubToken
+            }
+            content {
+                includeGroup("com.meta.wearable")
+            }
+        }
     }
 }
 

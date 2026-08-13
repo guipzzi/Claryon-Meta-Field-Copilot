@@ -10,7 +10,7 @@ plugins {
 
 android {
     namespace = "com.claryon.voice"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         minSdk = 31

@@ -5,16 +5,17 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.compose.compiler)
 }
 
 android {
     namespace = "com.claryon.field"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.claryon.field"
         minSdk = 31
-        targetSdk = 34
+        targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"
     }
@@ -22,11 +23,8 @@ android {
     buildFeatures {
         compose = true
     }
-
-    composeOptions {
-        // Deve casar exatamente com a versão do Kotlin (1.9.24 ↔ 1.5.14).
-        kotlinCompilerExtensionVersion = libs.versions.composeCompiler.get()
-    }
+    // Com Kotlin 2.x o Compose Compiler vem do plugin `compose-compiler`
+    // (versão casada ao Kotlin); não há mais kotlinCompilerExtensionVersion.
 
     buildTypes {
         release {
@@ -45,6 +43,13 @@ android {
 
     kotlinOptions {
         jvmTarget = "17"
+    }
+
+    lint {
+        // O detector NullSafeMutableLiveData quebra (IncompatibleClassChangeError)
+        // ao analisar UAST de código Kotlin 2.2 no lint do AGP 8.7.2. Não usamos
+        // LiveData; desabilitado até uma combinação AGP/lint sem o bug. Ver DECISIONS.md.
+        disable += "NullSafeMutableLiveData"
     }
 }
 

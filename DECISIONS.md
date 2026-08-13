@@ -5,6 +5,24 @@ Ordem cronológica inversa (mais recente no topo).
 
 ---
 
+## 2026-08-13 — M1 (setup do DAT)
+
+- **DAT 0.9.0 integrado e resolvendo** (`com.meta.wearable:mwdat-core/camera/mockdevice`), via GitHub Packages com PAT `read:packages` em `local.properties` (`github_token`). `mwdat-display` omitido de propósito (óculos sem display). Deps só em `core-glasses`.
+
+- **Kotlin 1.9.24 → 2.2.0 (forçado pelo SDK).** O `mwdat-core` foi compilado com metadata Kotlin 2.2.0; Kotlin 1.9 não consegue lê-lo (`incompatible version ... metadata 2.2.0`). Consequência: Compose passou a usar o plugin `org.jetbrains.kotlin.plugin.compose` (o `kotlinCompilerExtensionVersion` deixou de existir no Kotlin 2.x).
+
+- **compileSdk/targetSdk 34 → 35 e AGP 8.5.2 → 8.7.2.** O DAT puxa AndroidX novo (`activity 1.10.1`) que exige compileSdk 35; o AGP 8.5.2 tem teto no 34. AGP 8.7.2 suporta 35 e é compatível com o Gradle 8.9 do wrapper. Instalada a plataforma `android-35` + `build-tools 35.0.0`.
+
+- **Android Lint temporariamente DESLIGADO (workaround).** O lint do AGP 8.7.2 quebra com `IncompatibleClassChangeError` em `NonNullableMutableLiveDataDetector` ao analisar UAST de código Kotlin 2.2 — bug do ferramental, não do nosso código (nem usamos LiveData). `lintOptions.disable` não impede o detector de executar. Desligadas as tasks `lint*` em `subprojects` (raiz `build.gradle.kts`). Compilação e testes unitários seguem ativos. **TODO: reativar quando houver AGP/lint compatível com Kotlin 2.2 (revisitar no M8).**
+
+- **Manifest do DAT:** permissões `BLUETOOTH`, `BLUETOOTH_CONNECT`, `INTERNET`, `RECORD_AUDIO`, `CAMERA` + `uses-feature camera required=false`; meta-data `com.meta.wearable.mwdat.APPLICATION_ID`/`CLIENT_TOKEN` = `0` (Developer Mode dispensa attestation); intent-filter `claryonfield://` já presente. Fonte: `search_dat_docs`, 2026-08-13.
+
+- **API de registro (Kotlin, para o M2, não escrita de memória):** `Wearables.startRegistration(activity)`, `Wearables.startUnregistration(activity)`, `Wearables.registrationState.collect { }`, `Wearables.devices.collect { }`. Câmera: `session.addCamera(StreamConfiguration(videoQuality=…, frameRate=…))`. Fonte: `search_dat_docs`.
+
+- **Aceite do M1:** `./gradlew clean build` verde com os artefatos `mwdat-*` resolvidos; APK sobe de ~22 MB para ~52 MB (libs nativas do DAT embutidas). A execução de `Wearables.initialize()`/registro sem hardware fica para o M2 (MockDeviceKit).
+
+---
+
 ## 2026-08-13 — M0 (contexto e esqueleto)
 
 - **Toolchain fixado: AGP 8.5.2 · Gradle 8.9 · Kotlin 1.9.24 · JDK 17 · compileSdk 34 · minSdk 31.**

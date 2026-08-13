@@ -2,17 +2,34 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!--
-      M0: apenas o shell (launcher + deeplink de retorno). As permissões do DAT
-      (BLUETOOTH, BLUETOOTH_CONNECT, INTERNET, RECORD_AUDIO, CAMERA), o
-      foregroundServiceType e os meta-data APPLICATION_ID/CLIENT_TOKEN entram no
-      M1/M8, sempre confirmados na doc viva. Ver DECISIONS.md e README.
+      Permissões confirmadas na doc do DAT (search_dat_docs, 2026-08-13).
+      RECORD_AUDIO é nosso (captura HFP via AudioRecord, não passa pelo DAT).
+      O foregroundServiceType do pipeline contínuo entra no M8.
     -->
+    <uses-permission android:name="android.permission.BLUETOOTH" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <application
         android:allowBackup="false"
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.ClaryonField">
+
+        <!--
+          Attestation do DAT (autenticidade do app). Em Developer Mode NÃO é
+          usada e pode ser 0; fora dele, usar os valores do app registrado no
+          Wearables Developer Center. Ver docs/GUIA_TECNICO.md e DECISIONS.md.
+        -->
+        <meta-data
+            android:name="com.meta.wearable.mwdat.APPLICATION_ID"
+            android:value="0" />
+        <meta-data
+            android:name="com.meta.wearable.mwdat.CLIENT_TOKEN"
+            android:value="0" />
 
         <activity
             android:name=".MainActivity"

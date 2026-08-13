@@ -85,7 +85,7 @@ encerramento), orçamento de latência e integração WhatsApp estão em
 | Ferramenta | Versão | Observação |
 |---|---|---|
 | JDK | 17 | Ex.: `brew install openjdk@17` |
-| Android SDK | Platform 34, Build-Tools 34.0.0, Platform-Tools | via Android Studio ou `android-commandlinetools` |
+| Android SDK | Platform 35, Build-Tools 35.0.0, Platform-Tools | via Android Studio ou `android-commandlinetools` |
 | NDK | (a partir do M4) | para whisper.cpp e sherpa-onnx (JNI, `.so` por ABI) |
 
 > Modelos on-device (whisper `ggml-tiny`, Piper/sherpa-onnx pt-BR, Silero VAD,
@@ -131,9 +131,9 @@ adb logcat -s ClaryonField          # logs do app
 
 | Marco | Descrição | Estado |
 |---|---|---|
-| **M0** | Contexto e esqueleto: módulos, interfaces (§3.1/§3.2), `./gradlew build` verde | ✅ **concluído** — MCP `search_dat_docs` ativo (`.mcp.json`), SDK `mwdat 0.9.0` registrado em `DECISIONS.md` |
-| M1 | Setup do DAT (GitHub Packages, manifest, `claryonfield://`) | ⏳ falta apenas o **PAT `read:packages`** (credencial que só você gera) |
-| M2 | Mock Device Kit (fase online, sem hardware) | pendente |
+| **M0** | Contexto e esqueleto: módulos, interfaces (§3.1/§3.2), `./gradlew build` verde | ✅ **concluído** — MCP `search_dat_docs` ativo (`.mcp.json`) |
+| **M1** | Setup do DAT: GitHub Packages, `mwdat 0.9.0`, manifest, `claryonfield://` | ✅ **concluído** — `clean build` verde com os artefatos `mwdat-*` resolvidos |
+| M2 | Mock Device Kit (fase online, sem hardware) | ⏳ próximo — `Wearables.initialize()`/registro + MDK |
 | M3 | Pipeline de áudio (fone HFP comum) | pendente |
 | M4 | Voz on-device (whisper.cpp, sherpa-onnx, Silero, openWakeWord) | pendente |
 | M5 | Agente e som (roteador, fila, earcons, laconicidade) | pendente |

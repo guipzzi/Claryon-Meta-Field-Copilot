@@ -10,7 +10,7 @@ plugins {
 
 android {
     namespace = "com.claryon.sync"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         minSdk = 31

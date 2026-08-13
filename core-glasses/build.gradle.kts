@@ -9,7 +9,7 @@ plugins {
 
 android {
     namespace = "com.claryon.glasses"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         minSdk = 31
@@ -27,6 +27,12 @@ android {
 
 dependencies {
     implementation(project(":core-common"))
+
+    // Meta Wearables Device Access Toolkit — apenas aqui. mockdevice alimenta o
+    // painel de diagnóstico/demo (M2) sem hardware.
+    implementation(libs.mwdat.core)
+    implementation(libs.mwdat.camera)
+    implementation(libs.mwdat.mockdevice)
 
     testImplementation(libs.junit)
 }
