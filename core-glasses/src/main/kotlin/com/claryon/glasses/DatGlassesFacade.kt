@@ -14,6 +14,7 @@ import com.meta.wearable.dat.core.selectors.AutoDeviceSelector
 import com.meta.wearable.dat.core.session.DeviceSession
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -70,6 +71,12 @@ class DatGlassesFacade(private val scope: CoroutineScope) : GlassesFacade {
     private var activeCamera: Camera? = null
     private var activeStream: Stream? = null
 
+    // Jobs dos coletores; cancelados antes de reobservar para não acumular
+    // coletores concorrentes a cada start/stop (evita escrita duplicada em
+    // _session/_stream/_frameInfo).
+    private var sessionObserver: Job? = null
+    private var streamObserver: Job? = null
+
     // ── Registro ────────────────────────────────────────────────────────────
 
     override suspend fun ensureRegistered(): Result<Unit> =
@@ -114,16 +121,19 @@ class DatGlassesFacade(private val scope: CoroutineScope) : GlassesFacade {
     }
 
     private fun observeSession(s: DeviceSession) {
-        scope.launch {
-            s.state.collect { state ->
-                _session.value = state.name.toEnumOr(SessionStatus.IDLE)
-                if (_session.value == SessionStatus.STOPPED) cleanupSession()
+        sessionObserver?.cancel()
+        sessionObserver = scope.launch {
+            launch {
+                s.state.collect { state ->
+                    _session.value = state.name.toEnumOr(SessionStatus.IDLE)
+                    if (_session.value == SessionStatus.STOPPED) cleanupSession()
+                }
             }
-        }
-        scope.launch {
-            // Erros de sessão são one-shot; no M2 apenas convergimos o estado.
-            // No M5 cada erro vira um earcon próprio ("falha nunca é silêncio").
-            s.errors.collect { /* TODO(M5): mapear erro → earcon */ }
+            launch {
+                // Erros de sessão são one-shot; no M2 apenas convergimos o estado.
+                // No M5 cada erro vira um earcon próprio ("falha nunca é silêncio").
+                s.errors.collect { /* TODO(M5): mapear erro → earcon */ }
+            }
         }
     }
 
@@ -155,18 +165,21 @@ class DatGlassesFacade(private val scope: CoroutineScope) : GlassesFacade {
     }
 
     private fun observeStream(stream: Stream) {
-        scope.launch {
-            stream.state.collect { state ->
-                _stream.value = state.name.toEnumOr(StreamStatus.STOPPED)
-                if (_stream.value == StreamStatus.CLOSED) clearStreamRefs()
+        streamObserver?.cancel()
+        streamObserver = scope.launch {
+            launch {
+                stream.state.collect { state ->
+                    _stream.value = state.name.toEnumOr(StreamStatus.STOPPED)
+                    if (_stream.value == StreamStatus.CLOSED) clearStreamRefs()
+                }
             }
-        }
-        scope.launch {
-            var count = 0L
-            stream.videoStream.collect { frame ->
-                // Frames só chegam em STREAMING. No M2 mostramos metadados
-                // (dimensões + contagem) como prova de que o pipeline vive.
-                _frameInfo.value = FrameInfo(frame.width, frame.height, ++count)
+            launch {
+                var count = 0L
+                stream.videoStream.collect { frame ->
+                    // Frames só chegam em STREAMING. No M2 mostramos metadados
+                    // (dimensões + contagem) como prova de que o pipeline vive.
+                    _frameInfo.value = FrameInfo(frame.width, frame.height, ++count)
+                }
             }
         }
     }

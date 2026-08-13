@@ -22,6 +22,9 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.claryon.glasses.RegistrationStatus
+import com.claryon.glasses.SessionStatus
+import com.claryon.glasses.StreamStatus
 
 /**
  * Painel de diagnóstico (M2) — a tela existe só para config/diagnóstico/demo; a
@@ -67,6 +70,15 @@ fun DiagnosticsScreen(
             StatusCard("MockDeviceKit", mockStatus)
         }
 
+        // Botões gateados por pré-condição — evita toques sem efeito (no-op) e
+        // guia a sequência correta: registrar → sessão → câmera.
+        val canStartSession = registration == RegistrationStatus.REGISTERED &&
+            (session == SessionStatus.IDLE || session == SessionStatus.STOPPED)
+        val canStartCamera = session == SessionStatus.STARTED &&
+            (stream == StreamStatus.STOPPED || stream == StreamStatus.CLOSED)
+        val canStopCamera = stream == StreamStatus.STREAMING ||
+            stream == StreamStatus.STARTED || stream == StreamStatus.STARTING
+
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -74,14 +86,14 @@ fun DiagnosticsScreen(
             if (vm.mockAvailable) {
                 OutlinedButton(onClick = vm::enableMock) { Text("Habilitar mock") }
             }
-            Button(onClick = vm::startSession) { Text("Iniciar sessão") }
+            Button(onClick = vm::startSession, enabled = canStartSession) { Text("Iniciar sessão") }
         }
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Button(onClick = vm::startCamera) { Text("Iniciar câmera") }
-            OutlinedButton(onClick = vm::stopCamera) { Text("Parar câmera") }
+            Button(onClick = vm::startCamera, enabled = canStartCamera) { Text("Iniciar câmera") }
+            OutlinedButton(onClick = vm::stopCamera, enabled = canStopCamera) { Text("Parar câmera") }
         }
     }
 }
