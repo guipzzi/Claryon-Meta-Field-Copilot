@@ -5,6 +5,18 @@ Ordem cronológica inversa (mais recente no topo).
 
 ---
 
+## 2026-08-13 — Verificação: áudio NÃO passa pelo DAT (3 fontes)
+
+- **Confirmado na doc viva 0.9, no sample oficial e no Un13:** o áudio dos óculos usa os **perfis Bluetooth do sistema** (A2DP saída / HFP bidirecional), **não** uma API de áudio do DAT. Doc textual: "DAT sessions share microphone and speaker access with the system Bluetooth stack". O sample `AudioInputHandler.kt` captura via `AudioRecord(AudioSource.MIC)` puro — nenhum símbolo `mwdat`. O "sound-in-video" (CHANGELOG 0.9) é áudio do `AudioRecord` **muxado** no vídeo (vídeo = DAT; áudio = Bluetooth). ⇒ **M3 (AudioManager/AudioRecord/AudioTrack) está correto.**
+
+- **REFINAMENTO de ordering (0.9 vence a redação 0.8 do CLAUDE.md):** com HFP + câmera DAT, a ordem oficial é **(1) `addCamera` → (2) configurar/iniciar HFP, esperar a rota assentar → (3) `stream.start()`**. Iniciar o stream antes do HFP faz a rota de áudio falhar silenciosamente. A orquestração (M8) deve garantir que o **stream** da câmera só inicie após a rota HFP confirmada. (Para o pipeline de voz sem câmera, o HFP sobe independentemente.)
+
+- **NUANCE A2DP×HFP:** mutuamente exclusivos — ativar HFP (mic) derruba o A2DP e a **saída cai para 8 kHz mono** durante a sessão. TTS/earcons durante a escuta (HFP) saem em 8 kHz; saída de alta qualidade exigiria A2DP (sem mic). Tensão de design a tratar em M4/M5.
+
+- **Nota:** o sample usa `AudioSource.MIC`; usamos `VOICE_COMMUNICATION` (AEC/NS, melhor para comando de voz) — escolha deliberada.
+
+---
+
 ## 2026-08-13 — M3 (pipeline de áudio HFP)
 
 - **`GlassesAudioManagerImpl` (core-audio) — áudio NÃO passa pelo DAT.** `iniciar()` roteia `TYPE_BLUETOOTH_SCO` via `availableCommunicationDevices`+`setCommunicationDevice` (API 31+); trata **`false` e lista vazia** com erro tipado claro (`audio.no_sco`/`audio.set_comm_device_false`), nunca falha silenciosa. `microfonePcm()` = `AudioRecord(VOICE_COMMUNICATION)` mono PCM16 → `Flow<ShortArray>` em `Dispatchers.IO` (release no finally). `reproduzir()` = `AudioTrack(USAGE_VOICE_COMMUNICATION)` com drain antes do stop. `liberar()` = **`clearCommunicationDevice()`** (obrigatório; senão o áudio do sistema fica preso em 8 kHz) + restaura o modo.

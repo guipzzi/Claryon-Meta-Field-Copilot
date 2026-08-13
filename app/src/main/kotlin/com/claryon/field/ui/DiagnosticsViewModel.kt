@@ -78,17 +78,23 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 is Result.Success -> Unit
             }
-            _audioStatus.value = "gravando 3 s… (rota ${audio.rotaAtual})"
-            val buffer = ArrayList<Short>()
-            withTimeoutOrNull(3_000) {
-                audio.microfonePcm().collect { chunk -> chunk.forEach { buffer.add(it) } }
-            }
-            val pcm = buffer.toShortArray()
             val rota = audio.rotaAtual // capturar ANTES de liberar() (que zera a rota)
-            _audioStatus.value = "reproduzindo ${pcm.size} amostras… (rota $rota)"
-            audio.reproduzir(pcm, 16_000)
-            audio.liberar()
-            _audioStatus.value = "eco concluído · ${pcm.size} amostras · rota $rota"
+            try {
+                _audioStatus.value = "gravando 3 s… (rota $rota)"
+                val buffer = ArrayList<Short>()
+                withTimeoutOrNull(3_000) {
+                    audio.microfonePcm().collect { chunk -> chunk.forEach { buffer.add(it) } }
+                }
+                val pcm = buffer.toShortArray()
+                _audioStatus.value = "reproduzindo ${pcm.size} amostras… (rota $rota)"
+                audio.reproduzir(pcm, 16_000)
+                _audioStatus.value = "eco concluído · ${pcm.size} amostras · rota $rota"
+            } catch (e: Exception) {
+                // Ex.: RECORD_AUDIO negada, AudioRecord não inicializa. Falha nunca é silêncio.
+                _audioStatus.value = "falha no eco: ${e.message}"
+            } finally {
+                audio.liberar()
+            }
         }
     }
 

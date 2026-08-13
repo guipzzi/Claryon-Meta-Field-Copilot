@@ -55,6 +55,26 @@ stream.stop() → session.stop() → liberar interpretadores, AudioRecord, Audio
 
 ---
 
+## Áudio: Bluetooth do sistema, NÃO o DAT (confirmado na doc 0.9)
+
+O DAT cuida da **câmera**. O **áudio** (microfone e alto-falante dos óculos) é
+acessado pelos **perfis Bluetooth do sistema** — `AudioManager`/`AudioRecord`/
+`AudioTrack` no Android. Não existe API de áudio no SDK.
+
+| Perfil | Direção | Qualidade | Uso |
+|---|---|---|---|
+| **A2DP** | saída | alta (44,1/48 kHz estéreo) | mídia / TTS de alta qualidade |
+| **HFP** | bidirecional | **8 kHz mono** | captura de voz (microfone) |
+
+- **A2DP e HFP são mutuamente exclusivos.** Ativar o HFP (para o microfone)
+  derruba o A2DP e a **saída também cai a 8 kHz** enquanto a sessão HFP durar.
+- **Ordem oficial com câmera + HFP (0.9):** `addCamera` → iniciar HFP e esperar a
+  rota assentar → `stream.start()`. Iniciar o stream antes do HFP faz a rota de
+  áudio falhar silenciosamente.
+- Beamforming isola a voz de quem veste os óculos (comportamento esperado).
+
+---
+
 ## Orçamento de latência (alvos)
 
 | Estágio | Alvo |
