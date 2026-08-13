@@ -1,6 +1,7 @@
 package com.claryon.glasses
 
 import android.app.Activity
+import android.util.Log
 import com.claryon.common.ClaryonError
 import com.claryon.common.Result
 import com.meta.wearable.dat.camera.Camera
@@ -60,6 +61,11 @@ class DatGlassesFacade(private val scope: CoroutineScope) : GlassesFacade {
     private val _frameInfo = MutableStateFlow<FrameInfo?>(null)
     val frameInfo: StateFlow<FrameInfo?> = _frameInfo.asStateFlow()
 
+    // Uma única instância viva do seletor — como o sample oficial (`by lazy`).
+    // Criar um seletor novo a cada createSession pode não ter resolvido o
+    // dispositivo ativo ainda (leva a NO_ELIGIBLE_DEVICE).
+    private val deviceSelector = AutoDeviceSelector()
+
     private var activeSession: DeviceSession? = null
     private var activeCamera: Camera? = null
     private var activeStream: Stream? = null
@@ -89,7 +95,7 @@ class DatGlassesFacade(private val scope: CoroutineScope) : GlassesFacade {
         if (activeSession != null) return Result.success(Unit)
 
         val deferred = CompletableDeferred<Result<Unit>>()
-        Wearables.createSession(AutoDeviceSelector())
+        Wearables.createSession(deviceSelector)
             .onSuccess { created ->
                 activeSession = created
                 observeSession(created) // assinar ANTES de start(), para não perder transições
@@ -98,6 +104,8 @@ class DatGlassesFacade(private val scope: CoroutineScope) : GlassesFacade {
                 deferred.complete(Result.success(Unit))
             }
             .onFailure { error, _ ->
+                // Falha nunca é silêncio: registra para o diagnóstico.
+                Log.e(TAG, "createSession falhou: ${error.description}")
                 deferred.complete(
                     Result.failure(ClaryonError.Glasses("glasses.session_failed", error.description)),
                 )
@@ -224,6 +232,10 @@ class DatGlassesFacade(private val scope: CoroutineScope) : GlassesFacade {
         clearStreamRefs()
         activeSession = null
         _session.value = SessionStatus.STOPPED
+    }
+
+    private companion object {
+        const val TAG = "ClaryonField"
     }
 }
 

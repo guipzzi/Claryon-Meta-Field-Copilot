@@ -133,8 +133,8 @@ adb logcat -s ClaryonField          # logs do app
 |---|---|---|
 | **M0** | Contexto e esqueleto: módulos, interfaces (§3.1/§3.2), `./gradlew build` verde | ✅ **concluído** — MCP `search_dat_docs` ativo (`.mcp.json`) |
 | **M1** | Setup do DAT: GitHub Packages, `mwdat 0.9.0`, manifest, `claryonfield://` | ✅ **concluído** — `clean build` verde com os artefatos `mwdat-*` resolvidos |
-| M2 | Mock Device Kit (fase online, sem hardware) | ⏳ próximo — `Wearables.initialize()`/registro + MDK |
-| M3 | Pipeline de áudio (fone HFP comum) | pendente |
+| **M2** | Mock Device Kit: registro, sessão e câmera reais (sem hardware) | ✅ **concluído** — teste instrumentado + painel ao vivo (REGISTERED→STARTED→STREAMING) |
+| M3 | Pipeline de áudio (fone HFP comum) | ⏳ próximo |
 | M4 | Voz on-device (whisper.cpp, sherpa-onnx, Silero, openWakeWord) | pendente |
 | M5 | Agente e som (roteador, fila, earcons, laconicidade) | pendente |
 | M6 | Visão e evidência (OCR de placa, cofre cifrado) | pendente |

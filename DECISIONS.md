@@ -15,7 +15,11 @@ Ordem cronológica inversa (mais recente no topo).
 
 - **`DatGlassesFacade`** implementa `GlassesFacade` sobre a 0.9 (registro, sessão, `addCamera`→`Camera`→`stream`, `capturePhoto`) e expõe StateFlows extras (streamState/frameInfo/deviceCount) para o diagnóstico. **`MockDeviceController`** (debug) faz `enable → pairGlasses(RAYBAN_META) → powerOn → don → setCameraFeed(CameraFacing)` (câmera do celular). Painel Compose reflete tudo ao vivo.
 
-- **Aceite de build: `./gradlew :app:assembleDebug` e `:app:assembleDebugAndroidTest` verdes contra o SDK 0.9** (APK ~56 MB, libs nativas do DAT). **Verificação de runtime** (transição de estados + frames) via teste instrumentado `MockDeviceKitStreamTest` + emulador — em andamento (a máquina não tinha emulador; imagem android-35 baixada nesta sessão).
+- **Aceite de build: `./gradlew :app:assembleDebug` e `:app:assembleDebugAndroidTest` verdes contra o SDK 0.9** (APK ~56 MB, libs nativas do DAT).
+
+- **✅ Aceite de RUNTIME atingido (emulador android-35 provisionado nesta sessão).** O teste instrumentado `MockDeviceKitStreamTest` passou (`tests=1 failures=0`, ~0,97 s), confirmando registro → sessão STARTED → stream STREAMING via MockDeviceKit, sem hardware. O painel ao vivo confirmou o mesmo visualmente: Registro REGISTERED, Sessão STARTED, Stream STREAMING, Frames subindo (#56 · 480×640, câmera emulada como fonte).
+
+- **`AutoDeviceSelector` mantido como instância única** (como o sample oficial, `by lazy`), não recriado a cada `createSession`. E `createSession` on-failure agora é **logado** (falha nunca é silêncio).
 
 - **Pendência de compliance (registrada):** `mwdat-mockdevice` ainda é `implementation` (não `debugImplementation`) e `MockDeviceController` vive em `src/main` gated por `BuildConfig.DEBUG` no chamador. Mover para `src/debug` no próximo passo.
 

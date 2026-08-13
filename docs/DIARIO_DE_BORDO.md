@@ -180,15 +180,56 @@ oficial público, GitHub Packages resolve, 15 PDFs do curso lidos/mapeados.
 
 ---
 
+## 2026-08-13 — M2: registro, sessão e câmera reais (sem hardware)
+
+**Objetivo:** primeiro marco que exercita o SDK de verdade — `Wearables.initialize`,
+fluxo de registro, sessão e stream de câmera — usando o **Mock Device Kit** (câmera
+do celular como fonte), sem óculos e sem o app Meta AI.
+
+**Como foi feito com segurança (Regra Zero):** cloneei o **sample oficial
+`CameraAccess`** (repo `facebook/meta-wearables-dat-android`, 0.9.0) e confirmei
+CADA assinatura antes de escrever ("samples > docs"). Isso corrigiu suposições que
+eu erraria de memória: no 0.9 não existe `RegistrationState.AVAILABLE`, e a câmera
+é `session.addCamera()` → `Camera` → `camera.stream` (não `addStream`).
+
+**O que ficou pronto:**
+- `ClaryonApp : Application` inicializa o DAT via `GlassesRuntime` (em
+  `core-glasses`). O **compilador provou o isolamento da fachada**: o `app` não
+  consegue nem importar `Wearables` — a fronteira de módulo garante que só
+  `core-glasses` toca o SDK.
+- `DatGlassesFacade` — implementação real sobre a 0.9 (registro, sessão, câmera,
+  `capturePhoto`), com os enums do DAT mapeados **por nome** (robusto ao preview).
+- `MockDeviceController` (debug): `enable → pairGlasses(RAYBAN_META) → powerOn →
+  don → setCameraFeed(câmera do celular)`.
+- Painel Compose de diagnóstico refletindo **ao vivo** registro / dispositivos /
+  sessão / stream / frames.
+- Teste instrumentado `MockDeviceKitStreamTest`.
+
+**Verificação (a máquina não tinha emulador — provisionei um android-35):**
+1. Build verde contra o SDK 0.9 (`assembleDebug` + `assembleDebugAndroidTest`).
+2. **Teste instrumentado passou** (`tests=1 failures=0`): registro → STARTED →
+   STREAMING via MDK.
+3. **Painel ao vivo no emulador** confirmou visualmente: Registro **REGISTERED**,
+   Sessão **STARTED**, Stream **STREAMING**, **Frames #56 · 480×640** subindo.
+
+**Aprendizado de depuração:** o painel a princípio ficava em "sessão IDLE" no
+toque manual — não era bug de código, e sim (a) minha coordenada de toque
+desatualizada (o card do mock cresce para 2 linhas e empurra os botões) e (b) uma
+melhoria real: manter **uma única** instância de `AutoDeviceSelector` (como o
+sample), em vez de recriar a cada `createSession`. Com isso, o ciclo completa.
+
+---
+
 ## Estado atual (fim de 2026-08-13)
 
-- **Marcos concluídos:** M0, MCP, M1.
+- **Marcos concluídos:** M0, MCP, M1, **M2** (verificado em runtime no emulador).
 - **Build:** verde (`./gradlew clean build`), lint desligado (workaround documentado).
 - **Toolchain:** JDK 17 · Gradle 8.9 · AGP 8.7.2 · Kotlin 2.2.0 · compileSdk 35 · minSdk 31.
-- **DAT:** `mwdat 0.9.0` integrado em `core-glasses`.
-- **Próximo marco (M2):** MockDeviceKit — `Wearables.initialize()`, fluxo de
-  registro e a câmera do celular como fonte simulada, com o estado transitando no
-  painel de diagnóstico. Ainda **sem óculos**.
+- **DAT:** `mwdat 0.9.0` integrado; fachada real + MockDeviceKit funcionando.
+- **Próximo marco (M3):** pipeline de áudio HFP (`GlassesAudioManager`,
+  `AudioRecord(VOICE_COMMUNICATION)` → `Flow<ShortArray>`, `AudioTrack`),
+  validado contra fone Bluetooth comum. ⚠️ Risco 8 kHz→16 kHz
+  (`docs/COMPLIANCE.md` §D) e o **MDK não simula áudio**.
 
 **Pendências conhecidas (registradas para não se perderem):**
 - Reativar o Android Lint quando o ferramental acompanhar o Kotlin 2.2 (M8).
