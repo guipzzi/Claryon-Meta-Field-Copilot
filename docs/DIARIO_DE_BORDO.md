@@ -248,16 +248,41 @@ pipeline sem Bluetooth, roteando para o dispositivo padrão. Em produto é `fals
 
 ---
 
+## 2026-08-13 — M4: voz on-device (núcleo verificável; nativo diferido)
+
+**Decisão de escopo (o Guia manda isso):** os motores de voz "de verdade"
+(whisper.cpp, Piper/sherpa-onnx, openWakeWord, Silero) são **nativos** — exigem
+NDK, bibliotecas `.so` por ABI, modelos em assets e um **device físico** para
+validar. É o marco de maior risco de ambiente. O Guia é explícito: valide o ciclo
+com o fallback primeiro, e trate o nativo como tarefa própria. Foi o que fiz.
+
+**Pronto e verificado nesta sessão:**
+- **`DeterministicIntentRouter`** (o "cérebro"): mapeia a frase → intenção por
+  padrão/verbos, **sem LLM**. Teste de 20 frases + laconicidade passou; e ao vivo
+  no emulador: "pedir apoio suspeito armado" → `PedirApoio` →
+  "Apoio solicitado, guarnição avisada."
+- **`EnergyVoiceActivityDetector`**: VAD por energia, fecha a janela no silêncio
+  (teste JVM). Upgrade: Silero.
+- **`AndroidTts`**: fala pelo `TextToSpeech`, entregando PCM ao pipeline HFP do M3.
+- Painel ganhou o campo **"Comando de voz (texto)"** → roteador → resposta falada.
+
+**Diferido para o M4-nativo (tarefa própria, em device):** `WhisperCppStt`
+(whisper.cpp/JNI), `PiperTts` (sherpa-onnx), `openWakeWord`, Silero — os scaffolds
+já existem com `isAvailable()=false` para o pipeline degradar sem inventar
+transcrição. O aceite pleno (modo avião, "Claryon, pedir apoio" falado) precisa do
+STT real + hardware.
+
+---
+
 ## Estado atual (fim de 2026-08-13)
 
-- **Marcos concluídos:** M0, MCP, M1, M2, **M3** (verificados em runtime no emulador).
+- **Marcos concluídos:** M0, MCP, M1, M2, M3; **M4 núcleo** (roteador+VAD+TTS).
 - **Build:** verde (`./gradlew clean build`), lint desligado (workaround documentado).
 - **Toolchain:** JDK 17 · Gradle 8.9 · AGP 8.7.2 · Kotlin 2.2.0 · compileSdk 35 · minSdk 31.
-- **DAT:** `mwdat 0.9.0` integrado; fachada real + MockDeviceKit + áudio HFP funcionando.
-- **Próximo marco (M4):** voz on-device — `WhisperCppStt` (whisper.cpp/JNI/NDK),
-  `PiperTts` (sherpa-onnx), `openWakeWord`, Silero VAD. Marco de maior risco de
-  ambiente (nativo, `.so` por ABI, modelos em assets). ⚠️ Resolver o resample
-  8 kHz→16 kHz (`docs/COMPLIANCE.md` §D) e validar STT em **modo avião**.
+- **DAT:** `mwdat 0.9.0` integrado; fachada + MockDeviceKit + áudio HFP + roteador.
+- **Próximas tarefas:** **M4-nativo** (whisper.cpp/sherpa-onnx via NDK, em device;
+  resolver resample 8 kHz→16 kHz e validar em modo avião) e **M5** (fila de som +
+  earcons; o roteador já está adiantado).
 
 **Pendências conhecidas (registradas para não se perderem):**
 - Reativar o Android Lint quando o ferramental acompanhar o Kotlin 2.2 (M8).

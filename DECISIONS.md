@@ -5,6 +5,24 @@ Ordem cronológica inversa (mais recente no topo).
 
 ---
 
+## 2026-08-13 — M4 (voz on-device: núcleo verificável; nativo diferido)
+
+- **Escopo Guia-alinhado:** "AndroidTts/fallback primeiro valida o ciclo; whisper/piper/openWakeWord/Silero depois". O build **nativo** (NDK, `.so` por ABI, modelos em assets) é o maior risco de ambiente e **não** foi feito nesta sessão — os scaffolds (`WhisperCppStt`, `AndroidOnDeviceStt`) declaram `isAvailable()=false` e o pipeline degrada graciosamente (comando → `NaoReconhecida` → earcon), sem inventar transcrição.
+
+- **`DeterministicIntentRouter` (core-agent):** correspondência por padrão + verbos-chave sobre a transcrição normalizada (minúsculas, sem acento), **sem LLM**. Extrai placa (Mercosul/antiga) e prioridade (armado→EMERGENCIA, urgente→ALTA). Teste de **20 frases operacionais + laconicidade ≤7 palavras** passou. `OperationalResponses` mapeia intenção → frase curta (resultado sensível não é falado — vira earcon).
+
+- **`EnergyVoiceActivityDetector` (core-voice):** VAD por energia (RMS), fecha a janela após hangover de silêncio. Teste JVM. Upgrade planejado: **Silero VAD** (neural).
+
+- **`AndroidTts` (TtsEngine):** `TextToSpeech.synthesizeToFile` → WAV → `PcmAudio`, reproduzido pelo pipeline HFP do M3. Nunca `speak()` antes do `onInit`. Primário será **Piper (sherpa-onnx)** pt-BR.
+
+- **Wake word:** push-to-talk como 1ª versão (Un12 endossa "zero custo ocioso"); **openWakeWord** depois.
+
+- **Impedância registrada:** o `SpeechRecognizer` do Android **auto-captura** o áudio e não encaixa em `transcribe(pcm: ShortArray)` — o fallback Android exige um caminho auto-capturador separado (M4-nativo), sempre com `createOnDeviceSpeechRecognizer`/`EXTRA_PREFER_OFFLINE` (o reconhecedor padrão vaza áudio).
+
+- **Verificação:** unit tests verdes; ciclo **comando(texto) → roteador → TTS** demonstrado ao vivo no emulador (`PedirApoio` → "Apoio solicitado, guarnição avisada."). O aceite pleno do M4 (modo avião: "Claryon, pedir apoio" falado → resposta) precisa do **STT real (whisper.cpp)** e de **device físico** — M4-nativo.
+
+---
+
 ## 2026-08-13 — Verificação: áudio NÃO passa pelo DAT (3 fontes)
 
 - **Confirmado na doc viva 0.9, no sample oficial e no Un13:** o áudio dos óculos usa os **perfis Bluetooth do sistema** (A2DP saída / HFP bidirecional), **não** uma API de áudio do DAT. Doc textual: "DAT sessions share microphone and speaker access with the system Bluetooth stack". O sample `AudioInputHandler.kt` captura via `AudioRecord(AudioSource.MIC)` puro — nenhum símbolo `mwdat`. O "sound-in-video" (CHANGELOG 0.9) é áudio do `AudioRecord` **muxado** no vídeo (vídeo = DAT; áudio = Bluetooth). ⇒ **M3 (AudioManager/AudioRecord/AudioTrack) está correto.**

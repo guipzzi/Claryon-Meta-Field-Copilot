@@ -11,10 +11,14 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -47,6 +51,8 @@ fun DiagnosticsScreen(
     val devices by vm.deviceCount.collectAsState()
     val mockStatus by vm.mockStatus.collectAsState()
     val audioStatus by vm.audioStatus.collectAsState()
+    val commandStatus by vm.commandStatus.collectAsState()
+    var command by remember { mutableStateOf("") }
 
     Column(
         modifier = modifier
@@ -103,6 +109,19 @@ fun DiagnosticsScreen(
         ) {
             OutlinedButton(onClick = vm::echo) { Text("Eco 3 s (áudio HFP)") }
         }
+
+        // Ciclo de voz (M4): comando por texto → roteador → resposta falada.
+        StatusCard("Comando (roteador → TTS)", commandStatus)
+        OutlinedTextField(
+            value = command,
+            onValueChange = { command = it },
+            label = { Text("Comando de voz (texto)") },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Button(
+            onClick = { vm.runCommand(command) },
+            enabled = command.isNotBlank(),
+        ) { Text("Enviar comando") }
     }
 }
 

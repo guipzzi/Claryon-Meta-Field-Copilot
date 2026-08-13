@@ -3,11 +3,14 @@ package com.claryon.field.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.claryon.agent.DeterministicIntentRouter
+import com.claryon.agent.OperationalResponses
 import com.claryon.audio.GlassesAudioManagerImpl
 import com.claryon.common.Result
 import com.claryon.field.BuildConfig
 import com.claryon.glasses.DatGlassesFacade
 import com.claryon.glasses.MockDeviceController
+import com.claryon.voice.AndroidTts
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -98,8 +101,42 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ── Ciclo de voz — cérebro + saída (M4) ────────────────────────────────────
+
+    private val router = DeterministicIntentRouter()
+    private val tts = AndroidTts(app)
+
+    private val _commandStatus = MutableStateFlow("—")
+    val commandStatus: StateFlow<String> = _commandStatus.asStateFlow()
+
+    /**
+     * Ciclo (sem STT nativo ainda): texto → roteador determinístico → resposta
+     * lacônica → TTS falado pelo pipeline HFP. Demonstra o "cérebro" + a saída
+     * de voz. O STT real (whisper.cpp) entra no M4-nativo.
+     */
+    fun runCommand(text: String) {
+        viewModelScope.launch {
+            val intent = router.route(text)
+            val resposta = OperationalResponses.para(intent)
+            val nome = intent::class.simpleName
+            _commandStatus.value = "$nome → \"$resposta\""
+            when (val syn = tts.synthesize(resposta)) {
+                is Result.Success -> {
+                    if (audio.iniciar() is Result.Success) {
+                        audio.reproduzir(syn.value.samples, syn.value.sampleRateHz)
+                        audio.liberar()
+                    }
+                    _commandStatus.value = "$nome → \"$resposta\" (falado)"
+                }
+                is Result.Failure ->
+                    _commandStatus.value = "$nome → \"$resposta\" (TTS indisponível: ${syn.error.message})"
+            }
+        }
+    }
+
     override fun onCleared() {
         audio.liberar()
+        tts.liberar()
         if (mockEnabled) mock?.disable()
         super.onCleared()
     }

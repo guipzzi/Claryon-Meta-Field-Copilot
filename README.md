@@ -135,8 +135,8 @@ adb logcat -s ClaryonField          # logs do app
 | **M1** | Setup do DAT: GitHub Packages, `mwdat 0.9.0`, manifest, `claryonfield://` | ✅ **concluído** — `clean build` verde com os artefatos `mwdat-*` resolvidos |
 | **M2** | Mock Device Kit: registro, sessão e câmera reais (sem hardware) | ✅ **concluído** — teste instrumentado + painel ao vivo (REGISTERED→STARTED→STREAMING) |
 | **M3** | Pipeline de áudio HFP (`GlassesAudioManager`, AudioRecord/AudioTrack) | ✅ **concluído** — testes verdes; eco record→playback verificado (eco HFP final requer fone físico) |
-| M4 | Voz on-device (whisper.cpp, sherpa-onnx, Silero, openWakeWord) | ⏳ próximo |
-| M5 | Agente e som (roteador, fila, earcons, laconicidade) | pendente |
+| **M4** | Voz on-device | 🟡 **núcleo pronto** — roteador determinístico + VAD + TTS Android (testes verdes; ciclo texto→TTS ao vivo). **Nativo diferido**: whisper.cpp/sherpa-onnx/openWakeWord/Silero (NDK + device) |
+| M5 | Agente e som (roteador, fila, earcons, laconicidade) | 🟡 roteador já adiantado no M4; falta fila/earcons |
 | M6 | Visão e evidência (OCR de placa, cofre cifrado) | pendente |
 | M7 | Rede (Supabase, WhatsApp, fila offline) | pendente |
 | M8 | Energia e resiliência (FGS, WorkManager, freio térmico) | pendente |
