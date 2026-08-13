@@ -25,8 +25,11 @@ Ordem cronológica inversa (mais recente no topo).
 - **Dependências do DAT (`mwdat-core/camera/mockdevice`) NÃO adicionadas no M0.**
   Motivo (Regra Zero): dependem de credencial (PAT `read:packages`) e da versão vigente confirmada via `search_dat_docs`. O repositório Maven do GitHub Packages está como placeholder comentado em `settings.gradle.kts`. **Pendência para o M1.**
 
-- **⚠️ Item de aceite do M0 parcialmente bloqueado: versão do SDK do DAT não registrada.**
-  O MCP `search_dat_docs` não está disponível nesta sessão e o plugin do DAT não pôde ser confirmado. A parte de código do M0 (esqueleto + interfaces compilando + `./gradlew build` verde) está cumprida; a confirmação da versão do SDK fica pendente até o MCP/plugin serem configurados (pré-requisito absoluto antes de qualquer código que toque o SDK).
+- **MCP de docs vivas do DAT configurado (escopo de projeto, `.mcp.json`).**
+  Servidor `meta-wearables` → `https://mcp.developer.meta.com/wearables`, transporte HTTP, **sem autenticação** (verificado: `initialize` e `tools/list` respondem 200; ferramentas `search_dat_docs` e `search_webapps_docs` disponíveis). Escopo de projeto para toda a equipe herdar via `.mcp.json`. Só carrega em **nova sessão** do Claude Code (servidores MCP sobem no startup) e exige aprovação de confiança na primeira vez.
+
+- **⚠️ Item de aceite do M0 ainda pendente: versão do SDK do DAT não registrada.**
+  A parte de código do M0 (esqueleto + interfaces compilando + `./gradlew build` verde) está cumprida. A confirmação da versão vigente via `search_dat_docs` acontece na próxima sessão (quando o MCP estiver carregado). O plugin Claude Code do DAT (skills nativas) é complementar e opcional; o MCP é o antídoto essencial contra alucinação de API.
 
 - **`coroutines-core` exposto como `api` em `core-common`.**
   Motivo: os contratos usam `Flow`/`StateFlow`; expor uma vez evita repetir a dependência em cada módulo consumidor.

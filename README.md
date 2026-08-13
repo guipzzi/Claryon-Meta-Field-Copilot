@@ -131,8 +131,8 @@ adb logcat -s ClaryonField          # logs do app
 
 | Marco | Descrição | Estado |
 |---|---|---|
-| **M0** | Contexto e esqueleto: módulos, interfaces (§3.1/§3.2), `./gradlew build` verde | ✅ código concluído · ⚠️ versão do SDK do DAT pendente (MCP `search_dat_docs` a configurar) |
-| M1 | Setup do DAT (GitHub Packages, manifest, `claryonfield://`) | ⛔ bloqueado pelo pré-requisito da Regra Zero |
+| **M0** | Contexto e esqueleto: módulos, interfaces (§3.1/§3.2), `./gradlew build` verde | ✅ código concluído · MCP `search_dat_docs` configurado (`.mcp.json`) · ⚠️ versão do SDK a registrar na próxima sessão |
+| M1 | Setup do DAT (GitHub Packages, manifest, `claryonfield://`) | ⏳ falta apenas o PAT `read:packages` e carregar o MCP em nova sessão |
 | M2 | Mock Device Kit (fase online, sem hardware) | pendente |
 | M3 | Pipeline de áudio (fone HFP comum) | pendente |
 | M4 | Voz on-device (whisper.cpp, sherpa-onnx, Silero, openWakeWord) | pendente |
