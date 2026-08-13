@@ -100,7 +100,7 @@ sdk.dir=/caminho/para/o/android/sdk
 ```
 
 A partir do M1, este arquivo também guarda o PAT `read:packages` do DAT
-(`gpr.user` / `gpr.token`). **Nunca** versione credenciais.
+(chave `github_token`; alternativa: env `GITHUB_TOKEN`). **Nunca** versione credenciais.
 
 ### 2. Build
 
@@ -131,8 +131,8 @@ adb logcat -s ClaryonField          # logs do app
 
 | Marco | Descrição | Estado |
 |---|---|---|
-| **M0** | Contexto e esqueleto: módulos, interfaces (§3.1/§3.2), `./gradlew build` verde | ✅ código concluído · MCP `search_dat_docs` configurado (`.mcp.json`) · ⚠️ versão do SDK a registrar na próxima sessão |
-| M1 | Setup do DAT (GitHub Packages, manifest, `claryonfield://`) | ⏳ falta apenas o PAT `read:packages` e carregar o MCP em nova sessão |
+| **M0** | Contexto e esqueleto: módulos, interfaces (§3.1/§3.2), `./gradlew build` verde | ✅ **concluído** — MCP `search_dat_docs` ativo (`.mcp.json`), SDK `mwdat 0.9.0` registrado em `DECISIONS.md` |
+| M1 | Setup do DAT (GitHub Packages, manifest, `claryonfield://`) | ⏳ falta apenas o **PAT `read:packages`** (credencial que só você gera) |
 | M2 | Mock Device Kit (fase online, sem hardware) | pendente |
 | M3 | Pipeline de áudio (fone HFP comum) | pendente |
 | M4 | Voz on-device (whisper.cpp, sherpa-onnx, Silero, openWakeWord) | pendente |

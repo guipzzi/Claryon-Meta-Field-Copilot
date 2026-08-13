@@ -19,19 +19,20 @@ dependencyResolutionManagement {
         mavenCentral()
 
         // ── M1 (Setup do DAT) ─────────────────────────────────────────────
-        // Os artefatos do Meta Wearables Device Access Toolkit (mwdat-core,
-        // mwdat-camera, mwdat-mockdevice) são distribuídos via GitHub Packages
-        // e exigem um Personal Access Token clássico com escopo `read:packages`.
-        // NÃO habilitado no M0: depende de credencial (Regra Zero: parar e
-        // perguntar) e da confirmação da versão vigente via `search_dat_docs`.
-        // Quando for habilitar, ler o token de `local.properties`/`GITHUB_TOKEN`
-        // (nunca versionar). Ver DECISIONS.md (2026-08-13).
+        // Artefatos do Meta Wearables DAT (com.meta.wearable:mwdat-*, versão
+        // 0.9.0 — confirmada via search_dat_docs em 2026-08-13) são distribuídos
+        // via GitHub Packages e exigem um PAT clássico com escopo `read:packages`.
+        // NÃO habilitado no M0: depende de credencial (Regra Zero). Forma oficial
+        // da credencial: username vazio + chave `github_token` em local.properties
+        // (ou env GITHUB_TOKEN). Nunca versionar o token. Ver DECISIONS.md.
         //
+        // val githubToken = providers.environmentVariable("GITHUB_TOKEN")
+        //     .orElse(providers.gradleProperty("github_token"))
         // maven {
         //     url = uri("https://maven.pkg.github.com/facebook/meta-wearables-dat-android")
         //     credentials {
-        //         username = providers.gradleProperty("gpr.user").orElse(providers.environmentVariable("GITHUB_ACTOR")).get()
-        //         password = providers.gradleProperty("gpr.token").orElse(providers.environmentVariable("GITHUB_TOKEN")).get()
+        //         username = "" // não necessário
+        //         password = githubToken.get()
         //     }
         // }
     }

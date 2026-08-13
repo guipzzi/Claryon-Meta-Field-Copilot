@@ -28,8 +28,14 @@ Ordem cronológica inversa (mais recente no topo).
 - **MCP de docs vivas do DAT configurado (escopo de projeto, `.mcp.json`).**
   Servidor `meta-wearables` → `https://mcp.developer.meta.com/wearables`, transporte HTTP, **sem autenticação** (verificado: `initialize` e `tools/list` respondem 200; ferramentas `search_dat_docs` e `search_webapps_docs` disponíveis). Escopo de projeto para toda a equipe herdar via `.mcp.json`. Só carrega em **nova sessão** do Claude Code (servidores MCP sobem no startup) e exige aprovação de confiança na primeira vez.
 
-- **⚠️ Item de aceite do M0 ainda pendente: versão do SDK do DAT não registrada.**
-  A parte de código do M0 (esqueleto + interfaces compilando + `./gradlew build` verde) está cumprida. A confirmação da versão vigente via `search_dat_docs` acontece na próxima sessão (quando o MCP estiver carregado). O plugin Claude Code do DAT (skills nativas) é complementar e opcional; o MCP é o antídoto essencial contra alucinação de API.
+- **✅ Versão do SDK do DAT registrada: `mwdat = "0.9.0"`.**
+  Fonte: `search_dat_docs` (MCP oficial `meta-wearables`), consulta "Android Gradle dependency setup", 2026-08-13. Grupo `com.meta.wearable`; artefatos `mwdat-core`, `mwdat-camera`, `mwdat-display`, `mwdat-mockdevice`. Repositório Maven: `https://maven.pkg.github.com/facebook/meta-wearables-dat-android` (GitHub Packages, exige PAT `read:packages`). A versão exata mais recente deve ser reconferida em GitHub Packages no início do M1. Fecha o último item de aceite do M0.
+
+- **Credencial do GitHub Packages: `username = ""` + chave `github_token` em `local.properties` (ou env `GITHUB_TOKEN`).**
+  Correção sobre o placeholder inicial, que supunha `gpr.user`/`gpr.token`. Forma alinhada à doc oficial (`search_dat_docs`, 2026-08-13). Placeholders em `settings.gradle.kts`, `README.md` e `local.properties` ajustados.
+
+- **API real de câmera confirmada (não escrever de memória): `session.addCamera(StreamConfiguration(videoQuality = VideoQuality.MEDIUM, frameRate = 24))`.**
+  Fonte: `search_dat_docs` "camera streaming setup on Android", 2026-08-13. `frameRate` válido ∈ {2,7,15,24,30}; `VideoQuality` ∈ {LOW 360×640, MEDIUM 504×896, HIGH 720×1280}; `StreamState`: STARTING→STARTED→STREAMING→PAUSED→STOPPING→STOPPED→CLOSED. Divergências vs. minhas suposições do M0 (`addStream`/`quality`) ficam ABSORVIDAS por `GlassesFacade` — nenhum outro módulo muda. A tradução concreta é escrita no M2.
 
 - **`coroutines-core` exposto como `api` em `core-common`.**
   Motivo: os contratos usam `Flow`/`StateFlow`; expor uma vez evita repetir a dependência em cada módulo consumidor.
