@@ -1,0 +1,29 @@
+# ─── Segredos e configuração local (NUNCA versionar) ───────────────────────
+# local.properties guarda sdk.dir e, a partir do M1, o PAT read:packages do DAT.
+local.properties
+*.keystore
+*.jks
+secrets.properties
+
+# ─── Build ─────────────────────────────────────────────────────────────────
+.gradle/
+build/
+**/build/
+captures/
+*.apk
+*.aab
+
+# ─── Android / modelos nativos ─────────────────────────────────────────────
+# Modelos on-device (whisper ggml, piper/sherpa-onnx, silero, openWakeWord)
+# são baixados pelo setup (ver README) e não entram no Git.
+*.ggml
+*.gguf
+app/src/main/assets/models/
+
+# ─── IDE ───────────────────────────────────────────────────────────────────
+.idea/
+*.iml
+.kotlin/
+
+# ─── macOS ─────────────────────────────────────────────────────────────────
+.DS_Store

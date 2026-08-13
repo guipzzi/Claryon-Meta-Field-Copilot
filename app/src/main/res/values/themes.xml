@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Tema base mínimo apenas para o manifest. A aparência real é definida em
+      Compose (MaterialTheme). Usar um tema base do Android evita puxar a
+      dependência de Material Components (XML).
+    -->
+    <style name="Theme.ClaryonField" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>
