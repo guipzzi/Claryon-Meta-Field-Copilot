@@ -5,6 +5,18 @@ Ordem cronológica inversa (mais recente no topo).
 
 ---
 
+## 2026-08-13 — M3 (pipeline de áudio HFP)
+
+- **`GlassesAudioManagerImpl` (core-audio) — áudio NÃO passa pelo DAT.** `iniciar()` roteia `TYPE_BLUETOOTH_SCO` via `availableCommunicationDevices`+`setCommunicationDevice` (API 31+); trata **`false` e lista vazia** com erro tipado claro (`audio.no_sco`/`audio.set_comm_device_false`), nunca falha silenciosa. `microfonePcm()` = `AudioRecord(VOICE_COMMUNICATION)` mono PCM16 → `Flow<ShortArray>` em `Dispatchers.IO` (release no finally). `reproduzir()` = `AudioTrack(USAGE_VOICE_COMMUNICATION)` com drain antes do stop. `liberar()` = **`clearCommunicationDevice()`** (obrigatório; senão o áudio do sistema fica preso em 8 kHz) + restaura o modo.
+
+- **`allowFallbackToDefault` (flag de construtor).** Quando `true` e não há SCO, roteia para o dispositivo de comunicação padrão — permite exercitar record→playback **sem** fone Bluetooth (o MDK não simula áudio; o emulador não tem SCO). Em produto: `false` (só HFP dos óculos). No app, ligado apenas em `BuildConfig.DEBUG`.
+
+- **Aceite de RUNTIME.** 3 testes instrumentados passaram no emulador (`AudioRoutingTest`: sem-SCO → falha clara + limpeza segura; + M2 stream). O **eco ao vivo no painel funcionou**: `AudioRecord` capturou **46.720 amostras** (~2,9 s a 16 kHz) e o `AudioTrack` reproduziu — pipeline record→playback real, mesmo com o emulador sem áudio. O **eco HFP específico** (roteado pelo SCO dos óculos/fone) exige **fone Bluetooth físico** — a ser validado em dispositivo real (o emulador não tem SCO).
+
+- **Permissões em runtime:** MainActivity pede `RECORD_AUDIO` + `BLUETOOTH_CONNECT` no launch.
+
+---
+
 ## 2026-08-13 — M2 (Mock Device Kit + registro/sessão/câmera)
 
 - **Fonte autoritativa: sample oficial `CameraAccess` (repo `facebook/meta-wearables-dat-android`, tag 0.9.0).** Clonado num diretório irmão e lido para confirmar TODAS as assinaturas 0.9 antes de escrever (Regra Zero, "samples > docs"). Correções vs. material 0.8: `RegistrationState` = {UNAVAILABLE, REGISTERING, REGISTERED, UNREGISTERING} (sem "AVAILABLE"); câmera 0.9 é `session.addCamera(config): DatResult<Camera>` → `Camera.stream` (não `addStream`); `DatResult` usa `.onSuccess/.onFailure { error, _ -> }` (evitar `getOrThrow` em produção); `session.start()` retorna `Unit` (resultado via `session.state`/`session.errors`).

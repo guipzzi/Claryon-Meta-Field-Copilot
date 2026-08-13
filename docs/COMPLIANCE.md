@@ -65,11 +65,12 @@ não defeitos do que já existe.
 - [ ] **Reconfirmar via `search_dat_docs`** os enums reais 0.9: `RegistrationState`, `DeviceSessionState`, `StreamState`, erros — o material é 0.8 e linka 0.6. *(Regra Zero)*
 
 ### M3 — Áudio HFP
-- [ ] Roteamento SCO (`TYPE_BLUETOOTH_SCO`) confirmado ativo **antes** de qualquer stream. *(Un13 p.53)*
-- [ ] Tratar `setCommunicationDevice()==false` e lista vazia (mensagem, não falha silenciosa); fallback `MODE_IN_COMMUNICATION`. *(Un13 p.54)*
-- [ ] `AudioRecord` fonte `VOICE_COMMUNICATION`, mono, PCM 16-bit, `Dispatchers.IO`. *(Un13 p.54; Un12 p.28)*
-- [ ] **`clearCommunicationDevice()` sempre no encerramento.** *(Un13 p.56)*
-- [ ] ⚠️ **RISCO: HFP entrega 8 kHz; Whisper espera 16 kHz.** Implementar resample e medir acurácia real. *(§D abaixo)*
+- [x] Roteamento SCO (`TYPE_BLUETOOTH_SCO`) via `setCommunicationDevice`; a ordem "HFP antes do stream" é imposta pela orquestração do `app` (M8). *(Un13 p.53)*
+- [x] Tratar `setCommunicationDevice()==false` e lista vazia (erro tipado claro, não falha silenciosa); `MODE_IN_COMMUNICATION`. **Testado.** *(Un13 p.54)*
+- [x] `AudioRecord` fonte `VOICE_COMMUNICATION`, mono, PCM 16-bit, `Dispatchers.IO`. *(Un13 p.54; Un12 p.28)*
+- [x] **`clearCommunicationDevice()` sempre no encerramento.** *(Un13 p.56)*
+- [ ] ⚠️ **RISCO: HFP entrega 8 kHz; Whisper espera 16 kHz.** Resample + medir acurácia — **M4**. *(§D)*
+- [ ] Eco HFP roteado pelo SCO validado em **fone Bluetooth físico** (o emulador não tem SCO). *(Un13 p.61)*
 
 ### M4 — Voz on-device
 - [ ] `WhisperCppStt` em **lote**: só transcreve após o VAD fechar a janela; nunca alimenta PCM incremental. *(Un12 Nota 20 p.101)*

@@ -220,16 +220,44 @@ sample), em vez de recriar a cada `createSession`. Com isso, o ciclo completa.
 
 ---
 
+## 2026-08-13 — M3: pipeline de áudio HFP
+
+**Objetivo:** capturar e reproduzir voz pelo canal Bluetooth dos óculos (HFP),
+que **não passa pelo DAT** — é `AudioManager`/`AudioRecord`/`AudioTrack`.
+
+**O que ficou pronto (`GlassesAudioManagerImpl` em core-audio):**
+- `iniciar()` roteia o áudio para `TYPE_BLUETOOTH_SCO` (`setCommunicationDevice`,
+  API 31+) e trata **`false`/lista vazia** com erro claro — nunca falha silenciosa.
+- `microfonePcm()` → `AudioRecord(VOICE_COMMUNICATION)` mono 16-bit como
+  `Flow<ShortArray>` em `Dispatchers.IO`.
+- `reproduzir()` → `AudioTrack(USAGE_VOICE_COMMUNICATION)`.
+- `liberar()` chama **`clearCommunicationDevice()`** — sem isso o áudio do sistema
+  fica preso em 8 kHz.
+- Painel ganhou o botão **"Eco 3 s"** e um card de rota; MainActivity pede
+  `RECORD_AUDIO`/`BLUETOOTH_CONNECT` em runtime.
+
+**Verificação:** 3 testes instrumentados passaram no emulador (tratamento
+sem-SCO + limpeza + o M2 stream). E o **eco ao vivo funcionou**: `AudioRecord`
+capturou **46.720 amostras** (~2,9 s a 16 kHz) e o `AudioTrack` reproduziu — o
+pipeline record→playback é real. O **eco HFP roteado pelo SCO** dos óculos/fone
+precisa de **fone Bluetooth físico** (o MDK não simula áudio; o emulador não tem
+SCO) — validar em dispositivo real.
+
+**Detalhe de flag:** `allowFallbackToDefault` (só em DEBUG) permite exercitar o
+pipeline sem Bluetooth, roteando para o dispositivo padrão. Em produto é `false`.
+
+---
+
 ## Estado atual (fim de 2026-08-13)
 
-- **Marcos concluídos:** M0, MCP, M1, **M2** (verificado em runtime no emulador).
+- **Marcos concluídos:** M0, MCP, M1, M2, **M3** (verificados em runtime no emulador).
 - **Build:** verde (`./gradlew clean build`), lint desligado (workaround documentado).
 - **Toolchain:** JDK 17 · Gradle 8.9 · AGP 8.7.2 · Kotlin 2.2.0 · compileSdk 35 · minSdk 31.
-- **DAT:** `mwdat 0.9.0` integrado; fachada real + MockDeviceKit funcionando.
-- **Próximo marco (M3):** pipeline de áudio HFP (`GlassesAudioManager`,
-  `AudioRecord(VOICE_COMMUNICATION)` → `Flow<ShortArray>`, `AudioTrack`),
-  validado contra fone Bluetooth comum. ⚠️ Risco 8 kHz→16 kHz
-  (`docs/COMPLIANCE.md` §D) e o **MDK não simula áudio**.
+- **DAT:** `mwdat 0.9.0` integrado; fachada real + MockDeviceKit + áudio HFP funcionando.
+- **Próximo marco (M4):** voz on-device — `WhisperCppStt` (whisper.cpp/JNI/NDK),
+  `PiperTts` (sherpa-onnx), `openWakeWord`, Silero VAD. Marco de maior risco de
+  ambiente (nativo, `.so` por ABI, modelos em assets). ⚠️ Resolver o resample
+  8 kHz→16 kHz (`docs/COMPLIANCE.md` §D) e validar STT em **modo avião**.
 
 **Pendências conhecidas (registradas para não se perderem):**
 - Reativar o Android Lint quando o ferramental acompanhar o Kotlin 2.2 (M8).

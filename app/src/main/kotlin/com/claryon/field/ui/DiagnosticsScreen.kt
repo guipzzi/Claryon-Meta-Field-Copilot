@@ -46,6 +46,7 @@ fun DiagnosticsScreen(
     val frame by vm.frameInfo.collectAsState()
     val devices by vm.deviceCount.collectAsState()
     val mockStatus by vm.mockStatus.collectAsState()
+    val audioStatus by vm.audioStatus.collectAsState()
 
     Column(
         modifier = modifier
@@ -69,6 +70,7 @@ fun DiagnosticsScreen(
         if (vm.mockAvailable) {
             StatusCard("MockDeviceKit", mockStatus)
         }
+        StatusCard("Áudio HFP (M3)", audioStatus)
 
         // Botões gateados por pré-condição — evita toques sem efeito (no-op) e
         // guia a sequência correta: registrar → sessão → câmera.
@@ -94,6 +96,12 @@ fun DiagnosticsScreen(
         ) {
             Button(onClick = vm::startCamera, enabled = canStartCamera) { Text("Iniciar câmera") }
             OutlinedButton(onClick = vm::stopCamera, enabled = canStopCamera) { Text("Parar câmera") }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OutlinedButton(onClick = vm::echo) { Text("Eco 3 s (áudio HFP)") }
         }
     }
 }
