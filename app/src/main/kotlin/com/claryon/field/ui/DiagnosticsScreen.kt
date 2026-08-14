@@ -118,10 +118,16 @@ fun DiagnosticsScreen(
             label = { Text("Comando de voz (texto)") },
             modifier = Modifier.fillMaxWidth(),
         )
-        Button(
-            onClick = { vm.runCommand(command) },
-            enabled = command.isNotBlank(),
-        ) { Text("Enviar comando") }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Button(
+                onClick = { vm.runCommand(command) },
+                enabled = command.isNotBlank(),
+            ) { Text("Enviar comando") }
+            OutlinedButton(onClick = vm::falarComando) { Text("Falar comando (STT)") }
+        }
     }
 }
 

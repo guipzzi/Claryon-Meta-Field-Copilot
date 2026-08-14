@@ -1,7 +1,5 @@
 package com.claryon.voice
 
-import android.content.Context
-import android.speech.SpeechRecognizer
 import com.claryon.common.ClaryonError
 import com.claryon.common.Result
 
@@ -34,34 +32,20 @@ class WhisperCppStt : SttEngine {
 }
 
 /**
- * STT de **fallback** nativo do Android. Nota de arquitetura: o `SpeechRecognizer`
- * **captura o próprio áudio** (streaming, orientado a eventos) e **não** aceita um
- * `ShortArray` de PCM — logo não encaixa direto em `transcribe(pcm)`. O caminho
- * correto do fallback é um fluxo auto-capturador separado, a ser adicionado no
- * M4-nativo, usando `createOnDeviceSpeechRecognizer` + `EXTRA_PREFER_OFFLINE`
- * (nunca o reconhecedor padrão, que **vaza áudio** para servidor).
- *
- * `isAvailable()` reflete a disponibilidade real do reconhecedor on-device.
+ * STT **auto-capturador**: escuta o microfone e transcreve um comando por conta
+ * própria (orientado a eventos), diferente do [SttEngine] de **buffer** (que
+ * recebe PCM já capturado, como o whisper). São dois formatos distintos e ambos
+ * legítimos — o `SpeechRecognizer` do Android é auto-capturador.
  */
-class AndroidOnDeviceStt(private val context: Context) : SttEngine {
-    override val id: String = "android.SpeechRecognizer(on-device)"
-
-    override suspend fun isAvailable(): Boolean =
-        runCatching { SpeechRecognizer.isOnDeviceRecognitionAvailable(context.applicationContext) }
-            .getOrDefault(false)
-
-    override suspend fun transcribe(pcm: ShortArray, sampleRateHz: Int): Result<Transcript> =
-        Result.failure(
-            ClaryonError.Voice(
-                "stt.android_needs_self_capture",
-                "SpeechRecognizer captura o próprio áudio; caminho auto-capturador é M4-nativo.",
-            ),
-        )
+interface SelfCapturingStt {
+    suspend fun isAvailable(): Boolean
+    /** Escuta e transcreve UM comando. Trata `ERROR_NO_MATCH` como "não entendi". */
+    suspend fun recognizeOnce(): Result<Transcript>
 }
 
 /**
- * Seleciona o primeiro [SttEngine] disponível (primário → fallback). Enquanto
- * nenhum estiver pronto, o chamador trata a ausência como `NaoReconhecida`.
+ * Seleciona o primeiro [SttEngine] de buffer disponível (primário → fallback).
+ * Enquanto nenhum estiver pronto, o chamador trata a ausência como `NaoReconhecida`.
  */
 class SttSelector(private val engines: List<SttEngine>) {
     suspend fun firstAvailable(): SttEngine? = engines.firstOrNull { it.isAvailable() }

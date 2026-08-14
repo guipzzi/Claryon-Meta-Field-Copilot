@@ -10,6 +10,7 @@ import com.claryon.common.Result
 import com.claryon.field.BuildConfig
 import com.claryon.glasses.DatGlassesFacade
 import com.claryon.glasses.MockDeviceController
+import com.claryon.voice.AndroidOnDeviceStt
 import com.claryon.voice.AndroidTts
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -105,32 +106,51 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
 
     private val router = DeterministicIntentRouter()
     private val tts = AndroidTts(app)
+    private val stt = AndroidOnDeviceStt(app)
 
     private val _commandStatus = MutableStateFlow("—")
     val commandStatus: StateFlow<String> = _commandStatus.asStateFlow()
 
-    /**
-     * Ciclo (sem STT nativo ainda): texto → roteador determinístico → resposta
-     * lacônica → TTS falado pelo pipeline HFP. Demonstra o "cérebro" + a saída
-     * de voz. O STT real (whisper.cpp) entra no M4-nativo.
-     */
+    /** Comando por TEXTO (bypassa o STT): roteador → resposta lacônica → TTS. */
     fun runCommand(text: String) {
+        viewModelScope.launch { processar(text) }
+    }
+
+    /**
+     * Ciclo de voz REAL no aparelho: STT on-device (auto-capturador) → roteador
+     * → TTS. Fecha falar→transcrever→responder sem NDK. Exige pt-BR baixado
+     * (indisponível no emulador → mensagem clara).
+     */
+    fun falarComando() {
         viewModelScope.launch {
-            val intent = router.route(text)
-            val resposta = OperationalResponses.para(intent)
-            val nome = intent::class.simpleName
-            _commandStatus.value = "$nome → \"$resposta\""
-            when (val syn = tts.synthesize(resposta)) {
-                is Result.Success -> {
-                    if (audio.iniciar() is Result.Success) {
-                        audio.reproduzir(syn.value.samples, syn.value.sampleRateHz)
-                        audio.liberar()
-                    }
-                    _commandStatus.value = "$nome → \"$resposta\" (falado)"
-                }
-                is Result.Failure ->
-                    _commandStatus.value = "$nome → \"$resposta\" (TTS indisponível: ${syn.error.message})"
+            if (!stt.isAvailable()) {
+                _commandStatus.value = "STT on-device indisponível (baixe o pt-BR nas configs de voz)"
+                return@launch
             }
+            _commandStatus.value = "ouvindo…"
+            when (val r = stt.recognizeOnce()) {
+                is Result.Success -> processar(r.value.text)
+                is Result.Failure -> _commandStatus.value = "STT: ${r.error.message}"
+            }
+        }
+    }
+
+    /** Roteia o texto e fala a resposta pelo pipeline HFP. */
+    private suspend fun processar(text: String) {
+        val intent = router.route(text)
+        val resposta = OperationalResponses.para(intent)
+        val nome = intent::class.simpleName
+        _commandStatus.value = "\"$text\" → $nome → \"$resposta\""
+        when (val syn = tts.synthesize(resposta)) {
+            is Result.Success -> {
+                if (audio.iniciar() is Result.Success) {
+                    audio.reproduzir(syn.value.samples, syn.value.sampleRateHz)
+                    audio.liberar()
+                }
+                _commandStatus.value = "\"$text\" → $nome → \"$resposta\" (falado)"
+            }
+            is Result.Failure ->
+                _commandStatus.value = "$nome → \"$resposta\" (TTS: ${syn.error.message})"
         }
     }
 
