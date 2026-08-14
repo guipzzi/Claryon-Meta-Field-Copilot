@@ -19,7 +19,10 @@ android {
     defaultConfig {
         minSdk = 31
         ndk {
-            abiFilters += "arm64-v8a"
+            // arm64-v8a: celulares modernos + emulador Apple Silicon.
+            // x86_64: emuladores Intel. (armeabi-v7a — 32 bits, raro — pode ser
+            // adicionado no release; dobra o tempo de build nativo do whisper.)
+            abiFilters += listOf("arm64-v8a", "x86_64")
         }
     }
 

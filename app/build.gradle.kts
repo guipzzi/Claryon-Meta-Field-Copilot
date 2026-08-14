@@ -19,6 +19,11 @@ android {
         versionCode = 1
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // ABIs consistentes com o whisper nativo (o AAR do sherpa traz todas; sem
+        // isto o APK carregaria .so de sherpa para ABIs sem o whisper compilado).
+        ndk {
+            abiFilters += listOf("arm64-v8a", "x86_64")
+        }
     }
 
     buildFeatures {
@@ -63,6 +68,9 @@ dependencies {
 
     // sherpa-onnx (Piper TTS): o app empacota as .so + classes; core-voice usa compileOnly.
     implementation(":sherpa-onnx-1.13.5@aar")
+
+    // MockDeviceKit só no APK de DEBUG (o release não empacota o mock).
+    debugImplementation(libs.mwdat.mockdevice)
 
     // AndroidX + Compose.
     implementation(libs.androidx.core.ktx)

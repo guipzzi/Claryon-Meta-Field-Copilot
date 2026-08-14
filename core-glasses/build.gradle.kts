@@ -28,11 +28,14 @@ android {
 dependencies {
     implementation(project(":core-common"))
 
-    // Meta Wearables Device Access Toolkit — apenas aqui. mockdevice alimenta o
-    // painel de diagnóstico/demo (M2) sem hardware.
+    // Meta Wearables Device Access Toolkit — apenas aqui.
     implementation(libs.mwdat.core)
     implementation(libs.mwdat.camera)
-    implementation(libs.mwdat.mockdevice)
+    // mockdevice: compileOnly aqui (a classe compila), mas NÃO é empacotado por
+    // este módulo. O `app` empacota só em DEBUG (debugImplementation). Assim o
+    // MockDeviceController não entra no APK de release — a classe nunca é
+    // carregada em release (o chamador gateia por BuildConfig.DEBUG).
+    compileOnly(libs.mwdat.mockdevice)
 
     testImplementation(libs.junit)
 }
