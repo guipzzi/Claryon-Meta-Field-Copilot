@@ -1,6 +1,7 @@
 package com.claryon.voice
 
 import com.claryon.common.ClaryonError
+import com.claryon.common.PcmResampler
 import com.claryon.common.Result
 import com.whispercpp.whisper.WhisperContext
 import kotlinx.coroutines.sync.Mutex
@@ -41,8 +42,11 @@ class WhisperCppStt(private val modelPath: String) : SttEngine {
             val ctx = mutex.withLock {
                 context ?: WhisperContext.createContextFromFile(modelPath).also { context = it }
             }
+            // HFP entrega 8 kHz; o Whisper espera 16 kHz → reamostra se preciso.
+            val pcm16k =
+                if (sampleRateHz != TARGET_HZ) PcmResampler.resampleLinear(pcm, sampleRateHz, TARGET_HZ) else pcm
             // Whisper espera PCM float normalizado em [-1, 1], mono, 16 kHz.
-            val floats = FloatArray(pcm.size) { pcm[it] / 32768.0f }
+            val floats = FloatArray(pcm16k.size) { pcm16k[it] / 32768.0f }
             val texto = ctx.transcribeData(floats, printTimestamp = false).trim()
             Result.success(Transcript(texto, confidence = null))
         } catch (e: Exception) {
@@ -53,5 +57,9 @@ class WhisperCppStt(private val modelPath: String) : SttEngine {
     suspend fun release() {
         context?.release()
         context = null
+    }
+
+    private companion object {
+        const val TARGET_HZ = 16_000
     }
 }

@@ -28,6 +28,10 @@ dependencyResolutionManagement {
         google()
         mavenCentral()
 
+        // AAR pré-compilado do sherpa-onnx (Piper TTS) — não versionado, baixado
+        // no setup (ver README). flatDir para o AGP tratá-lo como dependência real.
+        flatDir { dirs("core-voice/libs") }
+
         // Meta Wearables Device Access Toolkit (com.meta.wearable:mwdat-*, 0.9.0).
         // Distribuído via GitHub Packages; exige PAT clássico read:packages.
         // Filtro de grupo: só este repo serve com.meta.wearable, evitando bater

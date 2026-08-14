@@ -33,3 +33,6 @@ app/src/androidTest/assets/models/
 
 # NDK build intermediates
 .cxx/
+
+# AAR pré-compilado do sherpa-onnx (baixado no setup, ver README)
+core-voice/libs/*.aar

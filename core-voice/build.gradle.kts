@@ -43,5 +43,10 @@ android {
 dependencies {
     implementation(project(":core-common"))
 
+    // Piper (TTS neural) via sherpa-onnx — API Kotlin `com.k2fsa.sherpa.onnx`.
+    // compileOnly aqui (módulo library não repackagea AAR); o `app` empacota as
+    // .so + classes via implementation. AAR baixado no setup (ver README).
+    compileOnly(":sherpa-onnx-1.13.5@aar")
+
     testImplementation(libs.junit)
 }

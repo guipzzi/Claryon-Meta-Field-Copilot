@@ -61,6 +61,9 @@ dependencies {
     implementation(project(":core-evidence"))
     implementation(project(":core-sync"))
 
+    // sherpa-onnx (Piper TTS): o app empacota as .so + classes; core-voice usa compileOnly.
+    implementation(":sherpa-onnx-1.13.5@aar")
+
     // AndroidX + Compose.
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

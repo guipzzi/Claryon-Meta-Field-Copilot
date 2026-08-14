@@ -89,13 +89,32 @@ class AndroidTts(
         tts = null
     }
 
-    /** Lê um WAV PCM 16-bit mono (o formato do synthesizeToFile) em [PcmAudio]. */
+    /**
+     * Lê um WAV PCM 16-bit em [PcmAudio], **localizando os chunks** `fmt `/`data`
+     * (não assume offset 44 — alguns motores inserem chunks LIST/fact antes do
+     * `data`, o que corromperia a leitura fixa).
+     */
     private fun readWavAsPcm(file: File): PcmAudio {
         val bytes = file.readBytes()
-        val header = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
-        val sampleRate = header.getInt(24)
-        val dataOffset = 44 // cabeçalho RIFF/WAVE padrão
-        val pcmBytes = bytes.copyOfRange(dataOffset.coerceAtMost(bytes.size), bytes.size)
+        val bb = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+        var sampleRate = 22_050
+        var dataOffset = -1
+        var dataLen = 0
+        var pos = 12 // após "RIFF" <size> "WAVE"
+        while (pos + 8 <= bytes.size) {
+            val id = String(bytes, pos, 4, Charsets.US_ASCII)
+            val size = bb.getInt(pos + 4)
+            val body = pos + 8
+            when (id) {
+                "fmt " -> if (body + 8 <= bytes.size) sampleRate = bb.getInt(body + 4)
+                "data" -> { dataOffset = body; dataLen = size }
+            }
+            if (dataOffset >= 0) break
+            pos = body + size + (size and 1) // chunks alinhados a palavra
+        }
+        if (dataOffset < 0) { dataOffset = 44; dataLen = bytes.size - 44 } // fallback
+        val end = (dataOffset + dataLen).coerceIn(dataOffset, bytes.size)
+        val pcmBytes = bytes.copyOfRange(dataOffset, end)
         val samples = ShortArray(pcmBytes.size / 2)
         ByteBuffer.wrap(pcmBytes).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer().get(samples)
         return PcmAudio(samples, sampleRate)
