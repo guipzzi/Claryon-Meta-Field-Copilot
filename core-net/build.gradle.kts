@@ -1,3 +1,5 @@
+import java.util.Properties
+
 // core-net — transporte da rede tática: PTT ao vivo, alertas e posições.
 //
 // A regra que governa este módulo: **o caminho ao vivo nunca espera durabilidade**.
@@ -12,13 +14,31 @@ plugins {
     alias(libs.plugins.kotlin.android)
 }
 
+// Credenciais do Supabase para o teste de integração do transporte. Lidas de
+// `local.properties` (não versionado) ou das envs correspondentes. Ausentes, o
+// teste de integração se declara pulado em vez de falhar — ninguém deve precisar
+// de credencial para rodar a suíte.
+val props = Properties().apply {
+    val arquivo = rootProject.file("local.properties")
+    if (arquivo.exists()) arquivo.inputStream().use { load(it) }
+}
+fun segredo(chave: String, env: String): String =
+    System.getenv(env) ?: props.getProperty(chave) ?: ""
+
 android {
     namespace = "com.claryon.net"
     compileSdk = 35
 
+    buildFeatures {
+        buildConfig = true
+    }
+
     defaultConfig {
         minSdk = 31
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        buildConfigField("String", "SUPABASE_URL", "\"${segredo("supabase_url", "SUPABASE_URL")}\"")
+        buildConfigField("String", "SUPABASE_ANON_KEY", "\"${segredo("supabase_anon_key", "SUPABASE_ANON_KEY")}\"")
     }
 
     compileOptions {
