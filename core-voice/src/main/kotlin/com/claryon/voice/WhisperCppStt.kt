@@ -18,26 +18,33 @@ import java.io.File
  * do submódulo `whisper` são reaproveitados **verbatim** do exemplo Android
  * oficial do whisper.cpp — nada escrito de memória.
  *
- * O modelo (~75 MB, ou menor quantizado) é baixado por [modelPath] (via
- * WorkManager no M7/M8) — **não** é versionado.
+ * **Duas origens de modelo**, e a distinção decide se há IA local no dia da
+ * demonstração:
+ *  - [ModelSource.Asset] — empacotado no APK (`assets/models/`, com `noCompress`).
+ *    É o caminho de **produção**: instala junto com o app, funciona offline, e não
+ *    depende do Wi-Fi do evento. Lê direto do APK, sem copiar ~75 MB para o disco.
+ *  - [ModelSource.Arquivo] — caminho no sistema de arquivos (`adb push`, download
+ *    por WorkManager). Serve para desenvolvimento e para trocar de modelo sem
+ *    reinstalar.
  *
- * ⚠️ Espera **16 kHz**. Nosso HFP entrega 8 kHz: o resample 8→16 kHz é uma etapa
- * a resolver (ver docs/COMPLIANCE.md §D). `AudioRecord` a 16 kHz e o `jfk.wav`
- * de teste já estão a 16 kHz.
+ * ⚠️ Espera **16 kHz**. Nosso HFP entrega 8 kHz; o resample é feito aqui.
  */
-class WhisperCppStt(private val modelPath: String) : SttEngine {
+class WhisperCppStt(private val fonte: ModelSource) : SttEngine {
+
+    /** Compatibilidade: caminho no sistema de arquivos. */
+    constructor(modelPath: String) : this(ModelSource.Arquivo(modelPath))
 
     override val id: String = "whisper.cpp/ggml-tiny"
 
     private val mutex = Mutex()
     private var context: WhisperContext? = null
 
-    override suspend fun isAvailable(): Boolean = File(modelPath).exists()
+    override suspend fun isAvailable(): Boolean = fonte.existe()
 
     override suspend fun transcribe(pcm: ShortArray, sampleRateHz: Int): Result<Transcript> {
-        if (!File(modelPath).exists()) {
+        if (!fonte.existe()) {
             return Result.failure(
-                ClaryonError.Voice("stt.model_missing", "Modelo whisper não encontrado: $modelPath"),
+                ClaryonError.Voice("stt.model_missing", "Modelo whisper não encontrado: $fonte"),
             )
         }
         // `withContext(Default)`: o carregamento do modelo (~75 MB via JNI), o
@@ -52,7 +59,7 @@ class WhisperCppStt(private val modelPath: String) : SttEngine {
         return withContext(Dispatchers.Default) {
         try {
             mutex.withLock {
-            val ctx = context ?: WhisperContext.createContextFromFile(modelPath).also { context = it }
+            val ctx = context ?: fonte.abrir().also { context = it }
             // HFP entrega 8 kHz; o Whisper espera 16 kHz → reamostra se preciso.
             val pcm16k =
                 if (sampleRateHz != TARGET_HZ) PcmResampler.resampleLinear(pcm, sampleRateHz, TARGET_HZ) else pcm

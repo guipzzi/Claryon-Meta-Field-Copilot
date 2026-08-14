@@ -5,26 +5,15 @@ package com.claryon.sound
  */
 
 /**
- * Prioridade de reprodução.
- *  - [EMERGENCIA] (nível 1): interrompe qualquer coisa.
- *  - [RESPOSTA]   (nível 2): resposta a comando do próprio agente; aguarda nível 1.
- *  - [INFORMATIVO](nível 3): suprimido inteiramente em Modo Tático.
+ * [Priority] e [Earcon] mudaram para `core-common` (ver `AudioSignals.kt`): o
+ * executor de intenções precisa nomear earcons para dizer "isto sai como sinal,
+ * não como fala", e `core-agent` não pode depender de `core-sound`.
+ *
+ * Os apelidos abaixo mantêm `com.claryon.sound.Earcon` válido — um único enum,
+ * duas portas de entrada, zero chance de as listas divergirem.
  */
-enum class Priority { EMERGENCIA, RESPOSTA, INFORMATIVO }
-
-/** Biblioteca fixa de earcons — sinal não-verbal curto (150–250 ms), significado fixo. */
-enum class Earcon(val significado: String) {
-    OUVI_VOCE("bipe curto ascendente — 'ouvi você' (~400 ms do fim da fala)"),
-    ACAO_EXECUTADA("duplo bipe curto — 'ação executada'"),
-    FALHA("bipe grave descendente — 'não entendi / falhou'"),
-    GRAVANDO("tom contínuo 2 s — 'gravando' (avisa agente e ambiente)"),
-    PRIORITARIA("três bipes rápidos — 'mensagem prioritária chegando'"),
-
-    // Resultado de consulta sensível: codificado, NUNCA falado.
-    CONSULTA_SEM_RESTRICAO("1 bipe curto e neutro"),
-    CONSULTA_RESTRICAO_ADMIN("2 bipes médios"),
-    CONSULTA_FURTO_ROUBO("padrão de alerta distinto, 3 tons"),
-}
+typealias Priority = com.claryon.common.Priority
+typealias Earcon = com.claryon.common.Earcon
 
 /** Item reproduzível: um earcon, ou fala sintetizada (sujeita à laconicidade). */
 sealed interface Sound {

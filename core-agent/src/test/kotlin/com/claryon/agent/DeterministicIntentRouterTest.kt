@@ -68,25 +68,8 @@ class DeterministicIntentRouterTest {
         assertTrue(router.route("") is Intent.NaoReconhecida)
     }
 
-    @Test
-    fun todaRespostaRespeitaLaconicidade() {
-        val intents = listOf(
-            Intent.PedirApoio(Prioridade.ALTA, null),
-            Intent.IniciarGravacao(null),
-            Intent.EncerrarGravacao,
-            Intent.ConsultarPlaca(null),
-            Intent.ConsultarPlaca("ABC1D23"),
-            Intent.NarrarOcorrencia("x"),
-            Intent.Emergencia,
-            Intent.Detalhar,
-            Intent.TrocarModo(ModoOperacao.OCORRENCIA),
-            Intent.NaoReconhecida("x"),
-        )
-        for (intent in intents) {
-            val palavras = OperationalResponses.para(intent).trim().split(Regex("\\s+")).size
-            assertTrue("Resposta excede 7 palavras: ${OperationalResponses.para(intent)}", palavras <= 7)
-        }
-    }
+    // A laconicidade migrou para UtteranceTest: a fala não é mais derivada da
+    // intenção (isso era a mentira), e sim do resultado da ação.
 
     @Test
     fun narracaoQueMencionaPlacaNaoViraConsulta() {

@@ -30,6 +30,15 @@ android {
         compose = true
         buildConfig = true // usamos BuildConfig.DEBUG para gatear o MockDeviceKit
     }
+
+    androidResources {
+        // Modelos on-device empacotados em assets/models/. Comprimir não vale a
+        // pena: são binários já densos (ganho de tamanho ínfimo) e a
+        // descompressão custa tempo e pico de memória a cada carga. O whisper lê
+        // por AASSET_MODE_STREAMING, então funcionaria comprimido — isto é
+        // otimização de tempo de carga, não pré-requisito.
+        noCompress += listOf("bin", "onnx")
+    }
     // Com Kotlin 2.x o Compose Compiler vem do plugin `compose-compiler`
     // (versão casada ao Kotlin); não há mais kotlinCompilerExtensionVersion.
 
@@ -91,6 +100,7 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
 
     testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
 
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.runner)

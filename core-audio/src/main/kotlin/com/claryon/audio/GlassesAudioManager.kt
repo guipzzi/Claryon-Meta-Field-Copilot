@@ -18,11 +18,23 @@ import kotlinx.coroutines.flow.Flow
  */
 interface GlassesAudioManager {
 
-    /** Configura o roteamento SCO. Trata `setCommunicationDevice() == false`. */
-    suspend fun iniciar(): Result<Unit>
+    /**
+     * Configura o roteamento SCO. Trata `setCommunicationDevice() == false`.
+     *
+     * Devolve a [GlassesAudioRoute] — a **prova** de que a rota subiu. É o único
+     * jeito de obter uma, e [microfonePcm] a exige: captura sem roteamento não
+     * compila (ver [GlassesAudioRoute]).
+     */
+    suspend fun iniciar(): Result<GlassesAudioRoute>
 
-    /** Fluxo de PCM mono 16-bit capturado do microfone dos óculos. */
-    fun microfonePcm(): Flow<ShortArray>
+    /**
+     * Fluxo de PCM mono 16-bit capturado do microfone **dos óculos**.
+     *
+     * @param route prova de roteamento devolvida por [iniciar]. A rota é
+     *   reconferida no início da captura: se caiu no intervalo, o fluxo falha em
+     *   vez de gravar pelo microfone do celular.
+     */
+    fun microfonePcm(route: GlassesAudioRoute): Flow<ShortArray>
 
     /** Reproduz PCM no alto-falante open-ear (earcons e TTS). */
     suspend fun reproduzir(pcm: ShortArray, sampleRateHz: Int): Result<Unit>

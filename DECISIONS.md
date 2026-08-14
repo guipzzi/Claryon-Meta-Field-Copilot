@@ -281,3 +281,52 @@ Ordem cronológica inversa (mais recente no topo).
 
 - **`coroutines-core` exposto como `api` em `core-common`.**
   Motivo: os contratos usam `Flow`/`StateFlow`; expor uma vez evita repetir a dependência em cada módulo consumidor.
+
+## Aditivo 02 — escopo congelado (2026-08-14)
+
+- **WhatsApp fora do escopo, em definitivo.** Era ideia de plano, não consta do formulário
+  de inscrição submetido — verificado antes de decidir, portanto não há alteração de escopo
+  submetido a formalizar (item 14.1 do edital). O `MessagingGateway` permanece como contrato;
+  o canal concreto passa a ser a rede tática própria (`core-net`), não plataforma de terceiro.
+
+- **Palavra de ativação: "Claryon". *Slash* segue como nome do copiloto.**
+  Critério acústico: o canal HFP em banda estreita corta em 4 kHz, então a palavra precisa
+  carregar identidade abaixo disso. "Claryon" (plosiva + líquida + duas vogais abertas +
+  nasal final) sobrevive ao corte; "Slash" (/s/ + /ʃ/) tem quase toda a energia acima dele.
+  Alternativa descartada: **"Câmbio"** — acusticamente ótima, mas é vocabulário de protocolo
+  de rádio, o que cria laço acústico (alto-falante *open-ear* a centímetros do microfone
+  reproduz "câmbio" de uma transmissão recebida e acorda o detector) e inverte o significado
+  consolidado (marca *fim* de fala, não início). Nome do produto e gatilho falado são coisas
+  separadas — precedente: Siri / "Hey Siri".
+  A decisão final deve ser reconfirmada pelo protocolo de medição (50 pronúncias × 3 pessoas,
+  filtro passa-baixa de 4 kHz, 30 min de fala natural como material de falso positivo).
+
+- **⚠️ Regra Zero — o toque capacitivo na haste NÃO é gatilho livre para o app.**
+  Fonte: `search_dat_docs` (MCP oficial `meta-wearables`), consultas "touch gesture on glasses
+  temple" e "listen to input events from glasses", 2026-08-14. A doc oficial afirma, em três
+  lugares independentes, que o toque na haste é **gesto de sistema ligado ao ciclo de vida da
+  sessão**: *tap* alterna pausa/retomada de um stream ativo e *tap-and-hold* encerra a sessão.
+  Entrega de eventos de toque ao app por callback existe **apenas no contexto da capacidade de
+  display** ("users can interact with display content through captouch") — que os Ray-Ban Meta
+  não têm e que o projeto omitiu do Gradle de propósito.
+  Consequência: usar a haste como PTT tende a **pausar ou encerrar a sessão de streaming**.
+
+- **✅ V1 — MEDIDO: o toque na haste pausa o stream E a sessão. Descartado como gatilho de PTT.**
+  Teste `PttTriggerTest` (emulador Android 15, mwdat 0.9.0, 2026-08-14), com sessão STARTED e
+  stream STREAMING, disparando `services.captouch.tap()`:
+
+  ```
+  stream STREAMING → PAUSED · sessão STARTED → PAUSED
+  ```
+
+  Um único toque derrubou os dois. Apertar para falar interromperia a própria transmissão —
+  o oposto do PTT. **Gatilho primário passa a ser o long-press do botão de volume**, que
+  ainda ganha em latência: o evento de haste viaja por Bluetooth (100–200 ms estimados),
+  o botão do celular é local. O gatilho fica atrás de `PttTrigger` para que a escolha seja
+  configuração, e o teste virou asserção de regressão — se o SDK mudar, ele falha e a
+  decisão é revisitada.
+
+  Assinatura do mock confirmada por **inspeção do artefato** (`javap` sobre
+  `mwdat-mockdevice-0.9.0.aar`), já que a doc oficial descreve o comportamento mas não
+  publica a API Android: `MockGlassesServices.getCaptouch(): MockCaptouchKit`, com
+  `tap()` e `tapAndHold()`.

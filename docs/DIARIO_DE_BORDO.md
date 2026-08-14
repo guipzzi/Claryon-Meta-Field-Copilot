@@ -438,6 +438,75 @@ os outros existem.
 
 ---
 
+## 2026-08-14 — Fase 1: o app para de mentir
+
+O relatório de status disse "falta montagem, não fundação". O Aditivo 02 foi mais
+duro e mais certo: **o aplicativo era um simulador de si mesmo** — ouvia, entendia,
+e mentia sobre ter agido. Dizia *"Apoio solicitado"* sem enviar e *"Gravação
+iniciada"* sem gravar. A Fase 1 corrige exatamente isso.
+
+**A correção central.** A frase saía de `OperationalResponses.para(intent)` —
+escolhida a partir do *comando*, antes de qualquer ação. Agora:
+
+```
+roteador → Intent → IntentExecutor.execute() → ActionOutcome → utteranceFor(outcome)
+                                               ↑ a ação acontece AQUI
+```
+
+`utteranceFor` aceita **apenas** `ActionOutcome`, e `OperationalResponses` foi
+apagado — não sobrou caminho da intenção para a fala. Há teste por reflexão que
+falha se alguém acrescentar uma sobrecarga que aceite `Intent`, e outro que prova a
+propriedade pelo comportamento: a mesma transcrição, com dois desfechos, produz
+duas respostas (*"Quatro unidades receberam."* × *"Sem rede. Na fila."*).
+
+**Rota de áudio virou pré-condição de tipo.** `microfonePcm` exige
+`GlassesAudioRoute`, e o único jeito de obter uma é rotear de fato. Gravar pelo
+microfone do celular — que capta terceiros e, com PTT, os difundiria para a
+guarnição inteira — **não compila**. A rota é reconferida no início da captura,
+porque HFP cai em campo.
+
+**Três módulos parados entraram no caminho.** `core-sound` (fila de prioridade,
+Modo Tático, earcon em todo caminho de falha), `core-evidence` (gravação real, com
+PCM sendo anexado ao cofre) e `core-sync` (despacho que enfileira honestamente,
+já que `core-net` não existe).
+
+**Modelos no APK de produção.** Whisper e Piper saíram do pacote de testes e foram
+para `assets/models/`. APK de 254 MB, IA local funcionando sem depender do Wi-Fi
+do evento.
+
+### V1 — a medição que mudou o plano
+
+O Aditivo 02 propunha o **toque na haste** como gatilho primário do PTT, com a
+ressalva de confirmar na documentação. A doc oficial dizia que o toque é gesto de
+sistema; medimos para ter certeza. Com sessão STARTED e stream STREAMING,
+disparando `services.captouch.tap()`:
+
+```
+stream STREAMING → PAUSED · sessão STARTED → PAUSED
+```
+
+Um único toque derrubou os dois. **Apertar para falar interromperia a própria
+transmissão.** O gatilho primário passa a ser o long-press do botão de volume —
+que ainda ganha em latência, por ser local em vez de viajar por Bluetooth. O teste
+virou asserção de regressão.
+
+### O que a verificação de caos encontrou
+
+13 cenários adversos no executor, todos verdes: sem rede, cofre falhando, gravação
+dupla, encerrar sem gravar, exceção inesperada, consulta sem base, repetir sem
+histórico, oito comandos concorrentes. A invariante em todos — nunca lança, nunca
+fica em silêncio, nunca afirma o que não fez.
+
+Dois achados honestos que **não** viraram teste verde artificial:
+
+- A queda de rota entre roteamento e captura **não é observável no emulador**: sem
+  SCO, a rota de desenvolvimento e o estado pós-limpeza são o mesmo dispositivo, e
+  o id não muda. Ficou com `Assume` e roda quando houver fone HFP. Um teste que
+  passa sem ter exercitado nada é pior que um teste ausente.
+- O `@Ignore` do JUnit vale **inclusive** para execução por classe — a instrução
+  que existia no `MockDeviceKitStreamTest` ("rodar isolado com `-P...class=`")
+  nunca funcionou. Corrigida.
+
 ## Estado atual (fim de 2026-08-14)
 
 - **Marcos concluídos:** M0, MCP, M1, M2, M3, **M4** (whisper.cpp nativo +

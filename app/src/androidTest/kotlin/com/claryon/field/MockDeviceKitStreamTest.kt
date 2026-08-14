@@ -46,7 +46,8 @@ import org.junit.runner.RunWith
  * processo.
  *
  * Fica fora da suíte para não deixar `connectedAndroidTest` vermelho por um
- * defeito de ferramenta. Rodar sob demanda, isolado:
+ * defeito de ferramenta. **`@Ignore` é filtro do JUnit e vale inclusive para
+ * execução por classe** — para rodar, remova a anotação e execute isolado:
  *
  * ```
  * ./gradlew :app:connectedDebugAndroidTest \
@@ -55,7 +56,7 @@ import org.junit.runner.RunWith
  *
  * Reavaliar a cada atualização do `mwdat-mockdevice`.
  */
-@Ignore("MockDeviceKit aborta (MediaCodec) quando divide processo com outra classe — rodar isolado; ver KDoc")
+@Ignore("Aborta se dividir processo com outra classe (MediaCodec do MDK). Remova a anotação para rodar isolado.")
 @RunWith(AndroidJUnit4::class)
 class MockDeviceKitStreamTest {
 

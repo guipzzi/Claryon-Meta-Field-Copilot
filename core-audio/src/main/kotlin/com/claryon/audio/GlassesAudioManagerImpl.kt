@@ -68,11 +68,31 @@ class GlassesAudioManagerImpl(
     val rotaAtual: String
         get() = synchronized(lock) { routedDevice?.let { deviceLabel(it) } ?: "nenhuma" }
 
-    override suspend fun iniciar(): Result<Unit> = synchronized(lock) {
+    /**
+     * Prova da rota **efetivada** (não da pretendida).
+     *
+     * SCO real sempre passa pelo caminho estrito. Qualquer outro dispositivo só
+     * vira prova pelo caminho de desenvolvimento, que por sua vez exige o flag
+     * — em release, [allowFallbackToDefault] é `false` e a prova falha.
+     */
+    private fun provaDaRotaAtual(): Result<GlassesAudioRoute> =
+        if (audioManager.communicationDevice?.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO) {
+            GlassesAudioRoute.acquire(audioManager)
+        } else {
+            GlassesAudioRoute.acquireParaDesenvolvimento(
+                audioManager,
+                buildDebug = allowFallbackToDefault,
+            )
+        }
+
+    override suspend fun iniciar(): Result<GlassesAudioRoute> = synchronized(lock) {
         if (usuarios > 0) {
-            // Já roteado por outro caminho: só soma um usuário.
-            usuarios++
-            return@synchronized Result.success(Unit)
+            // Já roteado por outro caminho: soma um usuário e reemite a prova.
+            // Só conta o usuário se a prova valer — senão o `liberar()` dele
+            // desequilibraria a contagem e derrubaria a rota de quem captura.
+            val prova = provaDaRotaAtual()
+            if (prova is Result.Success) usuarios++
+            return@synchronized prova
         }
 
         val modoAnterior = audioManager.mode
@@ -106,6 +126,16 @@ class GlassesAudioManagerImpl(
             )
         }
 
+        // A prova é tirada do estado efetivado. Se o sistema aceitou o
+        // setCommunicationDevice mas roteou para outro lugar, é aqui que se
+        // descobre — antes de qualquer captura, não depois.
+        val prova = provaDaRotaAtual()
+        if (prova is Result.Failure) {
+            runCatching { audioManager.clearCommunicationDevice() }
+            audioManager.mode = modoAnterior
+            return@synchronized prova
+        }
+
         previousMode = modoAnterior
         routedDevice = target
         usuarios = 1
@@ -113,13 +143,19 @@ class GlassesAudioManagerImpl(
             TAG,
             "Áudio roteado para ${deviceLabel(target)} (SCO=${target.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO})",
         )
-        Result.success(Unit)
+        prova
     }
 
     // Contrato: o chamador (app) garante RECORD_AUDIO concedido em runtime (o
     // onboarding pede antes de qualquer captura). O lint não enxerga esse fluxo.
     @Suppress("MissingPermission")
-    override fun microfonePcm(): Flow<ShortArray> = flow {
+    override fun microfonePcm(route: GlassesAudioRoute): Flow<ShortArray> = flow {
+        // A prova foi tirada no roteamento; a captura pode começar segundos
+        // depois. Se o HFP caiu no intervalo (óculos dobrados, fone desligado,
+        // ligação entrando), o sistema já escolheu um substituto — o microfone
+        // do celular — e capturar aqui captaria terceiros. Falhar é o certo.
+        if (!audioManager.confereRota(route)) throw RotaDeAudioPerdidaException()
+
         val frameSamples = sampleRateHz / 50 // janelas de 20 ms
         val minBuf = AudioRecord.getMinBufferSize(
             sampleRateHz,
@@ -251,6 +287,17 @@ class GlassesAudioManagerImpl(
  * (-6, o HFP caiu) ou `ERROR_INVALID_OPERATION` (-3, gravação não iniciada).
  * Carrega o código para o mapeamento erro → earcon.
  */
+/**
+ * A rota provada por [GlassesAudioRoute] não é mais a rota ativa no instante da
+ * captura. Não é erro de programação: HFP cai o tempo todo em campo. O
+ * tratamento é earcon de falha e nova tentativa de roteamento — **nunca**
+ * capturar mesmo assim.
+ */
+class RotaDeAudioPerdidaException : IllegalStateException(
+    "A rota de áudio dos óculos caiu entre o roteamento e a captura. " +
+        "Capturar agora gravaria pelo microfone do celular.",
+)
+
 class AudioCaptureException(val codigo: Int) : IllegalStateException(
     "AudioRecord.read retornou $codigo" +
         when (codigo) {

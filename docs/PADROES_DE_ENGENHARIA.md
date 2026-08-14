@@ -56,10 +56,14 @@ Inverter 4 e 5 → captura de voz intermitente. HFP totalmente configurado **ant
 
 ### Ciclo de voz
 ```
-PCM (HFP) → WakeWord → [earcon "ouvi você" IMEDIATO] → VAD fecha janela
-  → SttEngine.transcribe() → IntentRouter → executor → TtsEngine → SoundQueue
+PCM (HFP) → WakeWord → VAD fecha janela → [earcon "ouvi você" IMEDIATO]
+  → SttEngine.transcribe() → IntentRouter → IntentExecutor.execute()
+  → utteranceFor(ActionOutcome) → SoundQueue (earcon e/ou TTS)
 ```
-O earcon dispara quando o **VAD fecha a janela**, não quando o STT termina.
+Duas ordens que não podem ser invertidas:
+1. O earcon dispara quando o **VAD fecha a janela**, não quando o STT termina.
+2. A **ação acontece antes** de existir qualquer frase — `utteranceFor` recebe o
+   resultado, nunca a intenção. Ver "Honestidade" adiante.
 
 ### Encerramento
 ```
@@ -79,7 +83,8 @@ core-voice/     WakeWord, VAD, STT, TTS (interfaces + impls)
 core-agent/     IntentRouter determinístico, políticas de ação
 core-sound/     Earcons, fila de prioridade, protocolo de laconicidade
 core-evidence/  Cofre cifrado, hash chain, cadeia de custódia
-core-sync/      Supabase, MessagingGateway, WorkManager
+core-sync/      Fila offline durável, Supabase, WorkManager
+core-net/       Transporte da rede tática: PTT ao vivo, alertas, posições  ← a construir
 core-common/    Result types, logging, feature flags
 ```
 
@@ -114,6 +119,9 @@ Todo acesso ao DAT passa por `GlassesFacade` em `core-glasses` — quando a 0.9 
 | Tentar reviver sessão encerrada | *Cascading stop* — criar sessão nova |
 | `getThermalHeadroom()` = `NaN` como 0 | `NaN` = sem informação; manter só o teto de taxa |
 | Testar áudio no MDK | **MDK não simula áudio.** Use fone Bluetooth com HFP |
+| Toque na haste como gatilho livre | É **gesto de sistema**: tap pausa/retoma o stream, tap-and-hold encerra a sessão. Callback de toque só existe com a capacidade de display, que os Ray-Ban não têm. Ver `DECISIONS.md` |
+| Modelo só no pacote de teste | No aparelho da organização a IA local não existiria. Empacotar em `assets/models/` |
+| Duas capturas simultâneas | Dois `AudioRecord` na mesma fonte: a segunda falha ou rouba o fluxo da primeira. Fonte única com fan-out |
 | PAT commitado | `local.properties` (já no `.gitignore`) ou `GITHUB_TOKEN` |
 
 ---
@@ -125,9 +133,75 @@ Todo acesso ao DAT passa por `GlassesFacade` em `core-glasses` — quando a 0.9 
 - ❌ Enviar áudio, transcrição ou frame para serviço externo no caminho crítico
 - ❌ Credencial em arquivo versionado
 - ❌ Evidência fora de `EncryptedFile` + Android Keystore
-- ❌ LLM no caminho crítico de decisão operacional (latência imprevisível, não auditável)
+- ❌ **LLM escolhendo ação.** O modelo de linguagem pode **propor o preenchimento de
+  campos** de uma intenção previamente definida, e só isso. Ele **nunca escolhe qual ação
+  executar**, nunca produz texto que vá direto ao TTS, e sua saída é sempre validada contra
+  esquema estrito. Falha de validação → pedido de repetição, **nunca ação por adivinhação**.
+  A escolha da ação é sempre do roteador determinístico e auditável
 
 ---
+
+## Honestidade — garantida por assinatura, não por disciplina
+
+**Toda resposta falada deriva do resultado da ação, nunca do comando recebido.**
+Não existe caminho no código em que a frase seja escolhida antes de a ação ser executada.
+
+```
+roteador → Intent → IntentExecutor.execute() → ActionOutcome → utteranceFor(outcome)
+                                               ↑ a ação acontece AQUI
+```
+
+- `utteranceFor` aceita **apenas** `ActionOutcome`. **Nunca** acrescentar sobrecarga que
+  aceite `Intent` — há teste que falha se alguém acrescentar
+- `IntentExecutor` nunca lança: toda falha vira `ActionOutcome.Falhou` com causa tipada
+- Entregue ≠ enfileirado. `Despacho.Enviada | Enfileirada` é escolha do compilador, não do
+  programador. Sem rede, o agente ouve *"Sem rede. Na fila."* — jamais "apoio solicitado"
+- Contagem desconhecida não vira zero nem número inventado: `ApoioTransmitido(null)` fala
+  *"Apoio enviado."*, e só com contagem real fala *"Quatro unidades receberam."*
+- Capacidade que não existe devolve falha honesta. Consulta a base oficial está fora do
+  escopo → `CONSULTA_INDISPONIVEL`, nunca um "sem restrição" inventado
+
+**Falha nunca é silêncio.** Todo caminho de erro tem earcon próprio. Num sistema sem
+display, silêncio é indistinguível de aplicativo morto.
+
+## Rota de áudio — pré-condição de tipo
+
+Capturar exige `GlassesAudioRoute`, e o único jeito de obter uma é rotear de fato
+(`TYPE_BLUETOOTH_SCO` ativo). **Gravar pelo microfone do celular não compila.**
+
+- O microfone do celular é omnidirecional e capta terceiros; o beamforming dos óculos isola
+  quem os veste. Com PTT, gravar pela fonte errada **difunde** a fala do interlocutor para a
+  guarnição inteira — a violação deixa de ser local
+- A rota é reconferida no início da captura: HFP cai em campo (óculos dobrados, fone
+  desligado, ligação entrando), e o sistema escolhe um substituto silenciosamente
+- Reprodução de PTT sempre por **SCO, nunca A2DP** — o A2DP acrescenta 100–200 ms de buffer
+
+## Rádio tático (C1) — regras duras
+
+- **Transmissão é sempre push-to-talk explícito.** Nunca por palavra de ativação: um falso
+  positivo difundiria para a guarnição inteira
+- **Áudio ao vivo, em quadros Opus de 20 ms, enquanto o agente fala.** Nunca gravar arquivo
+  inteiro e depois enviar. O Storage é arquivamento assíncrono, jamais o caminho ao vivo
+- **A captura não bloqueia esperando a rede.** `AudioRecord` começa no instante do toque;
+  concessão de canal e estado do socket correm em paralelo. Rede lenta atrasa a entrega,
+  **nunca perde fala**
+- **Pré-roll:** buffer circular de 600 ms, **só em RAM, nunca persistido**. Ao pressionar, um
+  VAD retroativo localiza o início real da fala e transmite a partir dali — nunca de um recuo
+  fixo. Se o PTT não for pressionado, o conteúdo se perde por definição
+- **Detector de palavra de ativação desligado** enquanto qualquer áudio sai pelos
+  alto-falantes e enquanto o PTT está ativo. Alto-falante *open-ear* a centímetros do
+  microfone: sem isso, o produto conversa consigo mesmo
+
+## Localização e mapa (C2/C5)
+
+- Assinatura do canal de posições **só enquanto a tela do mapa está visível**. Difundir
+  posição de todos para todos o turno inteiro drena bateria para uma tela fechada 95% do tempo
+- Marcador esmaece após 2 min sem atualização. **Mostrar posição velha como atual é pior que
+  não mostrar** — é requisito de segurança, não polimento
+- **Reciprocidade:** dentro do talk group, quem vê é visto. Não existe modo de observar sem
+  ser observado. Assimetria de visibilidade entre pares é vigilância; simetria é coordenação
+- A consulta por voz devolve **distância, rumo e estado** — nunca coordenadas brutas. O
+  aparelho de um agente jamais recebe a posição de outro
 
 ## Design de áudio — regras duras
 
@@ -164,6 +238,9 @@ Todo acesso ao DAT passa por `GlassesFacade` em `core-glasses` — quando a 0.9 
 ## Fluxo de trabalho
 
 - **Um marco por sessão.** Ao concluir, apresentar o critério de aceite atendido e parar para revisão humana
+- **Antes de declarar marco concluído, ler o código procurando cenários de falha concretos.**
+  *Teste verde prova que o caminho feliz funciona; não prova que os outros caminhos existem.*
+  Foi assim que 21 defeitos apareceram em código já revisado e com suíte verde
 - `DECISIONS.md`: uma linha por decisão não óbvia — data, alternativa descartada, motivo
 - Commits pequenos, mensagem explicando o *porquê*
 - `README.md` com setup reproduzível do zero, incluindo NDK e download de modelos

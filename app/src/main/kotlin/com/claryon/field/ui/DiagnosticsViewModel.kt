@@ -4,25 +4,43 @@ import android.app.Application
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.claryon.agent.ActionOutcome
 import com.claryon.agent.DeterministicIntentRouter
-import com.claryon.agent.OperationalResponses
+import com.claryon.agent.FalhaOperacional
+import com.claryon.agent.ModoOperacao
+import com.claryon.agent.Utterance
+import com.claryon.agent.utteranceFor
 import com.claryon.audio.GlassesAudioManagerImpl
+import com.claryon.audio.RotaDeAudioPerdidaException
 import com.claryon.common.Result
+import com.claryon.evidence.EncryptedEvidenceVault
 import com.claryon.field.BuildConfig
+import com.claryon.field.agent.ClaryonIntentExecutor
+import com.claryon.field.agent.Identidade
 import com.claryon.glasses.DatGlassesFacade
 import com.claryon.glasses.MockDeviceController
+import com.claryon.field.voice.Modelos
 import com.claryon.field.voice.VoiceCycle
+import com.claryon.field.voice.VoiceOutput
+import com.claryon.sync.SemTransporteGateway
+import com.claryon.sync.SyncManager
+import com.claryon.sync.TacticalDispatcher
 import com.claryon.voice.AndroidOnDeviceStt
 import com.claryon.voice.AndroidTts
 import com.claryon.voice.EnergyVoiceActivityDetector
-import com.claryon.voice.WhisperCppStt
+import com.claryon.voice.PcmAudio
+import com.claryon.voice.PiperTts
+import com.claryon.voice.TtsEngine
 import java.io.File
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
@@ -83,20 +101,22 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
         // Dispatchers.Default: o acúmulo amostra a amostra e a reprodução não
         // podem rodar na Main (viewModelScope é Main.immediate por padrão).
         viewModelScope.launch(Dispatchers.Default) {
-            when (val r = audio.iniciar()) {
+            // iniciar() falhou ⇒ nenhum usuário foi contado ⇒ NÃO chamar liberar()
+            // (chamada extra desequilibraria a contagem e derrubaria a rota de
+            // quem estivesse capturando em paralelo).
+            val prova = when (val r = audio.iniciar()) {
                 is Result.Failure -> {
                     _audioStatus.value = "sem rota: ${r.error.message}"
-                    audio.liberar()
                     return@launch
                 }
-                is Result.Success -> Unit
+                is Result.Success -> r.value
             }
             val rota = audio.rotaAtual // capturar ANTES de liberar() (que zera a rota)
             try {
                 _audioStatus.value = "gravando 3 s… (rota $rota)"
                 val buffer = ArrayList<Short>()
                 withTimeoutOrNull(3_000) {
-                    audio.microfonePcm().collect { chunk -> chunk.forEach { buffer.add(it) } }
+                    audio.microfonePcm(prova).collect { chunk -> chunk.forEach { buffer.add(it) } }
                 }
                 val pcm = buffer.toShortArray()
                 _audioStatus.value = "reproduzindo ${pcm.size} amostras… (rota $rota)"
@@ -114,11 +134,87 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
     // ── Ciclo de voz — cérebro + saída (M4) ────────────────────────────────────
 
     private val router = DeterministicIntentRouter()
-    private val tts = AndroidTts(app)
     private val stt = AndroidOnDeviceStt(app)
+
+    /** Fallback do TTS: sempre disponível, voz do sistema. */
+    private val tts = AndroidTts(app)
+
+    /**
+     * TTS neural (Piper) resolvido sob demanda — a primeira chamada copia o
+     * `espeak-ng-data` e carrega o modelo ONNX, o que leva alguns segundos e não
+     * pode acontecer no construtor do ViewModel.
+     */
+    private var piper: PiperTts? = null
+    private var piperResolvido = false
+    private val ttsMutex = Mutex()
+
+    private suspend fun sintetizar(texto: String): PcmAudio? {
+        val engine: TtsEngine = ttsMutex.withLock {
+            if (!piperResolvido) {
+                piper = Modelos.piper(getApplication())
+                piperResolvido = true
+                Log.i(TAG, "TTS = ${if (piper != null) "Piper (neural, on-device)" else "AndroidTts (fallback)"}")
+            }
+            piper ?: tts
+        }
+        return (engine.synthesize(texto) as? Result.Success)?.value
+    }
 
     private val _commandStatus = MutableStateFlow("—")
     val commandStatus: StateFlow<String> = _commandStatus.asStateFlow()
+
+    // ── Executor de intenções + saída sonora ──────────────────────────────────
+    // É aqui que core-evidence, core-sync e core-sound — prontos e testados, mas
+    // até agora nunca importados pelo código de produção — entram no caminho.
+
+    private val cofre = EncryptedEvidenceVault(app)
+
+    /**
+     * Sem `core-net`, o despacho **sempre** cai na fila durável e o agente ouve
+     * "Sem rede. Na fila." — que é a verdade. Quando o transporte existir, troca-se
+     * [SemTransporteGateway] aqui e nada mais muda.
+     */
+    private val despachante = TacticalDispatcher(
+        outbox = SyncManager.outbox(app),
+        gateway = SemTransporteGateway,
+        novoId = { m -> "${m.agentId}-${System.currentTimeMillis()}" },
+        agora = { System.currentTimeMillis() },
+    )
+
+    private val saida = VoiceOutput(
+        scope = viewModelScope,
+        sintetizar = { texto -> sintetizar(texto) },
+        reproduzir = { pcm, sr -> reproduzirComRota(pcm, sr) },
+    )
+
+    private val executor = ClaryonIntentExecutor(
+        cofre = cofre,
+        despachante = despachante,
+        // Identidade de demonstração; no produto vem do onboarding/credencial.
+        identidade = Identidade(
+            agentId = "007",
+            unitId = "GTA-3",
+            vehiclePrefix = "GTA-3",
+            destinoPadrao = "COPOM",
+        ),
+        agora = { System.currentTimeMillis() },
+        // Modo Ocorrência liga o Modo Tático da fila: informativo é suprimido.
+        aoTrocarModo = { modo -> saida.modoTatico(modo == ModoOperacao.OCORRENCIA) },
+    )
+
+    /** Reprodução com rota garantida — sobe o HFP, toca, e devolve a rota. */
+    private suspend fun reproduzirComRota(pcm: ShortArray, sampleRateHz: Int) {
+        when (audio.iniciar()) {
+            is Result.Success -> try {
+                audio.reproduzir(pcm, sampleRateHz)
+            } finally {
+                audio.liberar()
+            }
+            // Falha nunca é silêncio — mas aqui o canal de aviso É o som, então
+            // só resta registrar. O status da UI já mostra a causa.
+            is Result.Failure -> Log.w(TAG, "sem rota de áudio para reproduzir")
+        }
+    }
 
     /** Comando por TEXTO (bypassa o STT): roteador → resposta lacônica → TTS. */
     fun runCommand(text: String) {
@@ -162,23 +258,92 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Roteia o texto e fala a resposta pelo pipeline HFP. */
+    /**
+     * Roteia o texto, **executa a ação**, e só então emite a resposta.
+     *
+     * A ordem é a correção central do produto: antes, a frase vinha de
+     * `OperationalResponses.para(intent)` — escolhida a partir do comando e dita
+     * sem que nada tivesse acontecido.
+     */
     private suspend fun processar(text: String) {
         val intent = router.route(text)
-        val resposta = OperationalResponses.para(intent)
-        val nome = intent::class.simpleName
-        _commandStatus.value = "\"$text\" → $nome → \"$resposta\""
-        when (val syn = tts.synthesize(resposta)) {
-            is Result.Success -> {
-                if (audio.iniciar() is Result.Success) {
-                    audio.reproduzir(syn.value.samples, syn.value.sampleRateHz)
-                    audio.liberar()
-                }
-                _commandStatus.value = "\"$text\" → $nome → \"$resposta\" (falado)"
+        val outcome = executor.execute(intent)
+        val utterance = utteranceFor(outcome)
+        saida.emitir(utterance)
+        aoResultado(outcome)
+        _commandStatus.value = descrever(text, intent::class.simpleName, outcome, utterance)
+    }
+
+    // ── C4: gravação de evidência de verdade ──────────────────────────────────
+
+    private var gravacaoJob: Job? = null
+
+    /**
+     * Efeitos que acompanham um resultado. Abrir o cofre não basta: sem alguém
+     * alimentando [ClaryonIntentExecutor.anexarEvidencia], a "gravação" seria um
+     * manifesto vazio — o mesmo tipo de mentira que este marco veio corrigir.
+     */
+    private fun aoResultado(outcome: ActionOutcome) {
+        when (outcome) {
+            is ActionOutcome.GravacaoIniciada -> iniciarCapturaDeEvidencia()
+            is ActionOutcome.GravacaoEncerrada -> {
+                gravacaoJob?.cancel()
+                gravacaoJob = null
             }
-            is Result.Failure ->
-                _commandStatus.value = "$nome → \"$resposta\" (TTS: ${syn.error.message})"
+            else -> Unit
         }
+    }
+
+    private fun iniciarCapturaDeEvidencia() {
+        gravacaoJob?.cancel()
+        gravacaoJob = viewModelScope.launch(Dispatchers.Default) {
+            val prova = when (val r = audio.iniciar()) {
+                is Result.Success -> r.value
+                is Result.Failure -> {
+                    saida.emitir(utteranceFor(ActionOutcome.Falhou(FalhaOperacional.SEM_ROTA_DE_AUDIO)))
+                    return@launch
+                }
+            }
+            try {
+                audio.microfonePcm(prova).collect { chunk ->
+                    executor.anexarEvidencia(chunk.paraBytesLE())
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Evidência interrompida no meio é grave: o manifesto parcial
+                // sobrevive (o cofre grava a cada segmento), mas o agente tem de
+                // saber que parou de gravar.
+                Log.e(TAG, "captura de evidência interrompida", e)
+                saida.emitir(utteranceFor(ActionOutcome.Falhou(FalhaOperacional.COFRE_INDISPONIVEL)))
+            } finally {
+                audio.liberar()
+            }
+        }
+    }
+
+    /** PCM 16-bit para bytes little-endian, como o cofre armazena. */
+    private fun ShortArray.paraBytesLE(): ByteArray {
+        val out = ByteArray(size * 2)
+        for (i in indices) {
+            out[i * 2] = (this[i].toInt() and 0xFF).toByte()
+            out[i * 2 + 1] = ((this[i].toInt() shr 8) and 0xFF).toByte()
+        }
+        return out
+    }
+
+    private fun descrever(
+        entrada: String,
+        intent: String?,
+        outcome: ActionOutcome,
+        utterance: Utterance,
+    ): String {
+        val saidaTexto = when (utterance) {
+            is Utterance.Falar -> "\"${utterance.texto}\""
+            is Utterance.Sinalizar -> "[${utterance.earcon.name}]"
+            is Utterance.SinalizarEFalar -> "[${utterance.earcon.name}] + \"${utterance.texto}\""
+        }
+        return "\"$entrada\" → $intent → ${outcome::class.simpleName} → $saidaTexto"
     }
 
     /**
@@ -191,27 +356,42 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
         // modelo de ~75 MB. Na Main isso congela a UI e arrisca ANR justamente
         // na janela em que a meta é responder em ≤ 2,0 s.
         viewModelScope.launch(Dispatchers.Default) {
-            when (val rota = audio.iniciar()) {
-                is Result.Failure -> {
-                    _commandStatus.value = "ciclo: sem rota de áudio (${rota.error.message})"
-                    audio.liberar(); return@launch
-                }
-                is Result.Success -> Unit
+            // Duas capturas simultâneas abririam dois AudioRecord na mesma fonte
+            // de comunicação — a segunda falha ao inicializar ou rouba o fluxo da
+            // primeira, e o que se perde é evidência. O caminho definitivo é uma
+            // fonte única com fan-out (evidência + STT + PTT bebendo do mesmo
+            // AudioRecord); é peça do C1 e será construída com o transporte.
+            // Até lá, o acesso é exclusivo e a recusa é audível.
+            if (gravacaoJob?.isActive == true) {
+                saida.emitir(utteranceFor(ActionOutcome.Falhou(FalhaOperacional.GRAVACAO_JA_ATIVA)))
+                _commandStatus.value = "ciclo: gravação de evidência em curso — encerre antes"
+                return@launch
             }
-            val modelo = File(getApplication<Application>().filesDir, "ggml-tiny.bin")
-            val whisper = if (modelo.exists()) WhisperCppStt(modelo.path) else null
-            _commandStatus.value = "ciclo: ouvindo… (STT=${if (whisper != null) "whisper" else "indisponível"})"
+            val prova = when (val rota = audio.iniciar()) {
+                is Result.Failure -> {
+                    // Falha nunca é silêncio: tenta o earcon mesmo assim (a
+                    // reprodução reergue a rota por conta própria; se o áudio
+                    // estiver inteiramente fora, resta o status na tela).
+                    saida.emitir(utteranceFor(ActionOutcome.Falhou(FalhaOperacional.SEM_ROTA_DE_AUDIO)))
+                    _commandStatus.value = "ciclo: sem rota de áudio (${rota.error.message})"
+                    return@launch
+                }
+                is Result.Success -> rota.value
+            }
+            // Assets do APK primeiro, filesDir depois — ver [Modelos].
+            val whisper = Modelos.whisper(getApplication())
+            val origem = Modelos.fonteDoWhisper(getApplication())?.toString() ?: "indisponível"
+            _commandStatus.value = "ciclo: ouvindo… (STT=$origem)"
 
             val cycle = VoiceCycle(
-                pcmInput = { audio.microfonePcm() },
+                pcmInput = { audio.microfonePcm(prova) },
                 vad = EnergyVoiceActivityDetector(sampleRateHz = 16_000),
                 sttFn = { pcm, sr ->
                     (whisper?.transcribe(pcm, sr) as? Result.Success)?.value?.text.orEmpty()
                 },
                 router = router,
-                ttsFn = { texto -> (tts.synthesize(texto) as? Result.Success)?.value },
-                playFn = { audio.reproduzir(it.samples, it.sampleRateHz) },
-                onOuviVoce = { _commandStatus.value = "ciclo: ouvi você (earcon)" },
+                executor = executor,
+                emitir = { utterance -> saida.emitir(utterance) },
                 sampleRateHz = 16_000,
             )
             // Timeout e exceção são coisas DIFERENTES e não podem virar a mesma
@@ -231,10 +411,27 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
                 whisper?.release()
             }
             _commandStatus.value = when (resultado) {
-                is Resultado.Erro -> "ciclo: FALHA — ${resultado.causa.message ?: resultado.causa::class.simpleName}"
+                is Resultado.Erro -> {
+                    // Todo caminho de erro tem earcon. A rota caída tem causa
+                    // própria: é o cenário operacional mais comum (óculos
+                    // dobrados, fone desligado) e o agente precisa distinguir.
+                    val falha = if (resultado.causa is RotaDeAudioPerdidaException) {
+                        FalhaOperacional.SEM_ROTA_DE_AUDIO
+                    } else {
+                        FalhaOperacional.INTERNA
+                    }
+                    saida.emitir(utteranceFor(ActionOutcome.Falhou(falha)))
+                    "ciclo: FALHA — ${resultado.causa.message ?: resultado.causa::class.simpleName}"
+                }
                 is Resultado.Ok -> resultado.valor?.let { r ->
-                    "\"${r.transcricao}\" → ${r.intent::class.simpleName} → \"${r.resposta}\""
-                } ?: "ciclo: sem fala detectada (8 s)"
+                    aoResultado(r.outcome)
+                    descrever(r.transcricao, r.intent::class.simpleName, r.outcome, r.utterance)
+                } ?: run {
+                    // Timeout sem fala não é erro, mas também não pode ser mudo:
+                    // o agente que apertou e falou precisa saber que não pegou.
+                    saida.emitir(utteranceFor(ActionOutcome.NaoEntendi))
+                    "ciclo: sem fala detectada (8 s)"
+                }
             }
         }
     }
@@ -244,11 +441,19 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
         // Sem parar a sessão, o stream dos óculos segue transmitindo por
         // Bluetooth depois que a tela morre, sem nenhum indicador — e um novo
         // DatGlassesFacade tentaria createSession com a anterior ainda viva.
+        gravacaoJob?.cancel()
         facade.stopCameraStream()
         facade.stopSession()
         audio.liberarTudo()
         tts.liberar()
+        saida.limpar()
+        // Piper segura um runtime ONNX nativo; sem release, o modelo vaza.
+        piper?.let { p -> kotlinx.coroutines.runBlocking { p.release() } }
         mock?.disable()
+        // A gravação não é finalizada aqui de propósito: `onCleared` não é
+        // suspensa e o `viewModelScope` já está morrendo. Não há perda — o cofre
+        // grava manifesto parcial a cada segmento, então o que ficou no disco
+        // continua com cadeia de custódia demonstrável e verificável.
         super.onCleared()
     }
 

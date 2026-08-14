@@ -7,8 +7,16 @@ import com.claryon.common.Result
  * O TTS fala conforme o caso; nunca diz "enviado" quando só enfileirou.
  */
 sealed interface Despacho {
-    /** Entregue ao destino agora. */
-    data class Enviada(val id: String) : Despacho
+    /**
+     * Entregue ao destino agora.
+     *
+     * @param destinatarios quantas unidades receberam, quando o servidor informa.
+     *   **`null` enquanto o transporte não devolve a contagem** — é o estado
+     *   atual, e propagar o desconhecimento é o ponto: quem consome precisa
+     *   escolher entre "Apoio enviado." e "Quatro unidades receberam.", e não
+     *   pode inventar a segunda.
+     */
+    data class Enviada(val id: String, val destinatarios: Int? = null) : Despacho
     /** Sem rede (ou falha momentânea): guardado na fila durável para subir depois. */
     data object Enfileirada : Despacho
 }
