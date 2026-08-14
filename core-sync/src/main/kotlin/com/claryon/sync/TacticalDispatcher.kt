@@ -14,7 +14,7 @@ sealed interface Despacho {
 }
 
 /**
- * Ponto único de saída de mensagem tática. Regra de honestidade (CLAUDE.md):
+ * Ponto único de saída de mensagem tática. Regra de honestidade (docs/PADROES_DE_ENGENHARIA.md):
  * *"Sem rede, a mensagem entra na fila e o TTS confirma 'apoio na fila' — NÃO
  * mente dizendo que enviou."*
  *

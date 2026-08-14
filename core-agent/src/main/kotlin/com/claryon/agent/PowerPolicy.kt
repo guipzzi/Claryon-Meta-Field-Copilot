@@ -4,7 +4,7 @@ package com.claryon.agent
  * Que recursos ficam ligados em cada [ModoOperacao]. Política **pura** — o
  * serviço apenas obedece, e o teste prova a economia sem precisar de bateria.
  *
- * O princípio (CLAUDE.md): *gatilho, nunca loop*. A cascata é
+ * O princípio (docs/PADROES_DE_ENGENHARIA.md): *gatilho, nunca loop*. A cascata é
  * wake word (barata, sempre que houver HFP) → VAD → STT (caro, quase nunca).
  */
 data class PerfilDeEnergia(

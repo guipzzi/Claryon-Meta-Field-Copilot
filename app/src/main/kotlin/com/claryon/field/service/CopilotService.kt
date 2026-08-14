@@ -25,7 +25,7 @@ import kotlinx.coroutines.flow.StateFlow
  * Serviço de primeiro plano do pipeline contínuo (sessão com os óculos, captura
  * HFP e — em ocorrência — câmera).
  *
- * Armadilhas endereçadas (CLAUDE.md):
+ * Armadilhas endereçadas (docs/PADROES_DE_ENGENHARIA.md):
  *  - `foregroundServiceType` declarado **no manifest e em `startForeground()`**
  *    (Android 14+ derruba o serviço se divergirem);
  *  - o tipo é **derivado do modo** por [PowerPolicy.tiposDeServico] — em Standby

@@ -36,3 +36,7 @@ app/src/androidTest/assets/models/
 
 # AAR pré-compilado do sherpa-onnx (baixado no setup, ver README)
 core-voice/libs/*.aar
+
+# Arquivo de contexto da ferramenta de desenvolvimento (local, não versionado).
+# O conteúdo canônico vive em docs/PADROES_DE_ENGENHARIA.md.
+CLAUDE.md

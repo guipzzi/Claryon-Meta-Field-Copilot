@@ -14,7 +14,7 @@ import kotlin.coroutines.resumeWithException
  * roda offline, sem rede no caminho crítico). Recebe um frame já decodificado
  * (Bitmap), lê o texto e devolve **apenas** a placa validada por [PlacaValidator].
  *
- * Política de privacidade e energia (CLAUDE.md):
+ * Política de privacidade e energia (docs/PADROES_DE_ENGENHARIA.md):
  *  - o frame é insumo efêmero: **não** é persistido — só o texto validado
  *    sobrevive à inferência (minimização);
  *  - dispara por intenção explícita, nunca em laço; o chamador controla a taxa.

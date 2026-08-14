@@ -1,4 +1,9 @@
-# CLAUDE.md — Claryon Field
+# Padrões de Engenharia — Claryon Field
+
+Regras duras do projeto: o que não pode ser invertido, o que é proibido, e as
+armadilhas que já custaram tempo. **Leitura obrigatória antes de tocar no
+código.** Onde este documento e a doc oficial do DAT divergirem, a doc oficial
+vence.
 
 App companion **Android/Kotlin** para óculos **Ray-Ban Meta** usando o **Meta Wearables Device Access Toolkit (DAT)**.
 Copiloto de voz para agentes de segurança pública: o usuário fala, o app entende localmente, age, e responde por áudio no ouvido. Mãos livres, olhos no ambiente.

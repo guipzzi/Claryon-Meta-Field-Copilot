@@ -52,7 +52,7 @@ object SyncManager {
 
     /**
      * Drenagem **pesada** (evidência/modelos): só em condições folgadas —
-     * carregando, rede não-tarifada, bateria ok (política de energia do CLAUDE.md).
+     * carregando, rede não-tarifada, bateria ok (política de energia do PADROES_DE_ENGENHARIA.md).
      */
     fun agendarDrenagemPesada(context: Context) {
         val req = OneTimeWorkRequestBuilder<OutboxUploadWorker>()

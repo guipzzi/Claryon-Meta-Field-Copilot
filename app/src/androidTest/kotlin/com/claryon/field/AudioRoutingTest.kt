@@ -12,7 +12,7 @@ import org.junit.runner.RunWith
 
 /**
  * M3 — verifica o **tratamento gracioso** do roteamento de áudio (a exigência do
- * edital/CLAUDE.md: `setCommunicationDevice==false` e lista vazia nunca são falha
+ * edital/PADROES_DE_ENGENHARIA.md: `setCommunicationDevice==false` e lista vazia nunca são falha
  * silenciosa). Roda no emulador, que não tem dispositivo Bluetooth SCO.
  *
  * O ciclo de eco completo (falar → gravar → reproduzir) exige um **fone

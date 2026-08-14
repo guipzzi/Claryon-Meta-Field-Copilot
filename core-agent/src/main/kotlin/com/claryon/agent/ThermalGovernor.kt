@@ -3,7 +3,7 @@ package com.claryon.agent
 /**
  * Teto de taxa em função do *thermal headroom* do aparelho.
  *
- * Armadilha que este objeto existe para evitar (CLAUDE.md): **`NaN` não é 0**.
+ * Armadilha que este objeto existe para evitar (docs/PADROES_DE_ENGENHARIA.md): **`NaN` não é 0**.
  * `getThermalHeadroom()` devolve `NaN` quando o sistema não tem informação
  * (chamadas muito próximas, aparelho sem sensor). Tratar `NaN` como 0 faria o
  * app se achar frio e acelerar exatamente quando não sabe nada — por isso, sem

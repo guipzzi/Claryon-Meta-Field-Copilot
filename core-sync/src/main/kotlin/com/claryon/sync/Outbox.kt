@@ -19,7 +19,7 @@ data class PendingItem(val seq: Long, val item: OutboxItem)
 /**
  * Fila de saída **durável** — sobrevive à morte do processo (é o ponto da
  * operação offline). FIFO por [PendingItem.seq]. Política de honestidade
- * (CLAUDE.md): sem rede a mensagem **entra na fila** e o TTS confirma "na fila";
+ * (docs/PADROES_DE_ENGENHARIA.md): sem rede a mensagem **entra na fila** e o TTS confirma "na fila";
  * nunca se diz que enviou.
  */
 interface Outbox {

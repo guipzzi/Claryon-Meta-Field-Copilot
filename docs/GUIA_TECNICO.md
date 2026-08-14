@@ -1,5 +1,4 @@
-# CLARYON FIELD — Guia Técnico de Construção
-## Briefing de engenharia para agente de código (Claude Code)
+# Claryon Field — Guia Técnico de Construção
 
 **Complemento técnico do Plano de Negócios — Programa AI Glasses Brasil 2026**
 **Alvo:** app companion Android/Kotlin + Meta Wearables Device Access Toolkit (DAT)
@@ -9,20 +8,23 @@
 
 ## Como usar este documento
 
-Este guia é escrito **para um agente de código**, não para leitura humana linear. Ele define: o que construir, em que ordem, com quais critérios de aceite, e — mais importante — **o que o agente não deve fazer sem confirmação**.
+Este guia define **o que construir, em que ordem e com quais critérios de aceite**
+— e, tão importante quanto, o que não deve ser feito sem confirmação. É a
+referência de engenharia do projeto; as regras do dia a dia estão condensadas em
+[`PADROES_DE_ENGENHARIA.md`](PADROES_DE_ENGENHARIA.md).
 
-Ordem de uso recomendada:
+Ordem recomendada:
 
-1. Copie o **Apêndice A** para `CLAUDE.md` na raiz do repositório (arquivo separado já entregue). É ele que será lido em toda sessão.
-2. Instale o plugin e o MCP do DAT (§2) **antes de qualquer linha de código**.
-3. Execute os marcos M0 → M8 (§6) em ordem. Cada marco tem um critério de aceite verificável.
-4. Mantenha `DECISIONS.md` atualizado (§9).
+1. Ler [`PADROES_DE_ENGENHARIA.md`](PADROES_DE_ENGENHARIA.md) — as regras duras.
+2. Configurar o MCP de documentação viva do DAT (§2) **antes de qualquer linha de código**.
+3. Executar os marcos M0 → M8 (§6) em ordem, cada um com critério de aceite verificável.
+4. Manter [`DECISIONS.md`](../DECISIONS.md) atualizado (§9).
 
 ---
 
-# 1. Contexto que o agente precisa reter
+# 1. Contexto do produto
 
-**O produto.** Copiloto de voz para agentes de segurança pública usando Ray-Ban Meta (sem display). O policial fala, o app entende localmente, age (pedir apoio no WhatsApp / gravar evidência / consultar placa) e responde por áudio no ouvido. Mãos livres, olhos no ambiente.
+**O produto.** Copiloto de voz para agentes de segurança pública usando Ray-Ban Meta (sem display). O policial fala, o app entende localmente, age (pedir apoio pelo canal tático / gravar evidência / consultar placa) e responde por áudio no ouvido. Mãos livres, olhos no ambiente.
 
 **As cinco restrições que definem toda decisão técnica:**
 
@@ -40,17 +42,18 @@ Ordem de uso recomendada:
 
 > ⛔ **REGRA ZERO.** O DAT está em *developer preview*, é versionado e mudou depois do corte de treinamento de qualquer modelo. **Nenhuma assinatura de API do DAT deve ser escrita de memória.** Toda vez que o agente for tocar em `Wearables`, `DeviceSession`, `Stream`, `StreamConfiguration`, `MockDeviceKit` ou qualquer símbolo do SDK, ele consulta a fonte primeiro.
 
-Configure os três canais antes de codar:
+Configure os canais de consulta antes de codar:
 
 | Canal | Endereço | Para quê |
 |---|---|---|
-| **Plugin Claude Code** | Repo `facebook/meta-wearables-dat-android` como marketplace de plugin — confira o comando exato em `wearables.developer.meta.com/docs/develop/dat/ai-assisted-claude-code/` | Skills nativas: APIs, streaming, MockDeviceKit, ciclo de sessão, permissões, debugging |
-| **MCP de docs vivas** | `https://mcp.developer.meta.com/wearables` — ferramenta `search_dat_docs` | Consulta versionada em tempo real. **Este é o antídoto contra alucinação de API.** |
-| **Referência estática** | `https://wearables.developer.meta.com/llms.txt?full=true` | API reference completa em formato para LLM |
+| **MCP de docs vivas** | `https://mcp.developer.meta.com/wearables` — ferramenta `search_dat_docs` | Consulta versionada em tempo real. **É o antídoto contra API inventada.** |
+| **Referência estática** | `https://wearables.developer.meta.com/llms.txt?full=true` | API reference completa, em texto |
+| **Samples oficiais** | `facebook/meta-wearables-dat-android` | Código real vale mais que documentação — clonar num diretório irmão e consultar |
 
-Alternativa/complemento: clonar `facebook/meta-wearables-dat-android` num diretório irmão e apontar o agente para os *samples* — código real vale mais que documentação.
-
-**Teste de fumaça antes de começar:** peça ao agente para rodar `search_dat_docs` com a consulta *"camera streaming setup on Android"* e conferir a versão retornada contra o `libs.versions.toml`. Se o MCP não responder, **pare e configure antes de escrever código**.
+**Teste de fumaça antes de começar:** rodar `search_dat_docs` com a consulta
+*"camera streaming setup on Android"* e conferir a versão retornada contra o
+`libs.versions.toml`. Se o MCP não responder, **pare e configure antes de
+escrever código**.
 
 **Fontes secundárias** (contexto de projeto, não de API): material de apoio Un12 (Kotlin/Android, Edge AI, visão, STT/TTS, background e energia) e Un13 (DAT: arquitetura, setup, sessão, câmera, áudio, Mock Device Kit). Onde eles divergirem da doc oficial, **a doc oficial vence** — o material foi escrito contra a 0.8.0.
 
@@ -224,7 +227,7 @@ Cada marco tem **critério de aceite verificável sem hardware dos óculos**. N�
 
 ### M0 — Contexto e esqueleto
 - Plugin do DAT e MCP `search_dat_docs` instalados e testados
-- Repositório com módulos de §3, `CLAUDE.md`, `DECISIONS.md`, `.gitignore` com `local.properties`
+- Repositório com módulos de §3, `PADROES_DE_ENGENHARIA.md`, `DECISIONS.md`, `.gitignore` com `local.properties`
 - Interfaces de §3.1 escritas (sem implementação), compilando
 
 **Aceite:** `./gradlew build` verde. `search_dat_docs` retorna resultado e a versão do SDK está registrada em `DECISIONS.md`.
@@ -331,7 +334,7 @@ Cada um deve produzir **feedback sonoro específico**, não silêncio. Silêncio
 
 ---
 
-# 9. Regras de trabalho para o agente
+# 9. Regras de trabalho
 
 ## 9.1 Anti-alucinação
 - Nunca escrever API do DAT de memória — consultar `search_dat_docs` ou o repo oficial primeiro
@@ -339,8 +342,8 @@ Cada um deve produzir **feedback sonoro específico**, não silêncio. Silêncio
 - Se a doc divergir do material de apoio (Un12/Un13), **a doc oficial vence** e a divergência vai para `DECISIONS.md`
 - Se uma API necessária não existir na versão vigente: **parar e perguntar.** Não inventar workaround silencioso
 
-## 9.2 Quando parar e perguntar ao humano
-- Necessidade de credencial (PAT, chave Supabase, token WhatsApp)
+## 9.2 Quando parar e perguntar
+- Necessidade de credencial (PAT do GitHub Packages, chave do Supabase)
 - Necessidade de hardware físico para validar
 - Qualquer nova dependência de terceiros (justificar tamanho, licença e alternativa nativa)
 - Qualquer decisão que afete latência, bateria ou privacidade
@@ -358,44 +361,6 @@ Cada um deve produzir **feedback sonoro específico**, não silêncio. Silêncio
 - `DECISIONS.md`: uma linha por decisão não óbvia, com data, alternativa descartada e motivo
 - Commits pequenos, mensagem descrevendo o *porquê*
 - `README.md` com setup reproduzível do zero em outra máquina — inclusive NDK e download de modelos
-- **Build precisa funcionar offline** após a primeira sincronização. Wi-Fi de evento é ruim, e você vai descobrir isso às 15h de 18/09
+- **Build precisa funcionar offline** após a primeira sincronização. Wi-Fi de evento é ruim, e isso se descobre às 15h de 18/09
 
 ---
-
-# 10. Prompt de bootstrap
-
-Cole isto na primeira sessão do Claude Code, depois de anexar este guia, o `CLAUDE.md`, o edital e os materiais Un12/Un13:
-
-> Você vai construir o Claryon Field, um app companion Android/Kotlin para Ray-Ban Meta usando o Meta Wearables Device Access Toolkit. Leia `CLAUDE.md` e o Guia Técnico anexado antes de qualquer coisa.
->
-> **Antes de escrever código:**
-> 1. Verifique se o plugin do DAT e o MCP `search_dat_docs` estão instalados. Se não estiverem, me diga exatamente o que rodar e pare.
-> 2. Rode `search_dat_docs` com "camera streaming setup on Android" e me diga qual versão do SDK está vigente.
-> 3. Confirme que entendeu as cinco restrições da seção 1 e a Regra Zero da seção 2, reformulando-as com suas palavras.
->
-> Depois disso, execute apenas o **marco M0**. Ao terminar, apresente o critério de aceite atendido e **pare para minha revisão**. Não avance para M1 sem confirmação.
->
-> Se em qualquer momento você precisar de uma API do DAT cuja assinatura não conseguiu confirmar na documentação, pare e me pergunte. Não invente.
-
-**Padrão de trabalho:** um marco por sessão, revisão humana entre marcos. Agente que executa M0 a M8 de uma vez produz código que compila e não funciona com hardware real — e você descobre isso no dia 18.
-
----
-
-# Apêndice A — Conteúdo do `CLAUDE.md`
-
-Entregue como arquivo separado. Copie para a raiz do repositório antes da primeira sessão.
-
----
-
-# Apêndice B — Ordem de leitura dos anexos
-
-Ao montar o contexto do Claude Code, anexe nesta ordem (do mais operacional ao mais contextual):
-
-1. `CLAUDE.md` — raiz do repo, lido sempre
-2. Este guia técnico
-3. Un13 (DAT: arquitetura, setup, sessão, câmera, áudio, MDK) — **o mais denso tecnicamente**
-4. Un12 (Kotlin/Android, background e energia, Edge AI, visão, STT/TTS)
-5. Plano de Negócios (para o agente entender *por que* cada decisão existe)
-6. Edital (checkpoints obrigatórios e critérios de avaliação)
-
-Un1–Un10 (agentes de IA, LangChain, CrewAI, LangGraph, bancos vetoriais) são **contexto conceitual, não implementação**. Nosso roteador de intenções é determinístico e roda no celular; não anexe esses materiais ao agente de código, para não induzi-lo a arrastar frameworks Python para dentro de um app Android.
