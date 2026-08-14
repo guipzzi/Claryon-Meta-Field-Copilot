@@ -12,8 +12,22 @@ android {
     namespace = "com.claryon.voice"
     compileSdk = 35
 
+    // NDK: compila o whisper.cpp (submódulo) via CMake. arm64-v8a cobre os
+    // celulares modernos e o emulador arm64; outras ABIs entram no release.
+    ndkVersion = "27.0.12077973"
+
     defaultConfig {
         minSdk = 31
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 
     compileOptions {

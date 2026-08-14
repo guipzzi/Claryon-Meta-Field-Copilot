@@ -86,7 +86,7 @@ encerramento), orçamento de latência e integração WhatsApp estão em
 |---|---|---|
 | JDK | 17 | Ex.: `brew install openjdk@17` |
 | Android SDK | Platform 35, Build-Tools 35.0.0, Platform-Tools | via Android Studio ou `android-commandlinetools` |
-| NDK | (a partir do M4) | para whisper.cpp e sherpa-onnx (JNI, `.so` por ABI) |
+| NDK | 27.0.12077973 | para whisper.cpp (JNI, `.so` por ABI). `sdkmanager "ndk;27.0.12077973" "cmake;3.22.1"` |
 
 > Modelos on-device (whisper `ggml-tiny`, Piper/sherpa-onnx pt-BR, Silero VAD,
 > openWakeWord) são baixados pelo setup do M4 e **não** entram no Git.
@@ -102,7 +102,21 @@ sdk.dir=/caminho/para/o/android/sdk
 A partir do M1, este arquivo também guarda o PAT `read:packages` do DAT
 (chave `github_token`; alternativa: env `GITHUB_TOKEN`). **Nunca** versione credenciais.
 
-### 2. Build
+### 2. Submódulos e modelos (voz on-device)
+
+```bash
+# whisper.cpp é um submódulo (core-voice/src/main/cpp/whisper)
+git submodule update --init --recursive
+
+# modelo STT (~77 MB, não versionado) — para o teste instrumentado do whisper
+curl -L -o app/src/androidTest/assets/models/ggml-tiny.bin \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin
+```
+
+Sem o submódulo, a build nativa de `core-voice` falha. Sem o modelo, o teste
+`WhisperCppSttTest` é apenas **ignorado** (não quebra o build).
+
+### 3. Build
 
 ```bash
 export JAVA_HOME="$(/usr/libexec/java_home -v 17 2>/dev/null || echo /opt/homebrew/opt/openjdk@17)"
@@ -135,7 +149,7 @@ adb logcat -s ClaryonField          # logs do app
 | **M1** | Setup do DAT: GitHub Packages, `mwdat 0.9.0`, manifest, `claryonfield://` | ✅ **concluído** — `clean build` verde com os artefatos `mwdat-*` resolvidos |
 | **M2** | Mock Device Kit: registro, sessão e câmera reais (sem hardware) | ✅ **concluído** — teste instrumentado + painel ao vivo (REGISTERED→STARTED→STREAMING) |
 | **M3** | Pipeline de áudio HFP (`GlassesAudioManager`, AudioRecord/AudioTrack) | ✅ **concluído** — testes verdes; eco record→playback verificado (eco HFP final requer fone físico) |
-| **M4** | Voz on-device | 🟡 **núcleo pronto** — roteador determinístico + VAD + TTS Android (testes verdes; ciclo texto→TTS ao vivo). **Nativo diferido**: whisper.cpp/sherpa-onnx/openWakeWord/Silero (NDK + device) |
+| **M4** | Voz on-device | ✅ roteador + VAD + TTS + **STT nativo whisper.cpp VERIFICADO** no emulador (transcreveu jfk.wav) + STT fallback (SpeechRecognizer). Falta: Piper/openWakeWord/Silero + resample 8→16 kHz |
 | M5 | Agente e som (roteador, fila, earcons, laconicidade) | 🟡 roteador já adiantado no M4; falta fila/earcons |
 | M6 | Visão e evidência (OCR de placa, cofre cifrado) | pendente |
 | M7 | Rede (Supabase, WhatsApp, fila offline) | pendente |

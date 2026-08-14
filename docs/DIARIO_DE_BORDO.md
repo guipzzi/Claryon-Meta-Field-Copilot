@@ -274,15 +274,47 @@ STT real + hardware.
 
 ---
 
-## Estado atual (fim de 2026-08-13)
+## 2026-08-14 — M4-nativo: whisper.cpp on-device, PROVADO
 
-- **Marcos concluídos:** M0, MCP, M1, M2, M3; **M4 núcleo** (roteador+VAD+TTS).
-- **Build:** verde (`./gradlew clean build`), lint desligado (workaround documentado).
-- **Toolchain:** JDK 17 · Gradle 8.9 · AGP 8.7.2 · Kotlin 2.2.0 · compileSdk 35 · minSdk 31.
-- **DAT:** `mwdat 0.9.0` integrado; fachada + MockDeviceKit + áudio HFP + roteador.
-- **Próximas tarefas:** **M4-nativo** (whisper.cpp/sherpa-onnx via NDK, em device;
-  resolver resample 8 kHz→16 kHz e validar em modo avião) e **M5** (fila de som +
-  earcons; o roteador já está adiantado).
+**O marco de maior risco do projeto — e deu certo, verificado em runtime.**
+
+O `whisper.cpp` (STT em C++) foi integrado e **transcreveu de verdade no emulador
+arm64**: o teste `WhisperCppSttTest` carregou o modelo `ggml-tiny` e transcreveu o
+áudio `jfk.wav` como *"...ask not what your country can do for you..."* — sem
+rede, sem hardware de áudio, puro on-device.
+
+**Como (Regra Zero, code real):**
+- Adicionei o whisper.cpp como **git submódulo** (`core-voice/src/main/cpp/whisper`).
+- Reaproveitei **verbatim** o `jni.c`, `CMakeLists.txt` e o wrapper Kotlin
+  (`LibWhisper.kt`) do **exemplo Android oficial** — nada de JNI escrito de memória.
+- Instalei **NDK 27 + CMake 3.22.1**; liguei o `externalNativeBuild` em
+  `core-voice` (arm64-v8a). O `.so` compilou (whisper + ggml) e carregou no device.
+- `WhisperCppStt` implementa nosso `SttEngine` sobre o `WhisperContext`.
+
+**Percalços honestos (e as correções):**
+- `initContextFromInputStream` está declarado no Kotlin mas **não** implementado
+  no `jni.c` → usei `createContextFromAsset` (lê do APK sem copiar 77 MB para o
+  disco cheio do emulador).
+- Assets de `androidTest` vivem no **APK de teste** (contexto da instrumentação),
+  não no `targetContext`.
+
+**Pendências reais:** o antigo alerta **8 kHz→16 kHz** agora é concreto — o
+`AudioRecord`/`jfk.wav` são 16 kHz, mas o HFP dos óculos entrega 8 kHz; falta o
+**resample** no caminho HFP→whisper. E ainda: **Piper (sherpa-onnx)** para TTS
+neural, **openWakeWord** e **Silero VAD**.
+
+---
+
+## Estado atual (fim de 2026-08-14)
+
+- **Marcos concluídos:** M0, MCP, M1, M2, M3, **M4** (inclui whisper.cpp nativo verificado).
+- **Build:** verde, lint desligado (workaround documentado).
+- **Toolchain:** JDK 17 · Gradle 8.9 · AGP 8.7.2 · Kotlin 2.2.0 · compileSdk 35 · minSdk 31 · **NDK 27 · CMake 3.22.1**.
+- **Voz:** roteador determinístico + VAD (energia) + TTS Android + **STT whisper.cpp
+  on-device (provado)** + STT fallback (SpeechRecognizer).
+- **Próximas tarefas:** **resample 8→16 kHz** (HFP→whisper); **Piper (sherpa-onnx)**,
+  **openWakeWord**, **Silero VAD**; **M5** (fila de som + earcons); validar o ciclo
+  completo em **modo avião** num device real.
 
 **Pendências conhecidas (registradas para não se perderem):**
 - Reativar o Android Lint quando o ferramental acompanhar o Kotlin 2.2 (M8).

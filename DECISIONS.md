@@ -5,6 +5,22 @@ Ordem cronológica inversa (mais recente no topo).
 
 ---
 
+## 2026-08-14 — M4-nativo: whisper.cpp on-device VERIFICADO
+
+- **whisper.cpp compilado e transcrevendo no emulador arm64.** Teste instrumentado `WhisperCppSttTest` carregou o `ggml-tiny` e transcreveu o `jfk.wav` corretamente ("...ask not what your country can do for you...") — 100% local, sem rede. O maior risco de ambiente do projeto está superado e provado em runtime.
+
+- **Integração via submódulo + código verbatim do exemplo oficial (Regra Zero).** whisper.cpp adicionado como **git submódulo** em `core-voice/src/main/cpp/whisper`. `jni.c`, `CMakeLists.txt`, `LibWhisper.kt`, `WhisperCpuConfig.kt` reaproveitados **verbatim** de `examples/whisper.android`. `WhisperCppStt` (nosso) implementa `SttEngine` sobre o `WhisperContext`.
+
+- **Toolchain nativo:** NDK **27.0.12077973** + CMake **3.22.1** (instalados via sdkmanager). `externalNativeBuild` em `core-voice`, `abiFilters = arm64-v8a` (cobre celulares modernos + emulador; outras ABIs no release). No emulador arm64 (com fp16) carrega `libwhisper_v8fp16_va.so`.
+
+- **Quirk registrado:** `initContextFromInputStream` é declarado no `LibWhisper.kt` mas **não** implementado no `jni.c` (UnsatisfiedLinkError). Usar `createContextFromFile` (produção, modelo baixado) ou `createContextFromAsset` (teste, lê do APK sem copiar 77 MB para o disco do emulador).
+
+- **Modelo não versionado:** `ggml-tiny.bin` (~77 MB) baixado no setup (`.gitignore`). O teste usa `Assume` — se o modelo faltar, é ignorado, não quebra o build. jfk.wav (344 KB) versionado como fixture.
+
+- **Pendência real (não bloqueia):** o HFP entrega **8 kHz**; o whisper espera **16 kHz** → falta o **resample 8→16 kHz** no caminho HFP→whisper (o `AudioRecord` a 16 kHz e o `jfk.wav` já são 16 kHz). Ver `docs/COMPLIANCE.md` §D.
+
+---
+
 ## 2026-08-13 — M4 (voz on-device: núcleo verificável; nativo diferido)
 
 - **Escopo Guia-alinhado:** "AndroidTts/fallback primeiro valida o ciclo; whisper/piper/openWakeWord/Silero depois". O build **nativo** (NDK, `.so` por ABI, modelos em assets) é o maior risco de ambiente e **não** foi feito nesta sessão — os scaffolds (`WhisperCppStt`, `AndroidOnDeviceStt`) declaram `isAvailable()=false` e o pipeline degrada graciosamente (comando → `NaoReconhecida` → earcon), sem inventar transcrição.

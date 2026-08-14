@@ -27,3 +27,9 @@ app/src/main/assets/models/
 
 # ─── macOS ─────────────────────────────────────────────────────────────────
 .DS_Store
+
+# Modelos de teste (baixados no setup, ver README)
+app/src/androidTest/assets/models/
+
+# NDK build intermediates
+.cxx/
