@@ -5,6 +5,18 @@ Ordem cronológica inversa (mais recente no topo).
 
 ---
 
+## 2026-08-14 — Ajuste dos achados em aberto (lint, mock, ABIs)
+
+- **Lint REABILITADO** (AGP 8.7.2 → **8.9.2**, Gradle 8.9 → **8.11.1**). O bug `IncompatibleClassChangeError` do lint com Kotlin 2.2 estava no AGP 8.7.2; o 8.9.2 corrige. Removido o `subprojects { lint disabled }`. Build completo verde COM lint. O lint pegou 1 achado real (`AudioRecord` sem `@RequiresPermission`) → suprimido com justificativa (`RECORD_AUDIO` é garantido pelo onboarding do app).
+
+- **`mwdat-mockdevice` gateado para fora do release:** `compileOnly` em core-glasses + `debugImplementation` no app. O `MockDeviceController` compila mas não é empacotado no release e nunca é carregado (gate `BuildConfig.DEBUG`). Verificado: `assembleRelease` verde.
+
+- **ABIs consistentes:** `abiFilters = arm64-v8a + x86_64` (app + core-voice). O AAR do sherpa trazia 4 ABIs mas o whisper só compila as filtradas — agora batem (celulares + emuladores Intel).
+
+- **Correção de flakiness:** `MockDeviceKitStreamTest` agora para o stream e espera assentar antes de `mock.disable()` — evitava um SIGSEGV na thread nativa `AsyncVideoFrame` (frames em voo). Suíte instrumentada: 5/5 verde.
+
+---
+
 ## 2026-08-14 — Resample 8→16 kHz + Piper (sherpa-onnx) VERIFICADO
 
 - **`PcmResampler` (core-common):** interpolação linear, upsample 8→16 kHz (HFP→whisper). Em core-common para respeitar a regra de módulos (core-audio e core-voice usam). `WhisperCppStt` reamostra internamente. Teste JVM.

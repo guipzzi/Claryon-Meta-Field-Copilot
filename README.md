@@ -134,7 +134,7 @@ export JAVA_HOME="$(/usr/libexec/java_home -v 17 2>/dev/null || echo /opt/homebr
 ./gradlew build
 ```
 
-O primeiro build baixa Gradle 8.9 (wrapper) e as dependências; depois disso, a
+O primeiro build baixa Gradle 8.11.1 (wrapper) e as dependências; depois disso, a
 build precisa funcionar **offline** (o Wi-Fi de evento é ruim).
 
 ---

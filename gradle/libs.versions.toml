@@ -1,7 +1,8 @@
 # Catálogo de versões — fonte única de verdade para dependências e plugins.
 #
 # Compatibilidades fixadas (ver DECISIONS.md, 2026-08-13):
-#   AGP 8.7.2  ↔  Gradle 8.9  ↔  JDK 17  ↔  compileSdk 35 (exigido pelo DAT 0.9.0)
+#   AGP 8.9.2  ↔  Gradle 8.11.1  ↔  JDK 17  ↔  compileSdk 35 (DAT 0.9.0). AGP 8.9
+#   reabilita o lint com Kotlin 2.2 (o 8.7.2 tinha o bug NonNullableMutableLiveData).
 #   Kotlin 2.2.0  → exigido pelo DAT 0.9.0 (metadata 2.2.0); Compose usa o
 #   plugin org.jetbrains.kotlin.plugin.compose (versão casada com o Kotlin).
 #
@@ -9,7 +10,7 @@
 # search_dat_docs em 2026-08-13. Reconferir a última versão em GitHub Packages.
 
 [versions]
-agp = "8.7.2"
+agp = "8.9.2"
 kotlin = "2.2.0"
 mwdat = "0.9.0"
 coroutines = "1.8.1"

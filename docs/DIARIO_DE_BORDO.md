@@ -106,12 +106,12 @@ manifest correto — sem ainda escrever chamadas de API (isso é o M2).
    `org.jetbrains.kotlin.plugin.compose` (o `kotlinCompilerExtensionVersion`
    deixou de existir).
 3. **`requires compileSdk 35`** — o DAT puxa AndroidX novo (`activity 1.10.1`) que
-   exige **compileSdk 35**; o AGP 8.5.2 tem teto no 34. Subimos para **AGP 8.7.2**
+   exige **compileSdk 35**; o AGP 8.5.2 tem teto no 34. Subimos para **AGP 8.9.2**
    (compatível com o Gradle 8.9) e **compileSdk/targetSdk 35**; instalamos a
    plataforma `android-35`.
 
 **Uma decisão que precisa ficar clara:** o **Android Lint ficou desligado**
-temporariamente. O lint embarcado no AGP 8.7.2 quebra com
+temporariamente. O lint embarcado no AGP 8.9.2 quebra com
 `IncompatibleClassChangeError` ao analisar código Kotlin 2.2 — é um **bug do
 ferramental**, não do nosso código (nem usamos LiveData, que é o detector que
 estoura). Desabilitar o detector específico não impede o crash, então desligamos
@@ -309,7 +309,7 @@ neural, **openWakeWord** e **Silero VAD**.
 
 - **Marcos concluídos:** M0, MCP, M1, M2, M3, **M4** (inclui whisper.cpp nativo verificado).
 - **Build:** verde, lint desligado (workaround documentado).
-- **Toolchain:** JDK 17 · Gradle 8.9 · AGP 8.7.2 · Kotlin 2.2.0 · compileSdk 35 · minSdk 31 · **NDK 27 · CMake 3.22.1**.
+- **Toolchain:** JDK 17 · Gradle 8.11.1 · AGP 8.9.2 · Kotlin 2.2.0 · compileSdk 35 · minSdk 31 · **NDK 27 · CMake 3.22.1**.
 - **Voz:** roteador determinístico + VAD (energia) + TTS Android + **STT whisper.cpp
   on-device (provado)** + STT fallback (SpeechRecognizer).
 - **Próximas tarefas:** **resample 8→16 kHz** (HFP→whisper); **Piper (sherpa-onnx)**,

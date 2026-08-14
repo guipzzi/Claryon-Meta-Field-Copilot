@@ -93,6 +93,9 @@ class GlassesAudioManagerImpl(
         return Result.success(Unit)
     }
 
+    // Contrato: o chamador (app) garante RECORD_AUDIO concedido em runtime (o
+    // onboarding pede antes de qualquer captura). O lint não enxerga esse fluxo.
+    @Suppress("MissingPermission")
     override fun microfonePcm(): Flow<ShortArray> = flow {
         val frameSamples = sampleRateHz / 50 // janelas de 20 ms
         val minBuf = AudioRecord.getMinBufferSize(

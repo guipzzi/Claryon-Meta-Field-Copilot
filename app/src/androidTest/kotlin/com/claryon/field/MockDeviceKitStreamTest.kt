@@ -10,6 +10,7 @@ import com.claryon.glasses.SessionStatus
 import com.claryon.glasses.StreamStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -58,6 +59,16 @@ class MockDeviceKitStreamTest {
         facade.startCameraStream(CameraProfile.EVIDENCE)
         withTimeout(20_000) { facade.streamState.first { it == StreamStatus.STREAMING } }
 
+        // Limpeza ordenada: para o stream e espera assentar ANTES de desabilitar o
+        // mock — senão a thread nativa AsyncVideoFrame do MDK pode crashar (SIGSEGV)
+        // com frames em voo. Depois cancela os coletores.
+        facade.stopCameraStream()
+        runCatching {
+            withTimeout(5_000) {
+                facade.streamState.first { it == StreamStatus.STOPPED || it == StreamStatus.CLOSED }
+            }
+        }
+        scope.cancel()
         mock.disable()
     }
 }

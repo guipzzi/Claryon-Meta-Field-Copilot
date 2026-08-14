@@ -10,14 +10,5 @@ plugins {
     alias(libs.plugins.compose.compiler) apply false
 }
 
-// Workaround temporário: o Android Lint embarcado no AGP 8.7.2 quebra com
-// IncompatibleClassChangeError (NonNullableMutableLiveDataDetector) ao analisar
-// UAST de código compilado com Kotlin 2.2 — versão exigida pelo DAT 0.9.0. Não é
-// o nosso código. Desligamos as tasks de lint até fixar uma combinação AGP/lint
-// compatível com Kotlin 2.2. A compilação e os testes unitários seguem ativos.
-// Ver DECISIONS.md (2026-08-13). TODO: reativar o lint no marco de energia (M8).
-subprojects {
-    tasks.matching { it.name.startsWith("lint") }.configureEach {
-        enabled = false
-    }
-}
+// Lint reabilitado com AGP 8.9.2 (o 8.7.2 quebrava com Kotlin 2.2 —
+// IncompatibleClassChangeError no NonNullableMutableLiveDataDetector). Ver DECISIONS.md.
