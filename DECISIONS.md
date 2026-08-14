@@ -330,3 +330,20 @@ Ordem cronológica inversa (mais recente no topo).
   `mwdat-mockdevice-0.9.0.aar`), já que a doc oficial descreve o comportamento mas não
   publica a API Android: `MockGlassesServices.getCaptouch(): MockCaptouchKit`, com
   `tap()` e `tapAndHold()`.
+
+- **`espeak-ng-data` podado para `pt_dict` + `en_dict` (113 dicionários → 2).**
+  O modelo Piper declara `espeak: {voice: pt-br}`; os outros 111 idiomas eram peso morto.
+  Mantidos íntegros o núcleo fonético (`phondata`, `phonindex`, `phontab`, `intonations`),
+  `lang/` e `voices/` — baratos (≈950 KB somados) e arriscados de podar. Inglês fica para
+  termos estrangeiros; o produto é focado no Brasil.
+  Ganho: **cópia no primeiro boot de 18 MB → 1,8 MB** (o que o usuário sente) e APK de
+  release de 235 → 227 MB (os dicionários comprimem bem, então o ganho no pacote é menor
+  que os 16 MB brutos). Verificado por `ModelosProducaoTest`, que apaga a cópia anterior
+  antes de sintetizar — senão o teste passaria lendo dados que o APK não empacota mais.
+
+- **Verificações dependentes de hardware isoladas em `docs/VERIFICACOES_COM_HARDWARE.md`.**
+  O emulador não tem rádio: a latência de saída Bluetooth (40–150 ms) e todo o
+  comportamento do HFP/SCO são propriedades de hardware. O MockDeviceKit também não simula
+  áudio. Em vez de testes que passam sem exercitar nada, os cenários ficam com `Assume` e
+  a lista de execução mora num documento próprio. Aguarda celular Android (15/08) e fone
+  Bluetooth com HFP.
