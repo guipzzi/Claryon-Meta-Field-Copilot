@@ -20,12 +20,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.claryon.agent.ModoOperacao
+import com.claryon.field.service.CopilotService
 import com.claryon.glasses.RegistrationStatus
 import com.claryon.glasses.SessionStatus
 import com.claryon.glasses.StreamStatus
@@ -132,6 +135,21 @@ fun DiagnosticsScreen(
             onClick = vm::cicloDeVoz,
             modifier = Modifier.fillMaxWidth(),
         ) { Text("▶ Ciclo de voz completo (push-to-talk)") }
+
+        // Modos de operação (M8). O serviço de primeiro plano PRECISA ser
+        // iniciado daqui — de tela visível; em background é
+        // ForegroundServiceStartNotAllowedException.
+        val context = LocalContext.current
+        val modo by CopilotService.modo.collectAsState()
+        StatusCard("Modo de operação", "${modo.name} · FPS teto ${CopilotService.fpsPermitidoAgora(context, modo)}")
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OutlinedButton(onClick = { CopilotService.parar(context) }) { Text("Standby") }
+            Button(onClick = { CopilotService.iniciar(context, ModoOperacao.ATIVO) }) { Text("Ativo") }
+            Button(onClick = { CopilotService.iniciar(context, ModoOperacao.OCORRENCIA) }) { Text("Ocorrência") }
+        }
     }
 }
 

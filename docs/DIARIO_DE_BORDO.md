@@ -354,19 +354,51 @@ faixas de WorkManager: tática (só `CONNECTED`) e pesada (`UNMETERED` +
 carregando + bateria ok) — mensagem tática não espera o carregador; evidência
 espera.
 
+## 2026-08-14 — M8: energia (serviço de primeiro plano, modos, térmico)
+
+Os modos viraram **política pura** (`PowerPolicy`, em core-agent): `perfil(modo)`
+diz o que fica ligado e `tiposDeServico(modo)` diz quais `foregroundServiceType`
+o modo exige. O serviço só obedece — então a economia de bateria é **testável em
+JUnit**, sem medir bateria. Standby fecha o HFP (o SCO é o maior consumidor
+contínuo); Ativo ouve mas **não filma**; Ocorrência liga tudo em janela curta.
+
+`ThermalGovernor` existe para uma armadilha só: **`NaN` não é 0**.
+`getThermalHeadroom()` devolve `NaN` quando o sistema não tem informação; tratar
+como 0 faria o app se achar frio e acelerar justamente quando não sabe nada. Sem
+informação: mantém o teto e não autoriza rajada.
+
+**Um bug real, achado em execução — e é o motivo de verificar em aparelho.**
+Subir o FGS com tipo `camera` exige a permissão de runtime **concedida**, não só
+a declaração no manifest. Sem ela: `SecurityException` e o processo morre — foi
+exatamente o que aconteceu no primeiro teste. Corrigido: o serviço
+intersecciona os tipos do modo com as permissões concedidas e **degrada** em vez
+de cair. Falta de sensor vira falha audível na feature, nunca queda do pipeline.
+
+Verificação no emulador (`dumpsys activity services`):
+
+| Modo | tipos observados | leitura |
+|---|---|---|
+| Standby | serviço parado | nada segurado |
+| Ativo | `0x90` | connectedDevice \| microphone |
+| Ocorrência | `0xD0` | connectedDevice \| microphone \| camera |
+| Ocorrência **sem** permissão de câmera | `0x90`, sem crash | degradou |
+
 ## Estado atual (fim de 2026-08-14)
 
 - **Marcos concluídos:** M0, MCP, M1, M2, M3, **M4** (whisper.cpp nativo +
   Piper/sherpa-onnx verificados), ciclo de voz, **M5** (som), **M6** (visão +
-  evidência), **M7** (rede).
+  evidência), **M7** (rede), **M8** (energia). **Todos os marcos do plano.**
 - **Build:** verde, **lint reabilitado** (AGP 8.9.2 corrige o bug com Kotlin 2.2).
 - **Toolchain:** JDK 17 · Gradle 8.11.1 · AGP 8.9.2 · Kotlin 2.2.0 · compileSdk 35 · minSdk 31 · **NDK 27 · CMake 3.22.1**.
 - **Voz:** roteador determinístico + VAD + TTS (Piper/Android) + **STT whisper.cpp
   on-device (provado)** + fallback (SpeechRecognizer) + resample 8→16 kHz.
 - **Rede:** fila offline durável + drenagem por WorkManager (duas faixas) +
   Supabase por PostgREST. WhatsApp fora do escopo por ora.
-- **Próximas tarefas:** **M8** (energia — FGS + modos Standby/Ativo/Ocorrência +
-  térmico), auditoria final + compliance + verificação de docs.
+- **Energia:** `CopilotService` (FGS com tipos derivados do modo, degrada sem
+  permissão), `PowerPolicy`, `ThermalGovernor`, WorkManager em duas faixas.
+- **Próximas tarefas:** auditoria final + compliance (edital e material de
+  apoio) + verificação completa de documentação. Depois: ensaio da demo com
+  hardware real e medição de bateria/latência em campo.
 
 **Pendências conhecidas (registradas para não se perderem):**
 - Revogar e rotacionar o PAT do GitHub (foi exposto em conversa durante o setup).

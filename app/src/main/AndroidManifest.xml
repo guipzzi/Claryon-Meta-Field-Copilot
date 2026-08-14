@@ -4,13 +4,23 @@
     <!--
       Permissões confirmadas na doc do DAT (search_dat_docs, 2026-08-13).
       RECORD_AUDIO é nosso (captura HFP via AudioRecord, não passa pelo DAT).
-      O foregroundServiceType do pipeline contínuo entra no M8.
     -->
     <uses-permission android:name="android.permission.BLUETOOTH" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.CAMERA" />
+
+    <!--
+      Serviço de primeiro plano do pipeline contínuo (M8). Android 14+ exige a
+      permissão POR TIPO, além do tipo declarado no <service> e repetido em
+      startForeground(); divergir entre os três derruba o serviço.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <application
@@ -53,5 +63,16 @@
                 <data android:scheme="claryonfield" />
             </intent-filter>
         </activity>
+
+        <!--
+          O conjunto de tipos aqui é a UNIÃO do que qualquer modo pode usar; o
+          startForeground() em runtime declara o subconjunto EXATO do modo
+          corrente (PowerPolicy.tiposDeServico) — em Standby, nem microfone nem
+          câmera. Sempre iniciado de tela visível (ver CopilotService.iniciar).
+        -->
+        <service
+            android:name=".service.CopilotService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice|microphone|camera" />
     </application>
 </manifest>

@@ -217,3 +217,23 @@ Ordem cronológica inversa (mais recente no topo).
 
 - **Duas faixas de WorkManager: tática (`CONNECTED`) e pesada (`UNMETERED` + `requiresCharging` + `requiresBatteryNotLow`).**
   Mensagem tática não pode esperar o celular ir para o carregador; evidência e modelos podem. Ambas com backoff exponencial e `enqueueUniqueWork(KEEP)` para não empilhar drenagens concorrentes. O gateway (com a chave) vive num holder de processo — não vai para a base do WorkManager.
+
+## M8 — Energia (2026-08-14)
+
+- **Modos como política pura (`PowerPolicy` em core-agent), não como `if` espalhado no serviço.**
+  `perfil(modo)` diz o que fica ligado (HFP, wake word, câmera, teto de FPS, supressão de informativos) e `tiposDeServico(modo)` diz quais `foregroundServiceType` o modo exige. O serviço só obedece. Efeito: a economia de bateria é **testável em JUnit**, sem medir bateria. Standby fecha o HFP porque o SCO é o maior consumidor contínuo; Ativo ouve mas **não filma**; Ocorrência liga tudo em janela curta e é o modo que suprime informativo.
+
+- **`foregroundServiceType` no manifest é a UNIÃO; em `startForeground()` é o subconjunto EXATO do modo.**
+  Declarar `connectedDevice|microphone|camera` no `<service>` é obrigatório (Android 14+ recusa o que não foi declarado), mas subir sempre com os três faria o app segurar microfone e câmera em Standby. O runtime deriva os tipos de `PowerPolicy.tiposDeServico`.
+
+- **O serviço DEGRADA quando falta permissão de runtime — nunca crasha.** *(bug real, achado em execução)*
+  Subir FGS com tipo `camera`/`microphone` exige a permissão de runtime **concedida**, não só a do manifest — senão é `SecurityException` e o processo morre (aconteceu no emulador). `entrarEmPrimeiroPlano` intersecciona os tipos do modo com as permissões concedidas. Verificado: sem `CAMERA`, Ocorrência sobe com `0x90` (connectedDevice|microphone) e o app segue vivo; com `CAMERA`, sobe com `0xD0`. A falta de sensor vira falha audível na feature, não queda do pipeline.
+
+- **`NaN` do `getThermalHeadroom()` NÃO é 0 (`ThermalGovernor`).**
+  `NaN` = sem informação (chamadas próximas demais, aparelho sem sensor). Tratar como 0 faria o app se achar frio e acelerar justamente quando não sabe nada. Regra: sem informação, **mantém o teto vigente** e **não autoriza rajada** (`podeIniciarRajada == false`). Acima de 0,85 cai para 2 fps (taxa mínima válida do DAT); em 1,0 a câmera desce.
+
+- **`FPS_PADRAO = 7`.**
+  O gargalo é o Bluetooth Classic: `LOW`/`MEDIUM` com FPS baixo dá qualidade **por frame** melhor que `HIGH`/30 fps. 7 é um valor válido do DAT (`frameRate ∈ {2,7,15,24,30}`).
+
+- **`START_STICKY` + serviço iniciado sempre de tela visível.**
+  Iniciar FGS em background é `ForegroundServiceStartNotAllowedException` — por isso os botões de modo vivem no painel e `CopilotService.iniciar` é chamado da UI. `START_STICKY` faz o pipeline voltar se o sistema matar por memória.
