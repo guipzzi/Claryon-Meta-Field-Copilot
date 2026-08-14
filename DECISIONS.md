@@ -177,3 +177,20 @@ Ordem cronológica inversa (mais recente no topo).
 
 - **`coroutines-core` exposto como `api` em `core-common`.**
   Motivo: os contratos usam `Flow`/`StateFlow`; expor uma vez evita repetir a dependência em cada módulo consumidor.
+
+## M6 — Visão (OCR de placa) + Evidência cifrada (2026-08-14)
+
+- **Placa: um único validador (`PlacaValidator` em core-agent), Mercosul estrito `[A-Z]{3}[0-9][A-Z][0-9]{2}` + antigo `[A-Z]{3}[0-9]{4}`.**
+  Antes o roteador tinha regex própria com 5º caractere permissivo (`[A-Z0-9]`). Unificado num validador puro reusado por voz **e** OCR — uma fonte de verdade, testável em JVM. O 5º dígito Mercosul é sempre letra, então o estrito é o correto.
+
+- **OCR on-device: ML Kit Text Recognition (Latin embarcado, `com.google.mlkit:text-recognition:16.0.1`).**
+  Alternativa: Tesseract (via JNI) — descartada por peso de integração e por o modelo Latin do ML Kit já rodar **offline** (sem rede no caminho crítico, exigência do edital). O frame é insumo efêmero: só o texto validado sobrevive à inferência (minimização). `PlacaOcr` vive em `app` (orquestra câmera + ML Kit); o validador puro fica em core-agent.
+
+- **Cofre: um `EncryptedFile` (AES-256 GCM/Tink) por segmento + chave-mestra no Android Keystore.**
+  Alternativa: um único arquivo com todos os segmentos concatenados. Descartada porque **um arquivo por segmento** permite apontar exatamente qual segmento foi adulterado (o GCM autenticado já faz a descriptografia falhar naquele arquivo). Manifesto (`manifest.txt`) fica em claro — hashes não são segredo e permitem verificação por terceiros sem a chave.
+
+- **Cadeia de custódia: `HashChain` puro (SHA-256 encadeado, `sha256(hash_anterior + bytes)`).**
+  `verificar()` devolve o índice do 1º segmento adulterado/faltante, ou `-1` se íntegro. Camada dupla: (1) GCM apanha adulteração de byte no ciphertext; (2) hash encadeado apanha troca/remoção/reordenação de segmentos. Verificado em teste instrumentado: 30 segmentos → cadeia íntegra; virar 1 byte do segmento 2 → `verificar()` retorna 2.
+
+- **`security-crypto = 1.1.0-alpha06`.**
+  A 1.0.0 estável arrasta uma versão antiga do Tink com problemas em APIs novas; a alpha06 é a linha usada de fato em produção para `EncryptedFile`/`MasterKey`. Reavaliar quando a 1.1.0 estabilizar.

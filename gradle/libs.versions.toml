@@ -21,6 +21,8 @@ composeBom = "2024.06.00"
 junit = "4.13.2"
 testRunner = "1.6.2"
 testExtJunit = "1.2.1"
+securityCrypto = "1.1.0-alpha06"
+mlkitText = "16.0.1"
 
 [libraries]
 # Meta Wearables Device Access Toolkit. mwdat-display omitido de propósito: os
@@ -30,6 +32,11 @@ mwdat-camera = { group = "com.meta.wearable", name = "mwdat-camera", version.ref
 mwdat-mockdevice = { group = "com.meta.wearable", name = "mwdat-mockdevice", version.ref = "mwdat" }
 
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
+
+# Repouso cifrado: EncryptedFile + chave no Android Keystore (M6 — core-evidence).
+androidx-security-crypto = { module = "androidx.security:security-crypto", version.ref = "securityCrypto" }
+# OCR de placa on-device (modelo Latin embarcado, roda offline) — M6.
+mlkit-text-recognition = { module = "com.google.mlkit:text-recognition", version.ref = "mlkitText" }
 
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
 androidx-lifecycle-runtime-ktx = { module = "androidx.lifecycle:lifecycle-runtime-ktx", version.ref = "lifecycle" }

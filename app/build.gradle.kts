@@ -69,6 +69,10 @@ dependencies {
     // sherpa-onnx (Piper TTS): o app empacota as .so + classes; core-voice usa compileOnly.
     implementation(":sherpa-onnx-1.13.5@aar")
 
+    // OCR de placa on-device (M6). Modelo Latin embarcado → roda offline, sem rede.
+    implementation(libs.mlkit.text.recognition)
+    implementation(libs.kotlinx.coroutines.core)
+
     // MockDeviceKit só no APK de DEBUG (o release não empacota o mock).
     debugImplementation(libs.mwdat.mockdevice)
 

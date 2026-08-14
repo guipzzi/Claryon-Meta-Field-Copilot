@@ -306,18 +306,45 @@ neural, **openWakeWord** e **Silero VAD**.
 
 ---
 
+## 2026-08-14 — Ciclo de voz completo, M5 (som) e M6 (visão + evidência)
+
+**Ciclo de voz (`VoiceCycle`).** Amarra a cascata sobre abstrações: PCM (HFP) →
+VAD fecha a janela → **earcon "ouvi você" imediato** → STT (lote) → roteador →
+TTS → playback. O earcon dispara no **fechamento do VAD**, não no fim do STT
+(teste JVM com STT falso prova a ordem e o resultado do roteador).
+
+**M5 — fila de som.** Separei política de mecanismo: `SoundScheduler` (puro —
+prioridade por ordinal, suprime informativo em Modo Tático, emergência
+interrompe) com testes JVM; `PrioritySoundQueue` (coroutine, Channel + Mutex, job
+de emergência cancela o que toca); `EarconSynthesizer` (sintetiza os earcons por
+seno — inclui o tom de 2 s de "gravando"). Resposta de TTS ≤ 7 palavras e sem
+cortesia já tinham teste desde o M4.
+
+**M6 — visão + evidência.** Três peças:
+- `PlacaValidator` (puro, core-agent): Mercosul + antigo, reusado por voz e OCR.
+- `PlacaOcr` (app): ML Kit Text Recognition **on-device** (modelo Latin
+  embarcado, roda offline). Verificado: renderei uma placa impressa sintética
+  ("ABC1D23") e o OCR leu e validou. O frame é efêmero — só o texto sobrevive.
+- `EncryptedEvidenceVault` (core-evidence): um `EncryptedFile` (AES-256 GCM,
+  chave no Keystore) por segmento + `HashChain` (SHA-256 encadeado). Verificado
+  em device: 30 segmentos → cadeia íntegra; virar **1 byte** do segmento 2 →
+  `verificar()` aponta o segmento 2. Dupla camada: o GCM apanha byte adulterado,
+  a cadeia apanha troca/remoção/reordenação.
+
 ## Estado atual (fim de 2026-08-14)
 
-- **Marcos concluídos:** M0, MCP, M1, M2, M3, **M4** (inclui whisper.cpp nativo verificado).
-- **Build:** verde, lint desligado (workaround documentado).
+- **Marcos concluídos:** M0, MCP, M1, M2, M3, **M4** (whisper.cpp nativo +
+  Piper/sherpa-onnx verificados), ciclo de voz, **M5** (som), **M6** (visão +
+  evidência).
+- **Build:** verde, **lint reabilitado** (AGP 8.9.2 corrige o bug com Kotlin 2.2).
 - **Toolchain:** JDK 17 · Gradle 8.11.1 · AGP 8.9.2 · Kotlin 2.2.0 · compileSdk 35 · minSdk 31 · **NDK 27 · CMake 3.22.1**.
-- **Voz:** roteador determinístico + VAD (energia) + TTS Android + **STT whisper.cpp
-  on-device (provado)** + STT fallback (SpeechRecognizer).
-- **Próximas tarefas:** **resample 8→16 kHz** (HFP→whisper); **Piper (sherpa-onnx)**,
-  **openWakeWord**, **Silero VAD**; **M5** (fila de som + earcons); validar o ciclo
-  completo em **modo avião** num device real.
+- **Voz:** roteador determinístico + VAD + TTS (Piper/Android) + **STT whisper.cpp
+  on-device (provado)** + fallback (SpeechRecognizer) + resample 8→16 kHz.
+- **Próximas tarefas:** **M7** (rede — Supabase + fila offline; WhatsApp fora do
+  escopo por ora), **M8** (energia — FGS + WorkManager + modos + térmico),
+  auditoria final + compliance + verificação de docs.
 
 **Pendências conhecidas (registradas para não se perderem):**
-- Reativar o Android Lint quando o ferramental acompanhar o Kotlin 2.2 (M8).
 - Revogar e rotacionar o PAT do GitHub (foi exposto em conversa durante o setup).
 - Confirmar a versão mais recente do `mwdat` em GitHub Packages no início de cada marco que toque o SDK.
+- `security-crypto` está em `1.1.0-alpha06`; migrar para a 1.1.0 estável quando sair.

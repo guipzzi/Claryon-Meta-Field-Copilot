@@ -51,11 +51,7 @@ class DeterministicIntentRouter : IntentRouter {
     }
 
     /** Extrai placa Mercosul (ABC1D23) ou padrão antigo (ABC1234), se houver. */
-    private fun extrairPlaca(texto: String): String? {
-        val compacto = texto.replace(Regex("[^a-z0-9]"), "").uppercase()
-        return PLACA_MERCOSUL.find(compacto)?.value
-            ?: PLACA_ANTIGA.find(compacto)?.value
-    }
+    private fun extrairPlaca(texto: String): String? = PlacaValidator.extrair(texto)
 
     private fun matches(texto: String, padroes: List<String>): Boolean =
         padroes.any { texto.contains(it) }
@@ -75,9 +71,6 @@ class DeterministicIntentRouter : IntentRouter {
 
         val PRIORIDADE_MAXIMA = listOf("armado", "arma", "refem", "perigo de vida")
         val PRIORIDADE_ALTA = listOf("urgente", "rapido", "agora")
-
-        val PLACA_MERCOSUL = Regex("[A-Z]{3}[0-9][A-Z0-9][0-9]{2}")
-        val PLACA_ANTIGA = Regex("[A-Z]{3}[0-9]{4}")
     }
 }
 

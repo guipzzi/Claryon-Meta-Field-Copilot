@@ -14,6 +14,7 @@ android {
 
     defaultConfig {
         minSdk = 31
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     compileOptions {
@@ -28,6 +29,14 @@ android {
 
 dependencies {
     implementation(project(":core-common"))
+    implementation(libs.kotlinx.coroutines.core)
+    // Repouso cifrado: EncryptedFile (AEAD) + MasterKey no Android Keystore.
+    implementation(libs.androidx.security.crypto)
 
     testImplementation(libs.junit)
+
+    // O cofre real depende do Keystore → verificação em teste instrumentado.
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.kotlinx.coroutines.test)
 }
