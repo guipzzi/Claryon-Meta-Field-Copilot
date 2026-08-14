@@ -1,7 +1,8 @@
-// core-glasses — ÚNICO módulo que tocará o Meta Wearables DAT.
-// No M0: apenas a fachada GlassesFacade e os tipos de domínio que isolam o SDK.
-// As dependências mwdat-* e a implementação real entram no M1, quando a versão
-// vigente for confirmada via search_dat_docs (Regra Zero).
+// core-glasses — ÚNICO módulo que toca o Meta Wearables DAT.
+// A fachada GlassesFacade e os tipos de domínio isolam o SDK: quando a preview
+// quebrar assinaturas, conserta-se um arquivo. Implementações: DatGlassesFacade
+// (DAT 0.9) e MockDeviceController (debug, sem hardware). Toda assinatura do SDK
+// é confirmada na fonte viva antes de virar código (Regra Zero).
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)

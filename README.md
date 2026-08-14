@@ -2,8 +2,8 @@
 
 Copiloto de voz **hands-free** para agentes de segurança pública, sobre óculos
 **Ray-Ban Meta (sem display)** e o **Meta Wearables Device Access Toolkit (DAT)**.
-O agente fala, o app entende **localmente**, age (pede apoio no WhatsApp, grava
-evidência, consulta placa) e responde por **áudio no ouvido**. Mãos livres,
+O agente fala, o app entende **localmente**, age (pede apoio pelo canal tático,
+grava evidência, consulta placa) e responde por **áudio no ouvido**. Mãos livres,
 olhos no ambiente.
 
 App companion **Android/Kotlin** — todo o processamento roda no smartphone
@@ -46,9 +46,6 @@ Antes de tocar em `Wearables`, `DeviceSession`, `Stream`, `StreamConfiguration`,
 Registre versão + fonte em [`DECISIONS.md`](DECISIONS.md). Se não conseguir
 confirmar uma assinatura: **pare e pergunte** — sem workaround inventado.
 
-Configuração do plugin Claude Code + MCP (fazer numa sessão interativa):
-<https://wearables.developer.meta.com/docs/develop/dat/ai-assisted-claude-code/>
-
 ---
 
 ## Arquitetura de módulos
@@ -72,9 +69,14 @@ ao DAT passa por `GlassesFacade` — quando a preview quebrar assinaturas,
 conserta-se um arquivo.
 
 Detalhes das sequências que não podem ser invertidas (boot, ciclo de voz,
-encerramento), orçamento de latência e integração WhatsApp estão em
+encerramento) e o orçamento de latência estão em
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) e no
 [`docs/GUIA_TECNICO.md`](docs/GUIA_TECNICO.md).
+
+Registro do projeto: [`DECISIONS.md`](DECISIONS.md) (uma entrada por decisão não
+óbvia), [`docs/DIARIO_DE_BORDO.md`](docs/DIARIO_DE_BORDO.md) (narrativa do
+desenvolvimento) e [`docs/COMPLIANCE.md`](docs/COMPLIANCE.md) (conformidade com
+o edital e o material do curso — **consultar antes de declarar um marco pronto**).
 
 ---
 
@@ -88,8 +90,8 @@ encerramento), orçamento de latência e integração WhatsApp estão em
 | Android SDK | Platform 35, Build-Tools 35.0.0, Platform-Tools | via Android Studio ou `android-commandlinetools` |
 | NDK | 27.0.12077973 | para whisper.cpp (JNI, `.so` por ABI). `sdkmanager "ndk;27.0.12077973" "cmake;3.22.1"` |
 
-> Modelos on-device (whisper `ggml-tiny`, Piper/sherpa-onnx pt-BR, Silero VAD,
-> openWakeWord) são baixados pelo setup do M4 e **não** entram no Git.
+> Modelos on-device (whisper `ggml-tiny` e voz Piper/sherpa-onnx pt-BR) são
+> baixados pelo passo 2 abaixo e **não** entram no Git.
 
 ### 1. `local.properties` (não versionado)
 
@@ -146,9 +148,18 @@ build precisa funcionar **offline** (o Wi-Fi de evento é ruim).
 ./gradlew :app:assembleDebug        # gera o APK de debug
 ./gradlew :app:installDebug         # instala no dispositivo/emulador
 ./gradlew test                      # testes unitários (JVM)
-./gradlew connectedAndroidTest      # testes instrumentados (MDK) — exige device
+./gradlew connectedAndroidTest      # testes instrumentados — exige device
 adb logcat -s ClaryonField          # logs do app
+
+# O teste do MockDeviceKit roda ISOLADO (ver o KDoc da classe: o decodificador
+# do mock aborta quando divide processo com outra classe de teste).
+./gradlew :app:connectedDebugAndroidTest \
+  -Pandroid.testInstrumentationRunnerArguments.class=com.claryon.field.MockDeviceKitStreamTest
 ```
+
+> O emulador precisa ser **arm64-v8a** ou **x86_64**: são as ABIs compiladas
+> (`abiFilters`), e num emulador `x86` os testes nativos falham por `.so` ausente.
+> Numa máquina virgem, aceite as licenças antes: `sdkmanager --licenses`.
 
 ---
 
@@ -160,13 +171,29 @@ adb logcat -s ClaryonField          # logs do app
 | **M1** | Setup do DAT: GitHub Packages, `mwdat 0.9.0`, manifest, `claryonfield://` | ✅ **concluído** — `clean build` verde com os artefatos `mwdat-*` resolvidos |
 | **M2** | Mock Device Kit: registro, sessão e câmera reais (sem hardware) | ✅ **concluído** — teste instrumentado + painel ao vivo (REGISTERED→STARTED→STREAMING) |
 | **M3** | Pipeline de áudio HFP (`GlassesAudioManager`, AudioRecord/AudioTrack) | ✅ **concluído** — testes verdes; eco record→playback verificado (eco HFP final requer fone físico) |
-| **M4** | Voz on-device | ✅ roteador + VAD + resample 8→16 kHz + **STT whisper.cpp** e **TTS Piper/sherpa-onnx VERIFICADOS** no emulador + fallbacks nativos. Falta: openWakeWord/Silero + wiring do ciclo push-to-talk num device |
-| M5 | Agente e som (roteador, fila, earcons, laconicidade) | 🟡 roteador já adiantado no M4; falta fila/earcons |
-| M6 | Visão e evidência (OCR de placa, cofre cifrado) | pendente |
-| M7 | Rede (Supabase, WhatsApp, fila offline) | pendente |
-| M8 | Energia e resiliência (FGS, WorkManager, freio térmico) | pendente |
+| **M4** | Voz on-device | ✅ **concluído** — roteador + VAD + resample 8→16 kHz + **STT whisper.cpp** e **TTS Piper/sherpa-onnx verificados** no emulador + fallbacks nativos |
+| **M5** | Agente e som (fila de prioridade, earcons, laconicidade, Modo Tático) | ✅ **concluído** — `SoundScheduler` (política pura) + `PrioritySoundQueue` + `EarconSynthesizer`, com testes |
+| **M6** | Visão e evidência (OCR de placa, cofre cifrado) | ✅ **concluído** — OCR leu placa impressa; 30 segmentos cifrados → cadeia íntegra; **adulterar 1 byte → verificação aponta o segmento** |
+| **M7** | Rede (Supabase + fila offline durável) | ✅ **concluído** — fila sobrevive à morte do processo; drenagem FIFO; despacho honesto (`Enviada` \| `Enfileirada`) |
+| **M8** | Energia (FGS por modo, WorkManager, modos, freio térmico) | ✅ **concluído** — verificado em aparelho: Standby → serviço parado, Ativo → `0x90`, Ocorrência → `0xD0`, e degradação sem crash quando falta permissão |
 
-Padrão de trabalho: **um marco por sessão**, com revisão humana entre eles.
+**Todos os marcos do plano estão concluídos.** Padrão de trabalho: **um marco por
+sessão**, com revisão humana entre eles.
+
+### O que ainda não existe (leia antes de assumir)
+
+Os componentes acima são verificados **isoladamente**. O que falta é a
+**montagem do produto** — e isso é deliberadamente explícito aqui para ninguém
+se enganar lendo a tabela:
+
+| Lacuna | Consequência |
+|---|---|
+| **Não há executor de intenções.** O roteador devolve `Intent`, a resposta é falada, e nada acontece | O app diz *"Apoio solicitado, guarnição avisada."* **sem tentar enviar** e *"Gravação iniciada."* **sem gravar** |
+| `core-sound`, `core-evidence` e `core-sync` **não são importados** por `app/src/main` | Nenhum earcon toca; o cofre nunca é aberto; a fila nunca recebe nada |
+| Os modelos (`ggml-tiny`, voz Piper) vivem em `app/src/androidTest/assets` | O **APK de produção não os contém** — no aparelho do evento, whisper e Piper não existem |
+| **Wake word não implementada** (`WakeWordDetector` é só interface) | O acionamento é push-to-talk por botão. O VAD é por energia, não Silero |
+| `Telemetry` não é chamado em lugar nenhum | As metas de latência e bateria são **alvos, não medições** |
+| `MessagingGateway` é contrato sem implementação | O canal de mensageria tática está por definir (o WhatsApp saiu do escopo — ver `DECISIONS.md`) |
 
 ---
 

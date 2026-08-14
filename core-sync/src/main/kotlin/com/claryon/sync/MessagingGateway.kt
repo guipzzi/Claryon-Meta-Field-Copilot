@@ -4,15 +4,15 @@ import com.claryon.common.Result
 import kotlinx.coroutines.flow.Flow
 
 /**
- * Gateway de mensageria tática.
+ * Gateway de mensageria tática — **contrato sem implementação**.
  *
- * Implementações:
- *  - WhatsAppDirectGateway (Cloud API 1:1 — demo oficial do hackathon);
- *  - WhatsAppGroupGateway  (Groups API — atrás de feature flag, exige OBA);
- *  - FakeGateway           (desenvolvimento e testes em CI).
+ * O canal concreto está por definir (ver `DECISIONS.md`, M7). O destino é
+ * abstraído por [TacticalMessage.recipientType], permitindo trocar 1:1 por grupo
+ * sem reescrita, e a mensagem é um **objeto tipado preenchendo um template
+ * aprovado** — nunca a transcrição bruta, para que erro de transcrição não vire
+ * erro operacional.
  *
- * O destino é abstraído por [TacticalMessage.recipientType], permitindo trocar
- * 1:1 por grupo sem reescrita. Contrato fixado no M0; implementação no M7.
+ * A saída de rede que existe hoje é o Supabase, por [SyncGateway] + [Outbox].
  */
 interface MessagingGateway {
     suspend fun send(msg: TacticalMessage): Result<MessageId>

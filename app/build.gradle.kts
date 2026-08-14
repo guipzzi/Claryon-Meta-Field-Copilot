@@ -51,8 +51,9 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
-    // O lint está desligado globalmente na raiz (build.gradle.kts) por causa do
-    // bug do AGP 8.7.2 com Kotlin 2.2; não há bloco `lint {}` por módulo.
+    // Lint ATIVO (o AGP 8.9.2 corrigiu o bug com Kotlin 2.2). O único achado
+    // suprimido é o MissingPermission do AudioRecord, com justificativa no
+    // próprio ponto de uso.
 }
 
 dependencies {

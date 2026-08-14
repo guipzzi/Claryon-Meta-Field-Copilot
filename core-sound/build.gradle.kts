@@ -1,8 +1,8 @@
 // core-sound — earcons, fila de prioridade e protocolo de laconicidade.
 // Num sistema sem display, o áudio é o único canal rico: cada erro tem earcon
 // próprio (falha nunca é silêncio) e resultado sensível sai codificado, nunca
-// falado (o alto-falante open-ear vaza som). No M0, apenas os contratos e o
-// modelo; a síntese/fila concreta chega no M5.
+// falado (o alto-falante open-ear vaza som). SoundScheduler é a política (pura e
+// testada); PrioritySoundQueue é o mecanismo; EarconSynthesizer sintetiza os tons.
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)

@@ -1,9 +1,13 @@
 # Compliance & Guidelines — Claryon Field
 
-Verificação de conformidade do que foi construído (M0/M1) e **checklist vivo** de
-guidelines extraídos do material teórico do curso (CEIA/Meta — Un12 Edge-AI/Android
-e Un13 DAT) e do edital. Cada item de milestone futuro deve ser conferido aqui
-antes de dizer "pronto".
+Verificação de conformidade do que foi construído (**M0 a M8**) e **checklist
+vivo** de guidelines extraídos do material teórico do curso (CEIA/Meta — Un12
+Edge-AI/Android e Un13 DAT) e do edital. Cada item de milestone deve ser
+conferido aqui antes de dizer "pronto".
+
+> **Última auditoria: 2026-08-14.** O checklist da seção C foi reconferido item a
+> item **contra o código**, não contra a memória de quem escreveu. Onde o estado
+> real diverge do planejado, está escrito o estado real.
 
 > Fonte dos guidelines: leitura integral de `Un12_Material_de_apoio_Meta.pdf`
 > (94 p.) e `Un13_Material_de_apoio_Meta.pdf` (64 p.). Un10/Un11 são conceituais
@@ -13,11 +17,11 @@ antes de dizer "pronto".
 
 ---
 
-## A. Veredito sobre M0 e M1
+## A. Veredito sobre as escolhas de arquitetura
 
-**Conclusão: em conformidade.** O material valida quase todas as nossas escolhas;
-não há contradição. As lacunas apontadas são de *implementação futura* (M3/M4),
-não defeitos do que já existe.
+**Conclusão: em conformidade.** O material valida as decisões estruturais do
+projeto; não há contradição. Esta tabela é sobre **escolhas**, não sobre estado
+de implementação — para o estado real, ver as seções B e C.
 
 | Decisão nossa | Material | Status |
 |---|---|---|
@@ -31,70 +35,91 @@ não defeitos do que já existe.
 | `claryonfield://` (VIEW+DEFAULT+BROWSABLE), scheme único | Un13 p.21,32 | ✅ valida |
 | minSdk 31 | Un13 p.54 — `setCommunicationDevice` exige API 31+ | ✅ valida a escolha |
 | whisper.cpp (ggml-tiny quantizado) STT | Un12 p.94,100 — a escolha típica recomendada | ✅ valida |
-| Silero VAD · openWakeWord · Piper/sherpa-onnx | Un12 p.96,97,101 — citados nominalmente | ✅ valida |
+| Piper/sherpa-onnx para TTS | Un12 p.96,101 — citado nominalmente | ✅ valida — **implementado e verificado** |
+| Silero VAD · openWakeWord (planejados) | Un12 p.97,101 — citados nominalmente | ✅ valida a escolha — **ainda não implementados** |
 | Roteador determinístico, sem LLM no caminho crítico | Un12 p.98; Un10/11 (RAG/LLM) fora de escopo | ✅ valida |
 | Cascata wake→VAD→STT, gatilho-nunca-loop | Un12 p.57,97 — bursty/race-to-sleep | ✅ valida |
 | ForegroundService (connectedDevice\|microphone\|camera) | Un12 p.55,59 | ✅ valida |
 | WorkManager (charging/UNMETERED/battery) | Un12 p.55,60 | ✅ valida |
-| `getThermalHeadroom`, NaN≠0, `sample` como teto | Un12 p.58,60 | ✅ valida |
+| `getThermalHeadroom`, NaN≠0 | Un12 p.58,60 | ✅ valida — **implementado e testado** |
+| `sample` como teto de taxa | Un12 p.58,60 | ✅ valida a escolha — **ainda não usado** |
 
 ---
 
-## B. Checkpoints obrigatórios do edital (§8.1) — como atendemos
+## B. Checkpoints obrigatórios do edital (§8.1) — estado real
 
-| Checkpoint | Nossa resposta | Onde |
-|---|---|---|
-| **Uso de IA** | 4 componentes de IA 100% locais: openWakeWord, Silero VAD, whisper.cpp, ML Kit OCR | core-voice, core-agent (M4–M6) |
-| **Câmera ou microfone** | Microfone (HFP) = canal primário; câmera (DAT) sob demanda | core-audio, core-glasses (M3, M6) |
-| **Output por áudio** | Earcons + TTS lacônico (≤7 palavras); resultado sensível = earcon codificado | core-sound (M5) |
-| **Privacidade e dados** | On-device no caminho crítico; sem reconhecimento facial; fala de terceiros não transcrita; evidência cifrada | core-evidence, políticas (M6) |
-| **Eficiência de bateria** | Cascata, modos Standby/Ativo/Ocorrência, câmera desligada por padrão, freio térmico | core-* (M8) |
+O edital exige que o componente de IA seja *"funcional e **comprovável durante o
+hackathon**"*. Por isso esta tabela separa **o que está construído e verificado**
+do **que está montado no app** — a diferença é o trabalho que resta.
+
+| Checkpoint | Construído e verificado | Montado no app | Evidência |
+|---|---|---|---|
+| **Uso de IA** | 3 componentes 100% locais: **whisper.cpp** (STT), **Piper/sherpa-onnx** (TTS neural), **ML Kit Text Recognition** (OCR). VAD por energia (RMS) | ⚠️ **parcial** — os modelos vivem em `app/src/androidTest/assets`; o **APK de produção não os embarca** | `core-voice/…/WhisperCppStt.kt`, `PiperTts.kt`, `app/…/vision/PlacaOcr.kt` |
+| **Câmera ou microfone** | Microfone HFP real (canal primário); stream de câmera do DAT sobe e entrega frames | ⚠️ microfone sim; os frames de câmera **não alimentam o OCR** | `core-audio/…/GlassesAudioManagerImpl.kt`, `core-glasses/…/DatGlassesFacade.kt` |
+| **Output por áudio** | Reprodução via `AudioTrack` (`USAGE_VOICE_COMMUNICATION`); TTS lacônico (≤7 palavras, com teste); earcons sintetizados; fila de prioridade | ⚠️ a fala sai; **os earcons ainda não tocam** (`core-sound` não é importado por `app/src/main`) | `core-sound/…/EarconSynthesizer.kt`, `PrioritySoundQueue.kt` |
+| **Privacidade e dados** | On-device no caminho crítico; **zero** reconhecimento facial; fala de terceiros não transcrita (rota HFP é pré-condição da captura); cofre `EncryptedFile` + Keystore com cadeia de hash — adulterar 1 byte aponta o segmento | ⚠️ o cofre **nunca é instanciado** pelo app | `core-evidence/…/EncryptedEvidenceVault.kt`, `HashChain.kt` |
+| **Eficiência de bateria** | Modos Standby/Ativo/Ocorrência como política pura e testada; FGS com tipos derivados do modo; freio térmico com `NaN` tratado; WorkManager em duas faixas | ✅ **montado** — verificado em aparelho | `core-agent/…/PowerPolicy.kt`, `ThermalGovernor.kt`, `app/…/service/CopilotService.kt` |
+
+**Não afirmamos** ter openWakeWord nem Silero VAD: `WakeWordDetector` é interface
+sem implementação e o VAD é por energia. O acionamento é **push-to-talk**, que o
+Un12 §12.13.3.7.4 endossa como primeiro passo legítimo.
 
 ---
 
-## C. Checklist vivo por milestone (conferir antes de "pronto")
+## C. Checklist por milestone — reconferido no código (2026-08-14)
+
+Legenda: ✅ feito · ⚠️ parcial · ❌ não feito · ⚪ não se aplica.
 
 ### M2 — Mock Device Kit + registro
-- [ ] `Wearables.initialize(context)` **uma vez, no `onCreate()` de uma classe `Application`** (não em Activity). Falta criar essa classe. *(Un13 p.34)*
-- [ ] Nenhuma chamada ao SDK antes de `initialize` (guardar contra `NOT_INITIALIZED`). *(Un13 p.34)*
-- [ ] Observar `registrationState` **e** o fluxo separado de erro de registro. *(Un13 p.31)*
-- [ ] Detectar "registro perdido" (state volta a `AVAILABLE` sozinho — Dev Mode 1-app-por-vez). *(Un13 p.32)*
-- [ ] Sessão: tratar até STOPPED (terminal); não reviver STOPPED; em PAUSED não reiniciar. *(Un13 p.35,36)*
-- [ ] `createSession` trata `NO_ELIGIBLE_DEVICE`/`SESSION_ALREADY_EXISTS`; coletar `session.errors`. *(Un13 p.33,35)*
-- [ ] MDK atrás de flag `DEBUG`; vídeo de mock em H.265; tratar foto rotacionada 90°. *(Un13 p.62,63)*
-- [ ] **Reconfirmar via `search_dat_docs`** os enums reais 0.9: `RegistrationState`, `DeviceSessionState`, `StreamState`, erros — o material é 0.8 e linka 0.6. *(Regra Zero)*
+
+- ✅ `Wearables.initialize` **uma vez, no `onCreate()` de uma `Application`** — `app/…/ClaryonApp.kt` → `core-glasses/…/GlassesRuntime.kt`. *(Un13 p.34)*
+- ✅ Nenhuma chamada ao SDK antes de `initialize` — garantido pelo compilador: as deps do DAT são `implementation` em `core-glasses`, então `app` não consegue importar `Wearables`. *(Un13 p.34)*
+- ⚠️ Observar `registrationState` **e** o fluxo separado de erro: o estado é observado; **`registrationErrorStream` ainda não**. *(Un13 p.31)*
+- ❌ Detectar "registro perdido" (Dev Mode, 1 app por vez): sem reação a `REGISTERED → UNAVAILABLE`. *(Un13 p.32)*
+- ⚠️ Sessão até STOPPED (terminal), não reviver, não reiniciar em PAUSED: `STOPPED → cleanupSession()` ✅; `PAUSED` mapeado mas sem comportamento (ainda não há processamento a segurar). *(Un13 p.35,36)*
+- ⚠️ `createSession` trata `NO_ELIGIBLE_DEVICE`/`SESSION_ALREADY_EXISTS`: a falha é logada, mas **sem distinguir os códigos**. `session.errors` **agora é publicado** em `sessionErrors` (era coletado e descartado). *(Un13 p.33,35)*
+- ⚠️ MDK atrás de flag DEBUG ✅ (`debugImplementation` + `BuildConfig.DEBUG`); rotação de 90° da foto ❌ — `capturePhoto()` ainda descarta os bytes. *(Un13 p.62,63)*
+- ✅ Enums 0.9 reconfirmados via `search_dat_docs`/sample oficial — ver `DECISIONS.md`. *(Regra Zero)*
 
 ### M3 — Áudio HFP
-- [x] Roteamento SCO (`TYPE_BLUETOOTH_SCO`) via `setCommunicationDevice`; a ordem "HFP antes do stream" é imposta pela orquestração do `app` (M8). *(Un13 p.53)*
-- [x] Tratar `setCommunicationDevice()==false` e lista vazia (erro tipado claro, não falha silenciosa); `MODE_IN_COMMUNICATION`. **Testado.** *(Un13 p.54)*
-- [x] `AudioRecord` fonte `VOICE_COMMUNICATION`, mono, PCM 16-bit, `Dispatchers.IO`. *(Un13 p.54; Un12 p.28)*
-- [x] **`clearCommunicationDevice()` sempre no encerramento.** *(Un13 p.56)*
-- [ ] ⚠️ **RISCO: HFP entrega 8 kHz; Whisper espera 16 kHz.** Resample + medir acurácia — **M4**. *(§D)*
-- [ ] Eco HFP roteado pelo SCO validado em **fone Bluetooth físico** (o emulador não tem SCO). *(Un13 p.61)*
+
+- ✅ Roteamento SCO (`TYPE_BLUETOOTH_SCO`) via `setCommunicationDevice`. *(Un13 p.53)*
+- ✅ Trata `setCommunicationDevice() == false` e lista vazia, com erro tipado. **Testado.** *(Un13 p.54)*
+- ✅ `AudioRecord` `VOICE_COMMUNICATION`, mono, PCM 16-bit, `Dispatchers.IO`. *(Un13 p.54; Un12 p.28)*
+- ✅ `clearCommunicationDevice()` sempre no encerramento — agora com contagem de referência, para um caminho não derrubar a rota de outro. *(Un13 p.56)*
+- ⚠️ Resample 8→16 kHz: **existe** (`PcmResampler`), mas o `AudioRecord` já abre a 16 kHz, então na prática **não dispara** na rota HFP. Acurácia com áudio HFP real **não medida**.
+- ❌ Ordem "HFP antes do stream" **não é imposta pela orquestração** — a UI libera a câmera sem exigir rota de áudio. *(Un13 p.53; §D)*
+- ❌ Eco HFP validado em **fone Bluetooth físico** (o emulador não tem SCO). *(Un13 p.61)*
 
 ### M4 — Voz on-device
-- [ ] `WhisperCppStt` em **lote**: só transcreve após o VAD fechar a janela; nunca alimenta PCM incremental. *(Un12 Nota 20 p.101)*
-- [ ] Fallback `AndroidOnDeviceStt` usa `createOnDeviceSpeechRecognizer`+`isOnDeviceRecognitionAvailable` (API 31+) ou `EXTRA_PREFER_OFFLINE` — **nunca** o `SpeechRecognizer` padrão (vaza áudio p/ servidor). *(Un12 p.99,101)*
-- [ ] `SpeechRecognizer` na main thread + `destroy()`; `ERROR_NO_MATCH` = earcon, não erro. *(Un12 p.100)*
-- [ ] `AndroidTts.speak()` só após `onInit`; enfileirar até `ready`. *(Un12 p.100)*
-- [ ] Assinaturas de whisper.cpp e sherpa-onnx confirmadas nos repos oficiais antes de codar (Regra Zero análoga). *(Un12 p.101)*
-- [ ] Validar tudo em **modo avião** (nenhum byte sai). *(Un12 p.98)*
+
+- ✅ `WhisperCppStt` em **lote**: `VoiceCycle` só transcreve após o VAD fechar a janela. *(Un12 Nota 20 p.101)*
+- ✅ Fallback usa `createOnDeviceSpeechRecognizer` + `isOnDeviceRecognitionAvailable` + `EXTRA_PREFER_OFFLINE` — nunca o `SpeechRecognizer` padrão, que vaza áudio. *(Un12 p.99,101)*
+- ✅ `SpeechRecognizer` na main thread, `destroy()` no `finally`, `cancel()` reenviado à main; `ERROR_NO_MATCH` tratado como "não entendi". ⚠️ ainda vira texto na tela, **não earcon**. *(Un12 p.100)*
+- ✅ `AndroidTts.speak()` só após `onInit` (enfileira em `ready`); agora com timeout e id por utterance. *(Un12 p.100)*
+- ✅ Assinaturas de whisper.cpp e sherpa-onnx confirmadas nos repos oficiais. *(Un12 p.101)*
+- ❌ Validar tudo em **modo avião** (nenhum byte sai) — não registrado. *(Un12 p.98)*
+- ❌ Wake word: `WakeWordDetector` é interface **sem implementação**. Acionamento é push-to-talk.
 
 ### M6 — Visão e evidência
-- [ ] Frame → pré-proc (tamanho/normalização do export) → inferência `Dispatchers.Default` → threshold/NMS; `conflate` no Flow. *(Un12 p.86,87)*
-- [ ] Conferir `dataType()` do tensor (não alimentar INT8 com float). *(Un12 p.89)*
-- [ ] ⚠️ OCR de placa a distância degrada (texto pequeno/ângulo) — medir cenário real; talvez pré-detectar/recortar a placa. *(Un12 p.80)*
-- [ ] `capturePhoto()` exige stream ativo, uma por vez (`CaptureError.CaptureInProgress`). *(Un13 p.43)*
+
+- ⚠️ Pipeline de frames: `conflate` **adicionado** em `withCamera`; mas **nenhum frame alimenta o OCR** — `PlacaOcr` recebe um `Bitmap` avulso e não é chamado por código de produção. *(Un12 p.86,87)*
+- ⚪ `dataType()` do tensor — não há LiteRT/`.tflite` no projeto; o ML Kit não expõe tensores. *(item não se aplica)*
+- ❌ OCR de placa **a distância** não medido: o teste usa bitmap sintético 900×320 com texto de 180 px — o oposto do cenário difícil. *(Un12 p.80)*
+- ⚠️ `capturePhoto()`: guarda de "sem stream" ✅ e **trava de concorrência adicionada** ✅; foto ainda descartada ❌. *(Un13 p.43)*
+- ✅ Cofre cifrado + cadeia de custódia: `EncryptedFile` (AES-256-GCM) + Keystore, hash encadeado, manifesto parcial a cada segmento. **Adulterar 1 byte → aponta o segmento** (teste instrumentado). ⚠️ nunca instanciado pelo app.
 
 ### M8 — Energia
-- [ ] `foregroundServiceType` no manifest **e** em `startForeground()`; FGS só de tela visível. *(Un12 p.55,59)*
-- [ ] `sample` como teto de taxa; `getThermalHeadroom` antes de rajadas (NaN = sem info). *(Un12 p.58,60)*
-- [ ] Medir com Power Profiler + `dumpsys batterystats` / Battery Historian. *(Un12 p.61)*
-- [ ] **Reativar o Android Lint** (desligado no M1 por bug AGP 8.7.2 × Kotlin 2.2). Ver DECISIONS.
+
+- ✅ `foregroundServiceType` no manifest **e** em `startForeground()`, com o tipo **derivado do modo**; FGS só de tela visível. Verificado em aparelho (`0x90`/`0xD0`). Bônus: intersecção com as permissões concedidas, após `SecurityException` real. *(Un12 p.55,59)*
+- ⚠️ `getThermalHeadroom` com `NaN` tratado ✅ (3 testes); mas o teto de FPS é apenas **exibido** — não é aplicado ao stream, e `podeIniciarRajada` nunca é chamado. `sample` não é usado. *(Un12 p.58,60)*
+- ❌ Medir com Power Profiler + `dumpsys batterystats` — nenhum número medido. *(Un12 p.61)*
+- ✅ Android Lint **reativado** (AGP 8.9.2 + Gradle 8.11.1); pegou um achado real de `MissingPermission`. Ver `DECISIONS.md`.
+- ✅ WorkManager em duas faixas: tática (`CONNECTED`) e pesada (`UNMETERED` + carregando + bateria ok).
 
 ---
 
-## D. Riscos e lacunas surfados na leitura (não são defeitos de M0/M1)
+## D. Riscos e lacunas em aberto
 
 1. **8 kHz (HFP) → 16 kHz (Whisper).** O microfone dos óculos chega mono a 8 kHz; o Whisper espera 16 kHz. Exige resample e pode pressionar a meta de 92% de acurácia do STT. **Validar com áudio HFP real, não com fone de melhor qualidade.** *(Un12 p.93; Un13 p.52)*
 2. **`SpeechRecognizer` padrão vaza áudio para servidor.** O fallback nativo só é aceitável na variante on-device explícita; se o pacote pt-BR não estiver no aparelho, não há STT local nativo → plano B é depender só do whisper.cpp. *(Un12 p.99,101)*
@@ -105,7 +130,21 @@ não defeitos do que já existe.
 
 ---
 
-## E. Confirmação de acesso à documentação (2026-08-13)
+## E. Lacunas de montagem (a maior dívida do projeto)
+
+Descobertas na auditoria de 2026-08-14 e detalhadas no `README.md`:
+
+1. **Não existe executor de intenções.** O roteador devolve `Intent`, a resposta é falada, e **nada é executado** — o app diz "Apoio solicitado, guarnição avisada." sem tentar enviar. Colide com o checkpoint 1 do edital ("funcional e comprovável") e com o critério de considerações éticas (§11.2).
+2. **`core-sound`, `core-evidence` e `core-sync` não são importados por `app/src/main`.** São dependências declaradas e código testado, mas morto no produto.
+3. **Modelos fora do APK de produção.** `ggml-tiny` e a voz Piper vivem em `app/src/androidTest/assets` — no aparelho fornecido pela organização (§9), whisper e Piper não existem.
+4. **Fluxo de permissões incompleto.** `MainActivity` pede só 2 das 4 permissões (faltam `CAMERA` e `POST_NOTIFICATIONS`), sem checagem prévia, rationale ou recuperação de negação permanente — o Un12 §12.9.4.6 avisa que negação permanente é o que mais derruba demo de hackathon.
+5. **Nenhuma métrica é medida.** `Telemetry` não tem uma única chamada. As seis metas do projeto são alvos, não medições — contra a própria regra "métrica adicionada no fim nunca é adicionada".
+6. **Entregáveis da Etapa 5 (§5.5)** — documento final revisado e apresentação no template da organização, prazo **22/08** — ainda não existem no repositório.
+7. **§14.1 veda alteração de escopo.** O WhatsApp saiu do escopo por decisão de produto; se o documento submetido o menciona, a mudança precisa ser formalizada com a organização, não apenas removida da documentação.
+
+---
+
+## F. Confirmação de acesso à documentação (2026-08-13)
 
 | Fonte | Estado |
 |---|---|

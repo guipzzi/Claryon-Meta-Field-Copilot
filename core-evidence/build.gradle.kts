@@ -1,8 +1,8 @@
 // core-evidence — cofre cifrado e cadeia de custódia.
 // Evidência SEMPRE em EncryptedFile + chave no Android Keystore; jamais em
 // storage inseguro. Cada segmento recebe SHA-256 encadeado (adulterar 1 byte
-// quebra a cadeia de forma detectável e demonstrável em juízo). No M0, apenas
-// os contratos; implementação no M6.
+// quebra a cadeia de forma detectável e demonstrável em juízo — verificado em
+// teste instrumentado). Implementação: EncryptedEvidenceVault + HashChain.
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)

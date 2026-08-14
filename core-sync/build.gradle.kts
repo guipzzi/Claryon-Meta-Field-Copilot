@@ -1,8 +1,9 @@
-// core-sync — Supabase, MessagingGateway (WhatsApp) e fila offline (WorkManager).
+// core-sync — Supabase (PostgREST), fila offline durável e drenagem por WorkManager.
 // A mensagem que trafega é um objeto tipado preenchendo um template aprovado,
 // nunca a transcrição bruta. Sem rede, a mensagem entra na fila e o TTS confirma
-// "apoio na fila" — NÃO mente dizendo que enviou. No M0, apenas os contratos;
-// implementação no M7.
+// "apoio na fila" — NÃO mente dizendo que enviou: TacticalDispatcher devolve
+// Enviada | Enfileirada, e o chamador é obrigado a distinguir.
+// MessagingGateway segue como contrato sem implementação (canal a definir).
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)

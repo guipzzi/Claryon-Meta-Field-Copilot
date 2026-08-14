@@ -1,8 +1,9 @@
 // core-audio — roteamento HFP/SCO e captura/reprodução PCM.
 // Áudio NÃO passa pelo DAT: microfone e alto-falantes são acessados por
-// AudioManager/AudioRecord/AudioTrack via perfis Bluetooth. No M0, apenas os
-// contratos; a implementação (AudioRecord VOICE_COMMUNICATION → Flow<ShortArray>)
-// chega no M3, validada contra fone Bluetooth comum com HFP.
+// AudioManager/AudioRecord/AudioTrack via perfis Bluetooth. GlassesAudioManagerImpl
+// roteia o SCO (contagem de referência, para um caminho não derrubar a rota de
+// outro) e entrega AudioRecord VOICE_COMMUNICATION → Flow<ShortArray>.
+// O eco HFP final ainda precisa de validação com fone Bluetooth físico.
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)

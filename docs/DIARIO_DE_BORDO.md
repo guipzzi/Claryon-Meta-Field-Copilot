@@ -8,7 +8,8 @@ Documentos irmãos:
 - [`DECISIONS.md`](../DECISIONS.md) — uma linha por decisão não óbvia (o *registro formal*).
 - [`README.md`](../README.md) — setup e visão geral.
 - [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) — sequências e contratos.
-- [`docs/GUIA_TECNICO.md`](GUIA_TECNICO.md) — briefing de engenharia original.
+- [`docs/GUIA_TECNICO.md`](GUIA_TECNICO.md) — guia técnico de engenharia.
+- [`docs/COMPLIANCE.md`](COMPLIANCE.md) — conformidade com o edital e o material do curso.
 - Este diário — a *narrativa* de como chegamos aqui.
 
 ---
@@ -18,8 +19,8 @@ Documentos irmãos:
 **Claryon Field** é um app companion Android/Kotlin para os óculos **Ray-Ban Meta
 (sem display)**, usando o **Meta Wearables Device Access Toolkit (DAT)**. É um
 **copiloto de voz para o agente de segurança pública**: ele fala, o app entende
-**localmente** (sem nuvem no caminho crítico), age (pede apoio no WhatsApp, grava
-evidência, consulta placa) e responde por **áudio no ouvido**. A ausência de tela
+**localmente** (sem nuvem no caminho crítico), age (pede apoio pelo canal tático,
+grava evidência, consulta placa) e responde por **áudio no ouvido**. A ausência de tela
 é a especificação, não uma limitação — o canal visual do agente fica livre para o
 ambiente. Entrega no hackathon presencial em **18/09/2026**.
 
@@ -187,7 +188,7 @@ oficial público, GitHub Packages resolve, 15 PDFs do curso lidos/mapeados.
 fluxo de registro, sessão e stream de câmera — usando o **Mock Device Kit** (câmera
 do celular como fonte), sem óculos e sem o app Meta AI.
 
-**Como foi feito com segurança (Regra Zero):** cloneei o **sample oficial
+**Como foi feito com segurança (Regra Zero):** clonei o **sample oficial
 `CameraAccess`** (repo `facebook/meta-wearables-dat-android`, 0.9.0) e confirmei
 CADA assinatura antes de escrever ("samples > docs"). Isso corrigiu suposições que
 eu erraria de memória: no 0.9 não existe `RegistrationState.AVAILABLE`, e a câmera
@@ -213,11 +214,11 @@ eu erraria de memória: no 0.9 não existe `RegistrationState.AVAILABLE`, e a c�
 3. **Painel ao vivo no emulador** confirmou visualmente: Registro **REGISTERED**,
    Sessão **STARTED**, Stream **STREAMING**, **Frames #56 · 480×640** subindo.
 
-**Aprendizado de depuração:** o painel a princípio ficava em "sessão IDLE" no
-toque manual — não era bug de código, e sim (a) minha coordenada de toque
-desatualizada (o card do mock cresce para 2 linhas e empurra os botões) e (b) uma
-melhoria real: manter **uma única** instância de `AutoDeviceSelector` (como o
-sample), em vez de recriar a cada `createSession`. Com isso, o ciclo completa.
+**Aprendizado de depuração:** o painel a princípio ficava em "sessão IDLE" ao ser
+acionado — não era bug de código, e sim (a) o toque caía fora do botão, porque o
+card do mock cresce para duas linhas e empurra o layout, e (b) uma melhoria real:
+manter **uma única** instância de `AutoDeviceSelector` (como o sample), em vez de
+recriar a cada `createSession`. Com isso, o ciclo completa.
 
 ---
 
@@ -331,6 +332,8 @@ cortesia já tinham teste desde o M4.
   `verificar()` aponta o segmento 2. Dupla camada: o GCM apanha byte adulterado,
   a cadeia apanha troca/remoção/reordenação.
 
+---
+
 ## 2026-08-14 — M7: rede (Supabase + fila offline)
 
 WhatsApp saiu do escopo por ora (decisão de produto); o contrato
@@ -353,6 +356,8 @@ O que importa aqui não é o `POST` — é o **comportamento sem rede**. Três p
 faixas de WorkManager: tática (só `CONNECTED`) e pesada (`UNMETERED` +
 carregando + bateria ok) — mensagem tática não espera o carregador; evidência
 espera.
+
+---
 
 ## 2026-08-14 — M8: energia (serviço de primeiro plano, modos, térmico)
 
@@ -383,6 +388,56 @@ Verificação no emulador (`dumpsys activity services`):
 | Ocorrência | `0xD0` | connectedDevice \| microphone \| camera |
 | Ocorrência **sem** permissão de câmera | `0x90`, sem crash | degradou |
 
+---
+
+## 2026-08-14 — Auditoria final: o que os testes verdes não mostravam
+
+Com M0–M8 concluídos, fizemos a auditoria completa: código, compliance contra o
+edital e o material do curso, e documentação. O resultado mudou a leitura do
+projeto.
+
+**O achado central não é um bug — é uma ausência.** Todos os componentes existem
+e passam nos testes, mas **o produto não está montado**:
+
+```
+imports de core-* em app/src/main:  agent, voice, glasses, common, audio
+                          ausentes:  sound, evidence, sync
+```
+
+Não há executor de intenções: o roteador devolve `Intent`, `OperationalResponses`
+devolve a frase, o TTS fala — e acabou. O app diz *"Apoio solicitado, guarnição
+avisada."* **sem tentar enviar**. É a violação mais dura possível da regra de
+honestidade que o próprio `TacticalDispatcher` codificou em tipo. Nenhum earcon
+toca. Os modelos de IA vivem em `androidTest` e **não entram no APK de produção**.
+
+**Vinte e um defeitos de código corrigidos** (6 altos). Os que mais ensinam:
+
+- **A cadeia de custódia tinha uma corrida.** `append()` lia `seq`/`prev` fora do
+  mutex: dois appends concorrentes gravavam ambos em `seg_00000.enc`, o segundo
+  por cima do primeiro. Perda silenciosa de evidência — no módulo que existe
+  justamente para impedir isso. Testes verdes não pegam corrida.
+- **`falarComando()` transcrevia terceiros.** Sem rotear o HFP antes, o
+  `SpeechRecognizer` grava pelo microfone do celular, que é omnidirecional. Sem o
+  beamforming dos óculos, a fala do abordado entra na transcrição — proibição
+  absoluta do projeto, atravessada por uma função de diagnóstico.
+- **O VAD nunca fechava a janela sob ruído sustentado.** Sirene ou motor mantêm a
+  energia acima do limiar; sem teto de duração, o acumulador cresce até estourar
+  e o copiloto fica mudo **exatamente no ambiente para o qual foi feito**.
+- **`HashChain` dava "íntegra" para cadeia truncada.** Apagar os últimos
+  segmentos deixando o manifesto intacto passava na verificação: o laço iterava
+  sobre os segmentos presentes, e ninguém reparava nos que sumiram.
+- **O celular ficava preso em `MODE_IN_COMMUNICATION`.** Três caminhos chamavam
+  `iniciar()`/`liberar()`; concorrentes, cada um restaurava o modo do outro. É a
+  armadilha dos 8 kHz da tabela do projeto, chegando por um caminho que a tabela
+  não previa. Virou contagem de referência.
+
+**Lição que vale registrar:** todos esses passaram por revisão e por suíte verde.
+O que os expôs foi ler o código procurando **cenários de falha concretos**, não
+procurando erros. Teste verde prova que o caminho feliz funciona; não prova que
+os outros existem.
+
+---
+
 ## Estado atual (fim de 2026-08-14)
 
 - **Marcos concluídos:** M0, MCP, M1, M2, M3, **M4** (whisper.cpp nativo +
@@ -396,11 +451,36 @@ Verificação no emulador (`dumpsys activity services`):
   Supabase por PostgREST. WhatsApp fora do escopo por ora.
 - **Energia:** `CopilotService` (FGS com tipos derivados do modo, degrada sem
   permissão), `PowerPolicy`, `ThermalGovernor`, WorkManager em duas faixas.
-- **Próximas tarefas:** auditoria final + compliance (edital e material de
-  apoio) + verificação completa de documentação. Depois: ensaio da demo com
-  hardware real e medição de bateria/latência em campo.
+- **Auditoria final:** concluída (código, compliance e documentação). 21 defeitos
+  corrigidos; documentação reconciliada com o código.
+
+### O que falta — em ordem de importância
+
+1. **Montar o produto.** Um `IntentExecutor` ligando `Intent` → `EvidenceVault` /
+   `TacticalDispatcher` / `PlacaOcr` / `CopilotService`, com a resposta derivada
+   do **resultado** da ação (`Despacho.Enviada` vs `Enfileirada` já modela isso).
+   Fecha de uma vez o "fala sem agir" e os três módulos mortos.
+2. **Ligar os earcons** (`PrioritySoundQueue` + `EarconSynthesizer`) ao
+   `onOuviVoce` e a todo caminho de falha. É o item mais barato do relatório e é
+   literalmente *"o único canal de saída"* do checkpoint 3 do edital.
+3. **Embarcar os modelos** em `app/src/main/assets` (ou um worker de download com
+   as constraints que `SyncManager` já sabe agendar) e instanciar o `PiperTts`.
+4. **Completar o fluxo de permissões**: 4 permissões, rationale e recuperação de
+   negação permanente (`openAppSettings`).
+5. **Instrumentar o `Telemetry`** — sem isso, quatro das seis metas do projeto
+   são afirmações sem prova diante da banca.
+6. **Entregáveis da Etapa 5** (§5.5 do edital): documento final e apresentação no
+   template da organização — prazo **22/08**.
+7. Ensaio da demo com hardware real, eco HFP em fone físico e medição de
+   bateria/latência em campo.
 
 **Pendências conhecidas (registradas para não se perderem):**
 - Revogar e rotacionar o PAT do GitHub (foi exposto em conversa durante o setup).
 - Confirmar a versão mais recente do `mwdat` em GitHub Packages no início de cada marco que toque o SDK.
 - `security-crypto` está em `1.1.0-alpha06`; migrar para a 1.1.0 estável quando sair.
+- **§14.1 do edital veda alteração de escopo:** conferir se o documento submetido
+  menciona WhatsApp. Se menciona, a saída do escopo precisa ser formalizada com a
+  organização — não apenas removida da documentação.
+- `MockDeviceKitStreamTest` roda **isolado** (o decodificador do mock aborta ao
+  dividir processo com outra classe de teste). Reavaliar a cada atualização do
+  `mwdat-mockdevice`.

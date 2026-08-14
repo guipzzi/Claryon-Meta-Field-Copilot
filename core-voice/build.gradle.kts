@@ -1,8 +1,9 @@
 // core-voice — pipeline de voz 100% on-device: WakeWord, VAD, STT, TTS.
 // Toda peça de risco tem interface com dois back-ends (primário + fallback
-// nativo do Android), para permitir plano B sem reescrita. No M0, apenas os
-// contratos e tipos; implementações nativas (whisper.cpp, sherpa-onnx, Silero,
-// openWakeWord) chegam no M4.
+// nativo do Android), para permitir plano B sem reescrita. Implementado e
+// verificado em aparelho: WhisperCppStt (JNI/NDK), PiperTts (sherpa-onnx),
+// AndroidTts e AndroidOnDeviceStt (fallbacks), EnergyVoiceActivityDetector.
+// Ainda sem implementação: WakeWordDetector (o acionamento é push-to-talk).
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
@@ -12,8 +13,8 @@ android {
     namespace = "com.claryon.voice"
     compileSdk = 35
 
-    // NDK: compila o whisper.cpp (submódulo) via CMake. arm64-v8a cobre os
-    // celulares modernos e o emulador arm64; outras ABIs entram no release.
+    // NDK: compila o whisper.cpp (submódulo) via CMake. As ABIs estão no
+    // defaultConfig abaixo e precisam casar com os abiFilters do `app`.
     ndkVersion = "27.0.12077973"
 
     defaultConfig {
