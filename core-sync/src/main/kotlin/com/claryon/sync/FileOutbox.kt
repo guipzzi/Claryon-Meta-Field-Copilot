@@ -83,7 +83,17 @@ class FileOutbox(private val dir: File) : Outbox {
         }
     }
 
-    private fun ler(f: File): OutboxItem? {
+    /**
+     * Lê um item; devolve `null` se o arquivo estiver **corrompido ou truncado**
+     * (o caminho de escrita não-atômico existe como fallback, e um `.item` pela
+     * metade é possível se o processo morrer no pior instante).
+     *
+     * Nunca propaga exceção: sem o `runCatching`, um Base64 inválido subiria por
+     * `list()` → `drenar()` → worker, e **toda mensagem tática enfileirada depois
+     * nunca mais sairia** — um byte ruim travaria a fila para sempre. Quem drena
+     * remove os quarentenados, e a remoção é contabilizada (não é silêncio).
+     */
+    private fun ler(f: File): OutboxItem? = runCatching {
         if (!f.exists()) return null
         val campos = HashMap<String, String>()
         f.forEachLine { linha ->
@@ -91,13 +101,30 @@ class FileOutbox(private val dir: File) : Outbox {
             if (i > 0) campos[linha.substring(0, i)] = linha.substring(i + 1)
         }
         val payloadB64 = campos["payload"] ?: return null
-        return OutboxItem(
+        OutboxItem(
             id = campos["id"] ?: return null,
             type = campos["type"] ?: return null,
             payload = String(Base64.getDecoder().decode(payloadB64), Charsets.UTF_8),
             createdAtEpochMillis = campos["createdAt"]?.toLongOrNull() ?: return null,
             attempts = campos["attempts"]?.toIntOrNull() ?: 0,
         )
+    }.getOrNull()
+
+    /**
+     * Remove os arquivos que não parseiam. Sem isto, `size()` os contaria para
+     * sempre e o worker devolveria `retry()` eternamente — bateria gasta em
+     * retentativas que nunca teriam o que drenar. Devolve quantos foram removidos.
+     */
+    @Synchronized
+    override fun descartarCorrompidos(): Int {
+        var n = 0
+        for (f in arquivos()) {
+            if (ler(f) == null) {
+                f.delete()
+                n++
+            }
+        }
+        return n
     }
 
     private fun maiorSeq(): Long =

@@ -16,10 +16,14 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -62,6 +66,14 @@ class DatGlassesFacade(private val scope: CoroutineScope) : GlassesFacade {
     private val _frameInfo = MutableStateFlow<FrameInfo?>(null)
     val frameInfo: StateFlow<FrameInfo?> = _frameInfo.asStateFlow()
 
+    /**
+     * Erros de sessão do DAT, que chegam por um fluxo **separado** do estado.
+     * `replay = 1` para quem assinar logo depois de um erro ainda o receber;
+     * `extraBufferCapacity` para o `tryEmit`/`emit` não bloquear o coletor do SDK.
+     */
+    private val _sessionErrors = MutableSharedFlow<ClaryonError>(replay = 1, extraBufferCapacity = 8)
+    val sessionErrors: SharedFlow<ClaryonError> = _sessionErrors.asSharedFlow()
+
     // Uma única instância viva do seletor — como o sample oficial (`by lazy`).
     // Criar um seletor novo a cada createSession pode não ter resolvido o
     // dispositivo ativo ainda (leva a NO_ELIGIBLE_DEVICE).
@@ -76,6 +88,9 @@ class DatGlassesFacade(private val scope: CoroutineScope) : GlassesFacade {
     // _session/_stream/_frameInfo).
     private var sessionObserver: Job? = null
     private var streamObserver: Job? = null
+
+    /** `capturePhoto()` é uma por vez (regra do DAT). */
+    private val capturaEmCurso = java.util.concurrent.atomic.AtomicBoolean(false)
 
     // ── Registro ────────────────────────────────────────────────────────────
 
@@ -120,6 +135,21 @@ class DatGlassesFacade(private val scope: CoroutineScope) : GlassesFacade {
         return deferred.await()
     }
 
+    /**
+     * Encerra a sessão na ordem do contrato: **câmera/stream primeiro, sessão
+     * depois**. Sem isto, sair da tela cancela apenas os coletores: a sessão e o
+     * stream continuam vivos no SDK, os óculos seguem transmitindo por Bluetooth
+     * sem nenhum indicador, e um `createSession` seguinte encontra a anterior
+     * ativa.
+     *
+     * `DeviceSession.stop()` confirmado no artefato `mwdat-core:0.9.0`.
+     * Sessão parada é terminal: para voltar, criar uma **nova** (não reviver).
+     */
+    fun stopSession() {
+        activeCamera?.stop()
+        activeSession?.stop()
+    }
+
     private fun observeSession(s: DeviceSession) {
         sessionObserver?.cancel()
         sessionObserver = scope.launch {
@@ -130,9 +160,15 @@ class DatGlassesFacade(private val scope: CoroutineScope) : GlassesFacade {
                 }
             }
             launch {
-                // Erros de sessão são one-shot; no M2 apenas convergimos o estado.
-                // No M5 cada erro vira um earcon próprio ("falha nunca é silêncio").
-                s.errors.collect { /* TODO(M5): mapear erro → earcon */ }
+                // Erros de sessão são one-shot e chegam por um fluxo SEPARADO do
+                // estado — observar só o estado perde a causa. Publicamos aqui
+                // para o app mapear erro → earcon: falha nunca é silêncio.
+                s.errors.collect { erro ->
+                    Log.w(TAG, "Erro de sessão: $erro")
+                    _sessionErrors.emit(
+                        ClaryonError.Glasses("glasses.session_error", erro.toString()),
+                    )
+                }
             }
         }
     }
@@ -195,6 +231,16 @@ class DatGlassesFacade(private val scope: CoroutineScope) : GlassesFacade {
         val s = activeSession
             ?: return Result.failure(ClaryonError.Glasses("glasses.no_session", "Sessão não iniciada."))
 
+        // Uma câmera/stream por vez (regra do DAT). Sem esta guarda, abrir uma
+        // consulta de placa com o painel já streamando sobrescreveria
+        // activeCamera/activeStream: o primeiro stream perderia toda referência
+        // e ficaria impossível de parar por qualquer caminho de código.
+        if (activeStream != null) {
+            return Result.failure(
+                ClaryonError.Glasses("glasses.stream_busy", "Já existe stream ativo — pare antes de abrir outro."),
+            )
+        }
+
         val camDeferred = CompletableDeferred<Camera?>()
         s.addCamera(config.toStreamConfiguration())
             .onSuccess { camDeferred.complete(it) }
@@ -208,16 +254,32 @@ class DatGlassesFacade(private val scope: CoroutineScope) : GlassesFacade {
         observeStream(stream)
         stream.start()
         return try {
-            block(stream.videoStream.map { it.toFrame() })
+            // `conflate`: um frame por vez, descartando os do meio enquanto a
+            // inferência do consumidor roda. Sem isso, todos os frames entram
+            // numa fila que só cresce e a latência da inferência vira atraso
+            // acumulado — a armadilha "todos os frames em fila".
+            block(stream.videoStream.map { it.toFrame() }.conflate())
             Result.success(Unit)
         } finally {
             camera.stop()
+            // Soltar as referências aqui também: esperar só pelo CLOSED deixaria
+            // activeStream apontando para um stream morto se o evento não vier.
+            streamObserver?.cancel()
+            clearStreamRefs()
         }
     }
 
     override suspend fun capturePhoto(): Result<PhotoData> {
         val stream = activeStream
             ?: return Result.failure(ClaryonError.Glasses("glasses.no_stream", "Sem stream ativo."))
+
+        // Uma foto por vez: chamadas paralelas devolvem CaptureInProgress. Falhar
+        // cedo com erro nosso é mais claro que o erro do SDK no meio da rajada.
+        if (!capturaEmCurso.compareAndSet(false, true)) {
+            return Result.failure(
+                ClaryonError.Glasses("glasses.capture_in_progress", "Já existe captura em curso."),
+            )
+        }
 
         val deferred = CompletableDeferred<Result<PhotoData>>()
         stream.capturePhoto()
@@ -230,7 +292,11 @@ class DatGlassesFacade(private val scope: CoroutineScope) : GlassesFacade {
                     Result.failure(ClaryonError.Glasses("glasses.capture_failed", error.description)),
                 )
             }
-        return deferred.await()
+        return try {
+            deferred.await()
+        } finally {
+            capturaEmCurso.set(false)
+        }
     }
 
     // ── Limpeza ───────────────────────────────────────────────────────────────

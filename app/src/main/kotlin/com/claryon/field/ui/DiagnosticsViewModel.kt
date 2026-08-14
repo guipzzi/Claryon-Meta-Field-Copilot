@@ -1,6 +1,7 @@
 package com.claryon.field.ui
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.claryon.agent.DeterministicIntentRouter
@@ -19,6 +20,8 @@ import java.io.File
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -77,7 +80,9 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Ciclo de eco: rotear → gravar 3 s → reproduzir → liberar. Exige fone HFP real. */
     fun echo() {
-        viewModelScope.launch {
+        // Dispatchers.Default: o acúmulo amostra a amostra e a reprodução não
+        // podem rodar na Main (viewModelScope é Main.immediate por padrão).
+        viewModelScope.launch(Dispatchers.Default) {
             when (val r = audio.iniciar()) {
                 is Result.Failure -> {
                     _audioStatus.value = "sem rota: ${r.error.message}"
@@ -131,10 +136,28 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
                 _commandStatus.value = "STT on-device indisponível (baixe o pt-BR nas configs de voz)"
                 return@launch
             }
-            _commandStatus.value = "ouvindo…"
-            when (val r = stt.recognizeOnce()) {
-                is Result.Success -> processar(r.value.text)
-                is Result.Failure -> _commandStatus.value = "STT: ${r.error.message}"
+            // O SpeechRecognizer captura pela fonte de comunicação do sistema.
+            // SEM rotear o HFP antes, ele grava pelo microfone do CELULAR, que é
+            // omnidirecional — e aí a fala do interlocutor entra na transcrição.
+            // Transcrever terceiros é proibição absoluta do projeto; o
+            // beamforming dos óculos é o que garante que só o agente é
+            // transcrito. Por isso a rota é pré-condição, não otimização.
+            when (val rota = audio.iniciar()) {
+                is Result.Failure -> {
+                    _commandStatus.value = "sem rota HFP — captura cancelada (${rota.error.message})"
+                    audio.liberar()
+                    return@launch
+                }
+                is Result.Success -> Unit
+            }
+            try {
+                _commandStatus.value = "ouvindo… (rota ${audio.rotaAtual})"
+                when (val r = stt.recognizeOnce()) {
+                    is Result.Success -> processar(r.value.text)
+                    is Result.Failure -> _commandStatus.value = "STT: ${r.error.message}"
+                }
+            } finally {
+                audio.liberar()
             }
         }
     }
@@ -164,7 +187,10 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
      * resposta → TTS → reprodução. É o [VoiceCycle] com os engines reais.
      */
     fun cicloDeVoz() {
-        viewModelScope.launch {
+        // Fora da Main: o VAD calcula RMS de 50 janelas/s e o STT carrega um
+        // modelo de ~75 MB. Na Main isso congela a UI e arrisca ANR justamente
+        // na janela em que a meta é responder em ≤ 2,0 s.
+        viewModelScope.launch(Dispatchers.Default) {
             when (val rota = audio.iniciar()) {
                 is Result.Failure -> {
                     _commandStatus.value = "ciclo: sem rota de áudio (${rota.error.message})"
@@ -188,21 +214,51 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
                 onOuviVoce = { _commandStatus.value = "ciclo: ouvi você (earcon)" },
                 sampleRateHz = 16_000,
             )
-            val r = runCatching { withTimeoutOrNull(8_000) { cycle.runOnce() } }.getOrNull()
-            audio.liberar()
-            whisper?.release()
-            _commandStatus.value = if (r != null) {
-                "\"${r.transcricao}\" → ${r.intent::class.simpleName} → \"${r.resposta}\""
-            } else {
-                "ciclo: sem fala detectada (8 s)"
+            // Timeout e exceção são coisas DIFERENTES e não podem virar a mesma
+            // mensagem: colapsar os dois em "sem fala detectada" mandou o
+            // operador procurar o problema no lugar errado (a causa real era
+            // RECORD_AUDIO negada). CancellationException tem de propagar —
+            // engoli-la faria o corpo seguir depois do escopo morto.
+            val resultado = try {
+                Resultado.Ok(withTimeoutOrNull(8_000) { cycle.runOnce() })
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "ciclo de voz falhou", e)
+                Resultado.Erro(e)
+            } finally {
+                audio.liberar()
+                whisper?.release()
+            }
+            _commandStatus.value = when (resultado) {
+                is Resultado.Erro -> "ciclo: FALHA — ${resultado.causa.message ?: resultado.causa::class.simpleName}"
+                is Resultado.Ok -> resultado.valor?.let { r ->
+                    "\"${r.transcricao}\" → ${r.intent::class.simpleName} → \"${r.resposta}\""
+                } ?: "ciclo: sem fala detectada (8 s)"
             }
         }
     }
 
     override fun onCleared() {
-        audio.liberar()
+        // Encerramento na ordem do contrato: câmera → sessão → áudio → engines.
+        // Sem parar a sessão, o stream dos óculos segue transmitindo por
+        // Bluetooth depois que a tela morre, sem nenhum indicador — e um novo
+        // DatGlassesFacade tentaria createSession com a anterior ainda viva.
+        facade.stopCameraStream()
+        facade.stopSession()
+        audio.liberarTudo()
         tts.liberar()
-        if (mockEnabled) mock?.disable()
+        mock?.disable()
         super.onCleared()
+    }
+
+    /** Distingue "rodou" de "explodiu" no ciclo de voz. */
+    private sealed interface Resultado {
+        data class Ok(val valor: VoiceCycle.Resultado?) : Resultado
+        data class Erro(val causa: Throwable) : Resultado
+    }
+
+    private companion object {
+        const val TAG = "ClaryonField"
     }
 }

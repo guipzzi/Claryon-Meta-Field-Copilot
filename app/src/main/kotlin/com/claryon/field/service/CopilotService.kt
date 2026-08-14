@@ -10,6 +10,7 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.claryon.agent.ModoOperacao
 import com.claryon.agent.PowerPolicy
@@ -43,18 +44,31 @@ class CopilotService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val modo = intent?.getStringExtra(EXTRA_MODO)
+        // `intent == null` significa **recriação pelo sistema** (START_STICKY após
+        // morte por memória), não pedido do usuário. Voltar em ATIVO aqui
+        // reabriria o microfone sem que ninguém tivesse pedido — regressão de
+        // privacidade e de energia, e ainda com o app em background (risco de
+        // ForegroundServiceStartNotAllowedException). O certo é encerrar e deixar
+        // o operador decidir; o modo é uma escolha explícita, não um padrão.
+        if (intent == null) {
+            Log.w(TAG, "Serviço recriado pelo sistema sem intent — encerrando (não reabre o microfone)")
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
+        val modo = intent.getStringExtra(EXTRA_MODO)
             ?.let { runCatching { ModoOperacao.valueOf(it) }.getOrNull() }
             ?: ModoOperacao.ATIVO
 
-        if (modo == ModoOperacao.STANDBY && intent?.action == ACAO_PARAR) {
+        if (modo == ModoOperacao.STANDBY && intent.action == ACAO_PARAR) {
             stopSelf()
             return START_NOT_STICKY
         }
 
         _modo.value = modo
         entrarEmPrimeiroPlano(modo)
-        // START_STICKY: se o sistema matar por memória, o pipeline volta.
+        // START_STICKY: se o sistema matar por memória, é recriado — e o ramo
+        // acima decide (com segurança) o que fazer nessa recriação.
         return START_STICKY
     }
 
@@ -126,6 +140,7 @@ class CopilotService : Service() {
     }
 
     companion object {
+        private const val TAG = "ClaryonField"
         private const val CANAL = "claryon_copiloto"
         private const val ID_NOTIFICACAO = 1
         private const val EXTRA_MODO = "modo"

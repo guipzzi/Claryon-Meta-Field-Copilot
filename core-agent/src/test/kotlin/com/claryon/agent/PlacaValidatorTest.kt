@@ -23,4 +23,13 @@ class PlacaValidatorTest {
         assertEquals("ABC1234", PlacaValidator.extrair("veículo ABC-1234 azul"))
         assertNull(PlacaValidator.extrair("sem placa aqui"))
     }
+
+    @Test
+    fun naoCasaDentroDeSequenciaMaior() {
+        // Sem fronteira de token, "ABC12345" produziria "ABC1234" e o app
+        // consultaria uma placa que ninguém falou.
+        assertNull(PlacaValidator.extrair("código ABC12345"))
+        assertNull(PlacaValidator.extrair("registro 12ABC1234"))
+        assertNull(PlacaValidator.extrair("ABC1D234"))
+    }
 }

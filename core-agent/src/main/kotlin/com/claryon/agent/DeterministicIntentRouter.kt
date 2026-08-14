@@ -25,7 +25,10 @@ class DeterministicIntentRouter : IntentRouter {
             matches(texto, ENCERRAR_GRAVACAO) -> Intent.EncerrarGravacao
             matches(texto, INICIAR_GRAVACAO) -> Intent.IniciarGravacao(motivo = null)
 
-            matches(texto, CONSULTAR_PLACA) ->
+            // Verbos explícitos primeiro. Só depois o termo solto "placa" —
+            // senão "narrar ocorrência: veículo de placa ABC1234" viraria
+            // consulta e a narração do agente seria perdida.
+            matches(texto, CONSULTAR_PLACA_EXPLICITO) ->
                 Intent.ConsultarPlaca(placa = extrairPlaca(texto))
 
             matches(texto, PEDIR_APOIO) ->
@@ -33,6 +36,9 @@ class DeterministicIntentRouter : IntentRouter {
 
             matches(texto, NARRAR) ->
                 Intent.NarrarOcorrencia(texto = transcricao.trim())
+
+            matches(texto, CONSULTAR_PLACA_SOLTO) ->
+                Intent.ConsultarPlaca(placa = extrairPlaca(texto))
 
             matches(texto, DETALHAR) -> Intent.Detalhar
 
@@ -62,7 +68,11 @@ class DeterministicIntentRouter : IntentRouter {
         val PEDIR_APOIO = listOf("apoio", "reforco", "reforcar", "solicitar apoio", "preciso de apoio")
         val INICIAR_GRAVACAO = listOf("gravar", "iniciar gravacao", "comecar gravacao", "registrar video")
         val ENCERRAR_GRAVACAO = listOf("encerrar gravacao", "parar gravacao", "parar de gravar", "finalizar gravacao")
-        val CONSULTAR_PLACA = listOf("consultar placa", "verificar placa", "checar placa", "placa")
+        // Verbo + objeto: intenção inequívoca de consulta.
+        val CONSULTAR_PLACA_EXPLICITO =
+            listOf("consultar placa", "verificar placa", "checar placa", "rodar placa")
+        // Termo solto: só vale se nada mais específico casou antes.
+        val CONSULTAR_PLACA_SOLTO = listOf("placa")
         val NARRAR = listOf("narrar", "ditar", "registrar ocorrencia", "anotar ocorrencia", "boletim")
         val DETALHAR = listOf("detalhar", "repetir", "repita", "de novo")
         val MODO_STANDBY = listOf("modo standby", "modo espera", "modo descanso")

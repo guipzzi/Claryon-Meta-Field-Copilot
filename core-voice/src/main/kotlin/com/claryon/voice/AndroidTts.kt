@@ -7,6 +7,9 @@ import android.speech.tts.UtteranceProgressListener
 import com.claryon.common.ClaryonError
 import com.claryon.common.Result
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -31,6 +34,10 @@ class AndroidTts(
     private val ready = CompletableDeferred<Boolean>()
     private var tts: TextToSpeech? = null
 
+    /** Serializa as sínteses: o listener do TextToSpeech é por engine. */
+    private val sinteseMutex = Mutex()
+    private val proximoId = java.util.concurrent.atomic.AtomicLong(0)
+
     init {
         tts = TextToSpeech(context.applicationContext) { status ->
             val engine = tts
@@ -54,31 +61,50 @@ class AndroidTts(
         val engine = tts
             ?: return Result.failure(ClaryonError.Voice("tts.null", "Motor TTS não inicializado."))
 
+        // Uma síntese por vez. O listener do TextToSpeech é POR ENGINE, não por
+        // utterance: duas sínteses concorrentes fariam a segunda substituir o
+        // listener da primeira, e a primeira ficaria pendurada para sempre.
+        return sinteseMutex.withLock { sintetizar(engine, text) }
+    }
+
+    private suspend fun sintetizar(engine: TextToSpeech, text: String): Result<PcmAudio> {
         val outFile = File.createTempFile("claryon_tts", ".wav")
-        val utteranceId = "claryon-${System.identityHashCode(text)}"
+        // Id único de verdade: `identityHashCode` de uma String interned colide
+        // entre chamadas com o mesmo texto.
+        val utteranceId = "claryon-${proximoId.incrementAndGet()}"
         val done = CompletableDeferred<Boolean>()
 
         engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(id: String?) {}
-            override fun onDone(id: String?) { done.complete(true) }
+            // Só reage ao PRÓPRIO id — callbacks de sínteses anteriores
+            // (canceladas por timeout) não podem completar esta.
+            override fun onDone(id: String?) { if (id == utteranceId) done.complete(true) }
             @Deprecated("Deprecated in Java")
-            override fun onError(id: String?) { done.complete(false) }
-            override fun onError(id: String?, errorCode: Int) { done.complete(false) }
+            override fun onError(id: String?) { if (id == utteranceId) done.complete(false) }
+            override fun onError(id: String?, errorCode: Int) {
+                if (id == utteranceId) done.complete(false)
+            }
         })
 
-        val enq = engine.synthesizeToFile(text, Bundle(), outFile, utteranceId)
-        if (enq != TextToSpeech.SUCCESS) {
-            outFile.delete()
-            return Result.failure(ClaryonError.Voice("tts.enqueue_failed", "synthesizeToFile falhou."))
-        }
-        val ok = done.await()
         return try {
-            if (!ok || !outFile.exists()) {
-                Result.failure(ClaryonError.Voice("tts.synthesis_failed", "Síntese não concluiu."))
-            } else {
-                Result.success(readWavAsPcm(outFile))
+            val enq = engine.synthesizeToFile(text, Bundle(), outFile, utteranceId)
+            if (enq != TextToSpeech.SUCCESS) {
+                return Result.failure(ClaryonError.Voice("tts.enqueue_failed", "synthesizeToFile falhou."))
+            }
+            // Timeout obrigatório: há motores que, em falha de voz, não chamam
+            // onDone NEM onError. Sem limite, a resposta operacional nunca sairia
+            // — falha viraria silêncio absoluto, que é o que o protocolo proíbe.
+            val ok = withTimeoutOrNull(TIMEOUT_MS) { done.await() }
+            when {
+                ok == null -> Result.failure(
+                    ClaryonError.Voice("tts.timeout", "Síntese não respondeu em ${TIMEOUT_MS} ms."),
+                )
+                !ok || !outFile.exists() ->
+                    Result.failure(ClaryonError.Voice("tts.synthesis_failed", "Síntese não concluiu."))
+                else -> Result.success(readWavAsPcm(outFile))
             }
         } finally {
+            // No finally: um cancelamento durante a espera deixaria o WAV órfão.
             outFile.delete()
         }
     }
@@ -118,5 +144,10 @@ class AndroidTts(
         val samples = ShortArray(pcmBytes.size / 2)
         ByteBuffer.wrap(pcmBytes).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer().get(samples)
         return PcmAudio(samples, sampleRate)
+    }
+
+    private companion object {
+        /** Folgado para uma frase de ≤7 palavras, curto para não travar o ciclo. */
+        const val TIMEOUT_MS = 5_000L
     }
 }

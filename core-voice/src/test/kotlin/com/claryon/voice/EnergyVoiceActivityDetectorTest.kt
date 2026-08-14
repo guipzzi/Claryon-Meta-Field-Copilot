@@ -41,4 +41,25 @@ class EnergyVoiceActivityDetectorTest {
         val segmentos = vad.segment(flowOf(*frames.toTypedArray())).toList()
         assertTrue(segmentos.isEmpty())
     }
+
+    @Test
+    fun ruidoSustentado_fechaPeloTeto_eNaoCresceSemLimite() = runBlocking {
+        // Sirene/motor: energia sempre acima do limiar. Sem teto de duração a
+        // janela nunca fecharia — o copiloto ficaria mudo e a memória estouraria.
+        val comTeto = EnergyVoiceActivityDetector(
+            sampleRateHz = 16_000,
+            energyThreshold = 500.0,
+            hangoverMs = 60,
+            minSpeechMs = 20,
+            maxSpeechMs = 100, // 1600 amostras
+        )
+        val frames = List(50) { tone(320) } // 16 000 amostras contínuas
+        val segmentos = comTeto.segment(flowOf(*frames.toTypedArray())).toList()
+
+        assertTrue("o teto deve fechar janelas mesmo sem silêncio", segmentos.isNotEmpty())
+        assertTrue(
+            "nenhuma janela pode passar do teto",
+            segmentos.all { it.pcm.size <= 1600 + 320 },
+        )
+    }
 }

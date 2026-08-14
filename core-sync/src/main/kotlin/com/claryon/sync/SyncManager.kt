@@ -85,8 +85,24 @@ class OutboxUploadWorker(
     override suspend fun doWork(): Result {
         val gateway = SyncManager.gatewayOuNulo() ?: return Result.retry()
         val outbox = SyncManager.outbox(applicationContext)
-        val relatorio = OutboxDrainer(outbox, gateway).drenar()
+        val relatorio = OutboxDrainer(
+            outbox,
+            gateway,
+            // Um descarte é uma mensagem que o agente ouviu "na fila" e que
+            // nunca vai chegar. Registrar é o mínimo; o app liga isto ao earcon
+            // de falha quando o executor de intenções existir.
+            aoDescartar = { item ->
+                android.util.Log.e(TAG, "Item DESCARTADO após tentativas: id=${item.id} tipo=${item.type}")
+            },
+        ).drenar()
+        if (relatorio.corrompidos > 0) {
+            android.util.Log.w(TAG, "Removidos ${relatorio.corrompidos} itens ilegíveis da fila")
+        }
         // Ainda há pendências (rede caiu no meio) → tenta de novo depois.
         return if (relatorio.restantes > 0) Result.retry() else Result.success()
+    }
+
+    private companion object {
+        const val TAG = "ClaryonField"
     }
 }

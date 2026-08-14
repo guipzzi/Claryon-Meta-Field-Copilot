@@ -1,6 +1,7 @@
 package com.claryon.voice
 
 import android.content.res.AssetManager
+import android.util.Log
 import com.claryon.common.ClaryonError
 import com.claryon.common.Result
 import com.k2fsa.sherpa.onnx.OfflineTts
@@ -36,6 +37,11 @@ class PiperTts(
     private val mutex = Mutex()
     private var tts: OfflineTts? = null
 
+    /** Última causa de falha ao carregar o motor (diagnóstico). */
+    @Volatile
+    var ultimaFalha: Throwable? = null
+        private set
+
     private suspend fun engine(): OfflineTts? = mutex.withLock {
         tts ?: runCatching {
             val config = getOfflineTtsConfig(
@@ -51,7 +57,15 @@ class PiperTts(
                 ruleFars = "",
             )
             OfflineTts(assetManager = assetManager, config = config)
-        }.getOrNull()?.also { tts = it }
+        }
+            // A causa NÃO pode ser descartada: sem ela o usuário recebe "Modelo
+            // Piper não carregou" e ninguém sabe se faltou arquivo, se a ABI está
+            // errada ou se o espeak-ng-data não foi copiado. Ponto crítico.
+            .onFailure { e ->
+                ultimaFalha = e
+                Log.e(TAG, "Piper/sherpa-onnx não carregou (modelDir=$modelDir, dataDir=$dataDir)", e)
+            }
+            .getOrNull()?.also { tts = it }
     }
 
     override suspend fun isAvailable(): Boolean = engine() != null
@@ -73,12 +87,15 @@ class PiperTts(
         }
     }
 
-    fun release() {
+    /** Libera o motor nativo sob o mesmo lock de [engine] — senão liberaria com
+     *  uma `generate()` nativa em andamento. */
+    suspend fun release() = mutex.withLock {
         tts?.release()
         tts = null
     }
 
     private companion object {
+        const val TAG = "ClaryonField"
         const val DEFAULT_MODEL_DIR = "vits-piper-pt_BR-faber-medium"
         const val DEFAULT_MODEL_NAME = "pt_BR-faber-medium.onnx"
     }

@@ -38,4 +38,14 @@ class HashChainTest {
         val hashes = construir(segs).dropLast(1) // falta o hash do último
         assertEquals(1, HashChain.verificar(segs, hashes))
     }
+
+    @Test
+    fun cadeiaTruncadaNoFim_naoPassaComoIntegra() {
+        // Atacante apaga os 2 últimos segmentos do disco e deixa o manifesto
+        // intacto: os que sobram batem, mas a cadeia está incompleta.
+        val segs = listOf("a", "b", "c", "d").map { it.toByteArray() }
+        val hashes = construir(segs)
+        val truncados = segs.dropLast(2)
+        assertEquals("deve apontar o primeiro segmento ausente", 2, HashChain.verificar(truncados, hashes))
+    }
 }

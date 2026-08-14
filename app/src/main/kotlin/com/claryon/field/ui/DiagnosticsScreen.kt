@@ -141,7 +141,14 @@ fun DiagnosticsScreen(
         // ForegroundServiceStartNotAllowedException.
         val context = LocalContext.current
         val modo by CopilotService.modo.collectAsState()
-        StatusCard("Modo de operação", "${modo.name} · FPS teto ${CopilotService.fpsPermitidoAgora(context, modo)}")
+        // getThermalHeadroom é uma chamada de binder e a API não deve ser
+        // consultada mais de uma vez por segundo — acima disso ela devolve NaN,
+        // o que tornaria o teto exibido inútil. Chamar direto no corpo do
+        // composable a executaria a CADA recomposição (e há muitas: os status de
+        // áudio e comando mudam durante os ciclos). `remember(modo)` amarra a
+        // leitura à troca de modo.
+        val fpsTeto = remember(modo) { CopilotService.fpsPermitidoAgora(context, modo) }
+        StatusCard("Modo de operação", "${modo.name} · FPS teto $fpsTeto")
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),

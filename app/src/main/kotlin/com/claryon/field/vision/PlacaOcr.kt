@@ -22,7 +22,14 @@ import kotlin.coroutines.resumeWithException
 class PlacaOcr(
     private val recognizer: com.google.mlkit.vision.text.TextRecognizer =
         TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS),
-) {
+) : java.io.Closeable {
+
+    /**
+     * `TextRecognizer` segura recursos nativos (o modelo Latin carregado). Sem
+     * `close()`, cada instância vaza o modelo — e o ciclo de vida deste objeto
+     * acompanha a tela/serviço que o criou.
+     */
+    override fun close() = recognizer.close()
 
     /** Texto bruto lido pelo OCR (para diagnóstico/painel). */
     suspend fun lerTexto(bitmap: Bitmap): String {

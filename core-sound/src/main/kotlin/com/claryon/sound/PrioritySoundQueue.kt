@@ -1,7 +1,10 @@
 package com.claryon.sound
 
+import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -40,11 +43,16 @@ class PrioritySoundQueue(
 
     override fun enqueue(sound: Sound) {
         scope.launch {
-            val aceito = mutex.withLock { scheduler.offer(sound) }
-            if (!aceito) return@launch
-            // Emergência interrompe algo de menor prioridade tocando agora.
-            if (scheduler.deveInterromper(sound.priority, playingPriority)) {
-                playing?.cancel()
+            // Tudo sob o mesmo lock que o laço usa para publicar `playing`/
+            // `playingPriority`: ler a prioridade nova e cancelar o job antigo em
+            // dois passos fazia a emergência cancelar um job JÁ CONCLUÍDO,
+            // deixando o som de menor prioridade tocar até o fim — quebrando
+            // "nível 1 interrompe tudo".
+            mutex.withLock {
+                if (!scheduler.offer(sound)) return@launch
+                if (scheduler.deveInterromper(sound.priority, playingPriority)) {
+                    playing?.cancel()
+                }
             }
             wake.trySend(Unit)
         }
@@ -61,19 +69,58 @@ class PrioritySoundQueue(
         }
     }
 
+    /**
+     * Laço de reprodução. **Nenhuma exceção pode escapar daqui**: esta fila é o
+     * único canal de saída do produto, e deixá-la morrer levaria junto os
+     * earcons de emergência — em silêncio, que é exatamente o que o protocolo
+     * proíbe. Cada iteração isola a própria falha e segue para o próximo som.
+     *
+     * A reprodução roda num escopo-filho com [SupervisorJob]: se o `AudioTrack`
+     * estourar (rota derrubada no meio), a falha morre no filho e não sobe para
+     * o escopo do chamador.
+     */
     private suspend fun loop() {
+        val playScope = CoroutineScope(coroutineContext + SupervisorJob(coroutineContext[Job]))
         while (coroutineContext.isActive) {
-            val next = mutex.withLock { scheduler.poll() }
-            if (next == null) {
-                wake.receive()
-                continue
+            try {
+                val next = mutex.withLock { scheduler.poll() }
+                if (next == null) {
+                    wake.receive()
+                    continue
+                }
+                val pcm = render(next) ?: continue
+                val job = playScope.launch {
+                    try {
+                        play(pcm)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Throwable) {
+                        Log.e(TAG, "Falha ao reproduzir ${descrever(next)}", e)
+                    }
+                }
+                mutex.withLock {
+                    playing = job
+                    playingPriority = next.priority
+                }
+                job.join() // pode ser cancelado por uma emergência
+                mutex.withLock {
+                    playing = null
+                    playingPriority = null
+                }
+            } catch (e: CancellationException) {
+                throw e // cancelamento do escopo: encerrar o laço de verdade
+            } catch (e: Throwable) {
+                Log.e(TAG, "Erro no laço da fila de som — seguindo para o próximo", e)
             }
-            val pcm = render(next) ?: continue
-            playingPriority = next.priority
-            val job = scope.launch { play(pcm) }
-            playing = job
-            runCatching { job.join() } // pode ser cancelado por uma emergência
-            playingPriority = null
         }
+    }
+
+    private fun descrever(sound: Sound): String = when (sound) {
+        is Sound.Tone -> sound.earcon.name
+        is Sound.Speech -> "fala"
+    }
+
+    private companion object {
+        const val TAG = "ClaryonField"
     }
 }

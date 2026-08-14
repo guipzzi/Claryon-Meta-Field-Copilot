@@ -35,5 +35,12 @@ interface Outbox {
     /** Incrementa e persiste o contador de tentativas; devolve o novo valor. */
     fun bumpAttempts(seq: Long): Int
 
+    /**
+     * Remove itens ilegíveis (corrompidos/truncados) e devolve quantos foram.
+     * Necessário para a fila não ficar com entradas que `list()` esconde mas
+     * `size()` conta — o que faria o worker retentar para sempre.
+     */
+    fun descartarCorrompidos(): Int
+
     fun size(): Int
 }

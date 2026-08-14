@@ -24,4 +24,16 @@ class LaconicityPolicyTest {
     fun courtesy_is_rejected() {
         assertFalse(LaconicityPolicy.isCompliant("Por favor aguarde"))
     }
+
+    @Test
+    fun naoConfundePreposicaoComCortesia() {
+        // "por", "tudo" e "bem" são fala operacional legítima — barrá-las
+        // reprovaria respostas válidas no caminho crítico.
+        assertTrue(LaconicityPolicy.isCompliant("Apoio solicitado por rádio."))
+        assertTrue(LaconicityPolicy.isCompliant("Sem restrição, tudo limpo."))
+        assertTrue(LaconicityPolicy.isCompliant("Veículo bem à frente."))
+        // As locuções continuam reprovadas.
+        assertFalse(LaconicityPolicy.isCompliant("Tudo bem, aguarde."))
+        assertFalse(LaconicityPolicy.isCompliant("Desculpe, repita."))
+    }
 }

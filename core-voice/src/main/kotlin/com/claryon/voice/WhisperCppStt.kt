@@ -4,8 +4,10 @@ import com.claryon.common.ClaryonError
 import com.claryon.common.PcmResampler
 import com.claryon.common.Result
 import com.whispercpp.whisper.WhisperContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
@@ -38,10 +40,19 @@ class WhisperCppStt(private val modelPath: String) : SttEngine {
                 ClaryonError.Voice("stt.model_missing", "Modelo whisper não encontrado: $modelPath"),
             )
         }
-        return try {
-            val ctx = mutex.withLock {
-                context ?: WhisperContext.createContextFromFile(modelPath).also { context = it }
-            }
+        // `withContext(Default)`: o carregamento do modelo (~75 MB via JNI), o
+        // resample e a conversão para float rodavam no dispatcher do chamador,
+        // que é a Main — segundos de UI congelada e risco de ANR justamente na
+        // janela em que a meta é resposta em ≤ 2,0 s.
+        //
+        // A transcrição inteira roda sob o lock: soltar o mutex logo após obter o
+        // contexto permitia um `release()` concorrente anular o campo no meio da
+        // inferência — ou criar um SEGUNDO contexto de ~75 MB que nunca seria
+        // liberado. O engine é um recurso nativo único; serializar é o correto.
+        return withContext(Dispatchers.Default) {
+        try {
+            mutex.withLock {
+            val ctx = context ?: WhisperContext.createContextFromFile(modelPath).also { context = it }
             // HFP entrega 8 kHz; o Whisper espera 16 kHz → reamostra se preciso.
             val pcm16k =
                 if (sampleRateHz != TARGET_HZ) PcmResampler.resampleLinear(pcm, sampleRateHz, TARGET_HZ) else pcm
@@ -49,14 +60,19 @@ class WhisperCppStt(private val modelPath: String) : SttEngine {
             val floats = FloatArray(pcm16k.size) { pcm16k[it] / 32768.0f }
             val texto = ctx.transcribeData(floats, printTimestamp = false).trim()
             Result.success(Transcript(texto, confidence = null))
+            }
         } catch (e: Exception) {
             Result.failure(ClaryonError.Voice("stt.whisper_error", e.message ?: "erro no whisper.cpp"))
         }
+        }
     }
 
+    /** Libera o contexto nativo. Sob o mesmo lock da transcrição (ver [transcribe]). */
     suspend fun release() {
-        context?.release()
-        context = null
+        mutex.withLock {
+            context?.release()
+            context = null
+        }
     }
 
     private companion object {

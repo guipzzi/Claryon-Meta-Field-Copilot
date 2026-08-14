@@ -3,6 +3,8 @@ package com.claryon.voice
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -85,11 +87,23 @@ class AndroidOnDeviceStt(context: Context) : SelfCapturingStt {
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE, "pt-BR")
                     putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
                 }
-                cont.invokeOnCancellation { runCatching { recognizer.cancel() } }
+                // invokeOnCancellation roda na thread de QUEM cancelou — que
+                // raramente é a main. Chamar recognizer.cancel() ali dispara
+                // "SpeechRecognizer should be used only from the application's
+                // main thread" (armadilha conhecida), engolida pelo runCatching e
+                // deixando o reconhecedor em estado indefinido. Por isso o
+                // cancelamento é reenviado para a main thread.
+                cont.invokeOnCancellation {
+                    mainHandler.post { runCatching { recognizer.cancel() } }
+                }
                 recognizer.startListening(intent)
             }
         } finally {
+            // destroy() também exige a main thread; o withContext(Main) externo
+            // garante isso mesmo no caminho de exceção.
             recognizer.destroy()
         }
     }
+
+    private val mainHandler = Handler(Looper.getMainLooper())
 }

@@ -46,15 +46,36 @@ class GlassesAudioManagerImpl(
     private val audioManager =
         context.applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
+    /**
+     * O roteamento é **estado global do aparelho**, e vários caminhos do app
+     * (eco, comando avulso, ciclo de voz) chamam `iniciar()`/`liberar()`. Sem
+     * serialização + contagem, dois caminhos concorrentes fazem o seguinte:
+     * o segundo `iniciar()` grava `previousMode = MODE_IN_COMMUNICATION` (o modo
+     * que o primeiro acabou de pôr) e o `liberar()` de cada um restaura esse
+     * valor — o **celular fica preso em MODE_IN_COMMUNICATION** e todo o áudio
+     * do sistema desce a 8 kHz. Pior: o `liberar()` do caminho curto derruba a
+     * rota do caminho longo ainda em captura.
+     *
+     * Portanto: só o **primeiro** `iniciar()` roteia e memoriza o modo anterior;
+     * só o **último** `liberar()` desfaz. `lock` protege os três campos.
+     */
+    private val lock = Any()
+    private var usuarios = 0
     private var previousMode: Int = AudioManager.MODE_NORMAL
     private var routedDevice: AudioDeviceInfo? = null
 
     /** Rota efetivada (para diagnóstico). */
     val rotaAtual: String
-        get() = routedDevice?.let { deviceLabel(it) } ?: "nenhuma"
+        get() = synchronized(lock) { routedDevice?.let { deviceLabel(it) } ?: "nenhuma" }
 
-    override suspend fun iniciar(): Result<Unit> {
-        previousMode = audioManager.mode
+    override suspend fun iniciar(): Result<Unit> = synchronized(lock) {
+        if (usuarios > 0) {
+            // Já roteado por outro caminho: só soma um usuário.
+            usuarios++
+            return@synchronized Result.success(Unit)
+        }
+
+        val modoAnterior = audioManager.mode
         // MODE_IN_COMMUNICATION prepara o pipeline de voz. Se a captura não subir
         // com MODE_NORMAL, este é o modo a testar (armadilha conhecida).
         audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
@@ -64,8 +85,8 @@ class GlassesAudioManagerImpl(
         val target = sco ?: if (allowFallbackToDefault) devices.firstOrNull() else null
 
         if (target == null) {
-            audioManager.mode = previousMode
-            return Result.failure(
+            audioManager.mode = modoAnterior
+            return@synchronized Result.failure(
                 ClaryonError.Audio(
                     "audio.no_sco",
                     "Nenhum dispositivo HFP (TYPE_BLUETOOTH_SCO). Verifique se os óculos/fone estão conectados no app Meta AI.",
@@ -76,8 +97,8 @@ class GlassesAudioManagerImpl(
         // setCommunicationDevice pode retornar false — tratar, nunca falha silenciosa.
         val ok = audioManager.setCommunicationDevice(target)
         if (!ok) {
-            audioManager.mode = previousMode
-            return Result.failure(
+            audioManager.mode = modoAnterior
+            return@synchronized Result.failure(
                 ClaryonError.Audio(
                     "audio.set_comm_device_false",
                     "setCommunicationDevice retornou false para ${deviceLabel(target)}.",
@@ -85,12 +106,14 @@ class GlassesAudioManagerImpl(
             )
         }
 
+        previousMode = modoAnterior
         routedDevice = target
+        usuarios = 1
         Log.i(
             TAG,
             "Áudio roteado para ${deviceLabel(target)} (SCO=${target.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO})",
         )
-        return Result.success(Unit)
+        Result.success(Unit)
     }
 
     // Contrato: o chamador (app) garante RECORD_AUDIO concedido em runtime (o
@@ -118,7 +141,17 @@ class GlassesAudioManagerImpl(
             val buffer = ShortArray(frameSamples)
             while (currentCoroutineContext().isActive) {
                 val n = record.read(buffer, 0, buffer.size)
-                if (n > 0) emit(buffer.copyOf(n))
+                when {
+                    n > 0 -> emit(buffer.copyOf(n))
+                    // n == 0 é legítimo (buffer ainda sem dados): só continuar.
+                    n == 0 -> Unit
+                    // Negativo é erro. Sem este ramo, uma desconexão do HFP
+                    // (ERROR_DEAD_OBJECT) faz o laço girar a 100% de CPU para
+                    // sempre, sem emitir e sem avisar ninguém — "sem fala
+                    // detectada" para o usuário e a bateria indo embora.
+                    // Falha nunca é silêncio: encerra o fluxo com erro tipado.
+                    else -> throw AudioCaptureException(n)
+                }
             }
         } finally {
             runCatching { record.stop() }
@@ -171,12 +204,26 @@ class GlassesAudioManagerImpl(
             }
         }
 
-    override fun liberar() {
+    /**
+     * Desfaz o roteamento quando o **último** usuário solta (ver [iniciar]).
+     * Chamadas extras são no-op — nunca derrubam a rota de quem ainda captura.
+     */
+    override fun liberar() = synchronized(lock) {
+        if (usuarios == 0) return@synchronized
+        usuarios--
+        if (usuarios > 0) return@synchronized
         // clearCommunicationDevice é OBRIGATÓRIO: sem ele, o áudio do sistema fica
         // preso no canal de voz 8 kHz.
         runCatching { audioManager.clearCommunicationDevice() }
         audioManager.mode = previousMode
         routedDevice = null
+    }
+
+    /** Solta todos os usuários de uma vez (encerramento do app). */
+    fun liberarTudo() = synchronized(lock) {
+        if (usuarios == 0) return@synchronized
+        usuarios = 1
+        liberar()
     }
 
     private fun deviceLabel(device: AudioDeviceInfo): String = buildString {
@@ -198,3 +245,18 @@ class GlassesAudioManagerImpl(
         const val DEFAULT_SAMPLE_RATE_HZ = 16_000
     }
 }
+
+/**
+ * `AudioRecord.read()` devolveu código de erro — tipicamente `ERROR_DEAD_OBJECT`
+ * (-6, o HFP caiu) ou `ERROR_INVALID_OPERATION` (-3, gravação não iniciada).
+ * Carrega o código para o mapeamento erro → earcon.
+ */
+class AudioCaptureException(val codigo: Int) : IllegalStateException(
+    "AudioRecord.read retornou $codigo" +
+        when (codigo) {
+            AudioRecord.ERROR_DEAD_OBJECT -> " (ERROR_DEAD_OBJECT — rota HFP caiu)"
+            AudioRecord.ERROR_INVALID_OPERATION -> " (ERROR_INVALID_OPERATION)"
+            AudioRecord.ERROR_BAD_VALUE -> " (ERROR_BAD_VALUE)"
+            else -> ""
+        },
+)

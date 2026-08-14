@@ -61,55 +61,86 @@ class EncryptedEvidenceVault(
                         ClaryonError.Evidence("EVID_MKDIR", "não criou diretório da ocorrência"),
                     )
                 }
-                mutex.withLock { sessoes[id] = Sessao(dir) }
-                Result.success(RecordingHandle(id))
+                mutex.withLock {
+                    // Reabrir uma ocorrência já existente reiniciaria `seq` em 0 e
+                    // sobregravaria seg_00000.enc — destruindo evidência já
+                    // gravada. O id é (unidade, agente, início): colisão só
+                    // acontece por engano de orquestração, e falhar é o certo.
+                    if (sessoes.containsKey(id) || segmentosExistentes(dir)) {
+                        return@withLock Result.failure(
+                            ClaryonError.Evidence(
+                                "EVID_JA_ABERTA",
+                                "já existe gravação para esta ocorrência — finalize antes de reabrir",
+                            ),
+                        )
+                    }
+                    sessoes[id] = Sessao(dir)
+                    Result.success(RecordingHandle(id))
+                }
             }.getOrElse { e ->
                 Result.failure(ClaryonError.Evidence("EVID_BEGIN", "falha ao abrir gravação"), e)
             }
         }
 
+    /**
+     * Anexa um segmento. **Toda** a operação (ler `seq`/`ultimoHash`, cifrar,
+     * gravar, encadear) roda sob o `mutex`.
+     *
+     * Ler a sequência fora do lock e gravar dentro parece suficiente, mas não é:
+     * dois `append` concorrentes no mesmo handle leriam `seq=0` e `prev=null`,
+     * gravariam **ambos** em `seg_00000.enc` — o segundo sobrescrevendo o
+     * primeiro — e a cadeia ficaria com duas entradas `sequence=0`. Perda
+     * silenciosa de evidência, que é exatamente o que este módulo existe para
+     * impedir. O custo de serializar é irrelevante perto disso.
+     */
     override suspend fun append(handle: RecordingHandle, chunk: ByteArray): Result<ChunkHash> =
         withContext(Dispatchers.IO) {
-            val sessao = mutex.withLock { sessoes[handle.id] }
-                ?: return@withContext Result.failure(
-                    ClaryonError.Evidence("EVID_HANDLE", "handle desconhecido ou já finalizado"),
-                )
-            runCatching {
-                val seq = sessao.seq
-                val arquivo = segmentFile(sessao.dir, seq)
-                encryptedFile(arquivo).openFileOutput().use { it.write(chunk) }
+            mutex.withLock {
+                val sessao = sessoes[handle.id]
+                    ?: return@withLock Result.failure(
+                        ClaryonError.Evidence("EVID_HANDLE", "handle desconhecido ou já finalizado"),
+                    )
+                runCatching {
+                    val seq = sessao.seq
+                    val prev = sessao.ultimoHash
+                    encryptedFile(segmentFile(sessao.dir, seq)).openFileOutput().use { it.write(chunk) }
 
-                val prev = sessao.ultimoHash
-                val hashHex = HashChain.sha256Hex(chunk, prev)
-                val ch = ChunkHash(sequence = seq, sha256Hex = hashHex, previousSha256Hex = prev)
+                    val hashHex = HashChain.sha256Hex(chunk, prev)
+                    val ch = ChunkHash(sequence = seq, sha256Hex = hashHex, previousSha256Hex = prev)
 
-                mutex.withLock {
                     sessao.seq += 1
                     sessao.ultimoHash = hashHex
                     sessao.cadeia.add(ch)
+                    // Manifesto parcial a cada segmento: se o processo morrer no
+                    // meio de uma ocorrência, os segmentos no disco continuam
+                    // tendo cadeia de custódia demonstrável (sem isto, evidência
+                    // cifrada sem manifesto = evidência inútil).
+                    escreverManifesto(sessao.dir, handle, sessao.cadeia, finalizado = false)
+                    Result.success(ch)
+                }.getOrElse { e ->
+                    Result.failure(ClaryonError.Evidence("EVID_APPEND", "falha ao anexar segmento"), e)
                 }
-                Result.success(ch)
-            }.getOrElse { e ->
-                Result.failure(ClaryonError.Evidence("EVID_APPEND", "falha ao anexar segmento"), e)
             }
         }
 
     override suspend fun finalize(handle: RecordingHandle): Result<CustodyManifest> =
         withContext(Dispatchers.IO) {
-            val sessao = mutex.withLock { sessoes.remove(handle.id) }
-                ?: return@withContext Result.failure(
-                    ClaryonError.Evidence("EVID_HANDLE", "handle desconhecido ou já finalizado"),
-                )
-            runCatching {
-                val manifesto = CustodyManifest(
-                    handle = handle,
-                    chain = sessao.cadeia.toList(),
-                    finalizedAtEpochMillis = clockMillis(),
-                )
-                File(sessao.dir, MANIFEST_NOME).writeText(serializar(manifesto))
-                Result.success(manifesto)
-            }.getOrElse { e ->
-                Result.failure(ClaryonError.Evidence("EVID_FINALIZE", "falha ao emitir manifesto"), e)
+            mutex.withLock {
+                val sessao = sessoes.remove(handle.id)
+                    ?: return@withLock Result.failure(
+                        ClaryonError.Evidence("EVID_HANDLE", "handle desconhecido ou já finalizado"),
+                    )
+                runCatching {
+                    val manifesto = CustodyManifest(
+                        handle = handle,
+                        chain = sessao.cadeia.toList(),
+                        finalizedAtEpochMillis = clockMillis(),
+                    )
+                    escreverManifesto(sessao.dir, handle, manifesto.chain, finalizado = true)
+                    Result.success(manifesto)
+                }.getOrElse { e ->
+                    Result.failure(ClaryonError.Evidence("EVID_FINALIZE", "falha ao emitir manifesto"), e)
+                }
             }
         }
 
@@ -137,6 +168,9 @@ class EncryptedEvidenceVault(
     private fun segmentFile(dir: File, seq: Int): File =
         File(dir, "seg_%05d.enc".format(seq))
 
+    private fun segmentosExistentes(dir: File): Boolean =
+        dir.listFiles { f -> f.isFile && f.name.endsWith(".enc") }?.isNotEmpty() == true
+
     private fun encryptedFile(file: File): EncryptedFile =
         EncryptedFile.Builder(
             appContext,
@@ -145,11 +179,32 @@ class EncryptedEvidenceVault(
             EncryptedFile.FileEncryptionScheme.AES256_GCM_HKDF_4KB,
         ).build()
 
-    /** Manifesto serializado em linhas simples — hashes não são segredo. */
-    private fun serializar(m: CustodyManifest): String = buildString {
-        appendLine("handle=${m.handle.id}")
-        appendLine("finalizedAt=${m.finalizedAtEpochMillis}")
-        for (c in m.chain) appendLine("${c.sequence}\t${c.previousSha256Hex ?: "-"}\t${c.sha256Hex}")
+    /**
+     * Manifesto em linhas simples — hashes não são segredo, e deixá-lo em claro
+     * é o que permite a um terceiro verificar a custódia **sem** a chave.
+     *
+     * `finalizado=false` marca uma gravação interrompida (processo morto no meio
+     * da ocorrência): a cadeia até ali continua verificável e demonstrável.
+     */
+    private fun escreverManifesto(
+        dir: File,
+        handle: RecordingHandle,
+        cadeia: List<ChunkHash>,
+        finalizado: Boolean,
+    ) {
+        val texto = buildString {
+            appendLine("handle=${handle.id}")
+            appendLine("finalizado=$finalizado")
+            if (finalizado) appendLine("finalizedAt=${clockMillis()}")
+            for (c in cadeia) appendLine("${c.sequence}\t${c.previousSha256Hex ?: "-"}\t${c.sha256Hex}")
+        }
+        // Escrita atômica: um manifesto truncado é pior que nenhum.
+        val tmp = File(dir, "$MANIFEST_NOME.tmp")
+        tmp.writeText(texto)
+        if (!tmp.renameTo(File(dir, MANIFEST_NOME))) {
+            tmp.copyTo(File(dir, MANIFEST_NOME), overwrite = true)
+            tmp.delete()
+        }
     }
 
     private companion object {

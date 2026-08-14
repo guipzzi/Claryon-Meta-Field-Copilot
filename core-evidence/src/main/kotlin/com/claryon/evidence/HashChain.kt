@@ -23,13 +23,20 @@ object HashChain {
 
     /**
      * Verifica a integridade da cadeia. Retorna o **índice do primeiro segmento
-     * adulterado** (ou faltante), ou `-1` se a cadeia está íntegra.
+     * adulterado, faltante ou excedente**, ou `-1` se a cadeia está íntegra.
+     *
+     * Percorre o **maior** dos dois tamanhos de propósito: iterar só sobre
+     * `segmentos` faria uma cadeia truncada no fim (atacante apaga os últimos
+     * arquivos e deixa o manifesto intacto) passar como íntegra — os que sobram
+     * batem, e ninguém repara nos que sumiram.
      */
     fun verificar(segmentos: List<ByteArray>, hashes: List<String>): Int {
         var anterior: String? = null
-        for (i in segmentos.indices) {
+        for (i in 0 until maxOf(segmentos.size, hashes.size)) {
+            // Segmento sem hash (excedente) ou hash sem segmento (removido).
+            if (i >= segmentos.size || i >= hashes.size) return i
             val esperado = sha256Hex(segmentos[i], anterior)
-            if (i >= hashes.size || hashes[i] != esperado) return i
+            if (hashes[i] != esperado) return i
             anterior = hashes[i]
         }
         return -1

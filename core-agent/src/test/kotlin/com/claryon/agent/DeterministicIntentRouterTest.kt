@@ -87,4 +87,19 @@ class DeterministicIntentRouterTest {
             assertTrue("Resposta excede 7 palavras: ${OperationalResponses.para(intent)}", palavras <= 7)
         }
     }
+
+    @Test
+    fun narracaoQueMencionaPlacaNaoViraConsulta() {
+        // "placa" solto não pode sequestrar a narração — a fala do agente para o
+        // boletim se perderia.
+        val intent = router.route("narrar ocorrência veículo de placa ABC1234 abandonado")
+        assertTrue(intent is Intent.NarrarOcorrencia)
+    }
+
+    @Test
+    fun verboExplicitoAindaConsultaPlaca() {
+        val intent = router.route("consultar placa ABC1D23")
+        assertTrue(intent is Intent.ConsultarPlaca)
+        assertEquals("ABC1D23", (intent as Intent.ConsultarPlaca).placa)
+    }
 }
