@@ -111,7 +111,18 @@ git submodule update --init --recursive
 # modelo STT (~77 MB, não versionado) — para o teste instrumentado do whisper
 curl -L -o app/src/androidTest/assets/models/ggml-tiny.bin \
   https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin
+
+# TTS Piper (sherpa-onnx): AAR pré-compilado (~49 MB) + voz pt-BR int8 (~21 MB)
+mkdir -p core-voice/libs app/src/androidTest/assets/models
+curl -L -o core-voice/libs/sherpa-onnx-1.13.5.aar \
+  https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.5/sherpa-onnx-1.13.5.aar
+curl -L https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-pt_BR-faber-medium-int8.tar.bz2 \
+  | tar xj -C app/src/androidTest/assets/models
 ```
+
+O **AAR do sherpa-onnx é obrigatório** para compilar (`core-voice`/`app`). Os
+modelos de whisper/Piper só são usados pelos testes instrumentados (`Assume`
+ignora se ausentes).
 
 Sem o submódulo, a build nativa de `core-voice` falha. Sem o modelo, o teste
 `WhisperCppSttTest` é apenas **ignorado** (não quebra o build).
@@ -149,7 +160,7 @@ adb logcat -s ClaryonField          # logs do app
 | **M1** | Setup do DAT: GitHub Packages, `mwdat 0.9.0`, manifest, `claryonfield://` | ✅ **concluído** — `clean build` verde com os artefatos `mwdat-*` resolvidos |
 | **M2** | Mock Device Kit: registro, sessão e câmera reais (sem hardware) | ✅ **concluído** — teste instrumentado + painel ao vivo (REGISTERED→STARTED→STREAMING) |
 | **M3** | Pipeline de áudio HFP (`GlassesAudioManager`, AudioRecord/AudioTrack) | ✅ **concluído** — testes verdes; eco record→playback verificado (eco HFP final requer fone físico) |
-| **M4** | Voz on-device | ✅ roteador + VAD + TTS + **STT nativo whisper.cpp VERIFICADO** no emulador (transcreveu jfk.wav) + STT fallback (SpeechRecognizer). Falta: Piper/openWakeWord/Silero + resample 8→16 kHz |
+| **M4** | Voz on-device | ✅ roteador + VAD + resample 8→16 kHz + **STT whisper.cpp** e **TTS Piper/sherpa-onnx VERIFICADOS** no emulador + fallbacks nativos. Falta: openWakeWord/Silero + wiring do ciclo push-to-talk num device |
 | M5 | Agente e som (roteador, fila, earcons, laconicidade) | 🟡 roteador já adiantado no M4; falta fila/earcons |
 | M6 | Visão e evidência (OCR de placa, cofre cifrado) | pendente |
 | M7 | Rede (Supabase, WhatsApp, fila offline) | pendente |

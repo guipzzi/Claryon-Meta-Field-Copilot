@@ -5,6 +5,22 @@ Ordem cronológica inversa (mais recente no topo).
 
 ---
 
+## 2026-08-14 — Resample 8→16 kHz + Piper (sherpa-onnx) VERIFICADO
+
+- **`PcmResampler` (core-common):** interpolação linear, upsample 8→16 kHz (HFP→whisper). Em core-common para respeitar a regra de módulos (core-audio e core-voice usam). `WhisperCppStt` reamostra internamente. Teste JVM.
+
+- **`PiperTts` (core-voice):** TTS neural pt-BR via **sherpa-onnx** (onnxruntime). Usa o **AAR pré-compilado** (v1.13.5, 49 MB) — evita compilar o onnxruntime do zero. Integração: **flatDir repo** (`core-voice/libs`) + `compileOnly` no core-voice (library não repackagea AAR) + `implementation` no app (empacota `.so` + classes). AAR e modelo **não versionados** (baixados no setup).
+
+- **Verificado em runtime:** `PiperTtsTest` sintetizou "Apoio solicitado, guarnição avisada." → **52.736 amostras @ 22 kHz** no emulador arm64, pt-BR neural, 100% local. Suíte instrumentada completa: 5/5 verdes (MDK, áudio, whisper, Piper juntos).
+
+- **Requisito do espeak:** o `espeak-ng-data` (fonemização) usa `fopen` → precisa de **diretório de filesystem**, não pode vir de assets. Copiado para `filesDir` (padrão `copyDataDir()` do exemplo oficial). O `.onnx`/`tokens` vêm dos assets.
+
+- **Modelo Piper:** `vits-piper-pt_BR-faber-medium` **int8** (21 MB vs 67 MB do fp32) — alinhado à orientação "quantizado" do Un12.
+
+- **Revisão (correção):** `AndroidTts.readWavAsPcm` agora localiza o chunk `data` (não assume offset 44) — robusto a WAVs com chunks LIST/fact.
+
+---
+
 ## 2026-08-14 — M4-nativo: whisper.cpp on-device VERIFICADO
 
 - **whisper.cpp compilado e transcrevendo no emulador arm64.** Teste instrumentado `WhisperCppSttTest` carregou o `ggml-tiny` e transcreveu o `jfk.wav` corretamente ("...ask not what your country can do for you...") — 100% local, sem rede. O maior risco de ambiente do projeto está superado e provado em runtime.
