@@ -1,0 +1,52 @@
+-- Segurança em nível de linha.
+--
+-- A regra que governa tudo: **toda resolução de destinatário acontece no
+-- servidor**. Um cliente jamais consulta a posição de terceiros para descobrir
+-- para quem enviar. Isso é requisito de privacidade antes de ser de arquitetura:
+-- o aplicativo de um agente nunca recebe a lista de onde os outros estão.
+
+alter table transmissions enable row level security;
+alter table deliveries    enable row level security;
+alter table agent_positions enable row level security;
+
+-- Lê quem escreveu, ou quem foi destinatário.
+create policy transmissions_read on transmissions for select
+using (
+  author_agent_id = current_agent_id()
+  or exists (
+    select 1 from deliveries d
+     where d.transmission_id = transmissions.id
+       and d.agent_id = current_agent_id()
+  )
+);
+
+-- Ninguém insere direto: toda transmissão passa pela Edge Function (service role),
+-- que é quem resolve destinatários e grava a entrega na mesma transação.
+create policy transmissions_no_direct_insert on transmissions for insert with check (false);
+
+-- Append-only de verdade.
+create policy transmissions_no_update on transmissions for update using (false);
+create policy transmissions_no_delete on transmissions for delete using (false);
+
+-- Cada agente vê apenas as próprias entregas.
+create policy deliveries_read on deliveries for select
+using (agent_id = current_agent_id());
+
+-- Reciprocidade: dentro do talk group, quem vê é visto. Não existe modo de
+-- observar sem ser observado — assimetria de visibilidade entre pares é
+-- vigilância; simetria é coordenação.
+create policy positions_read on agent_positions for select
+using (
+  exists (
+    select 1
+      from memberships meu
+      join memberships dele on dele.talk_group_id = meu.talk_group_id
+     where meu.agent_id = current_agent_id()
+       and dele.agent_id = agent_positions.agent_id
+  )
+);
+
+create policy positions_write on agent_positions for insert
+with check (agent_id = current_agent_id());
+create policy positions_update on agent_positions for update
+using (agent_id = current_agent_id());

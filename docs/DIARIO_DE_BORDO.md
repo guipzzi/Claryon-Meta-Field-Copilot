@@ -507,6 +507,42 @@ Dois achados honestos que **não** viraram teste verde artificial:
   que existia no `MockDeviceKitStreamTest` ("rodar isolado com `-P...class=`")
   nunca funcionou. Corrigida.
 
+## 2026-08-14 — Fase 2: a fatia vertical do rádio tático
+
+Construir o C1 inteiro de uma vez seria apostar. A ordem foi outra: **as políticas
+puras primeiro**, porque é nelas que os defeitos moram e são as únicas verificáveis
+sem hardware nem servidor.
+
+`core-net` nasceu com 46 testes e cinco peças: pré-roll com VAD retroativo, buffer
+de jitter adaptativo, controle de piso, sessão de PTT e política de reconexão.
+Nenhuma delas precisa de rede para ser provada.
+
+**V2 respondido.** A sonda de codec no emulador achou `c2.android.opus.encoder`, com
+o decodificador aceitando 8 kHz nativamente. Caminho é MediaCodec, sem dependência
+nova. Fica a ressalva de que lista de codecs de emulador não é a de aparelho real.
+
+**O defeito que a releitura pegou.** Soltar o PTT é cancelamento de corrotina, e
+chamada suspensa num `finally` sob cancelamento falha imediatamente. Consequência:
+o último quadro nunca sairia, e o receptor esperaria para sempre por uma fala que
+já tinha acabado. Corrigido com `NonCancellable` + timeout, e há teste que cancela
+o job no meio e confere que o último quadro sai.
+
+**A divergência do aditivo.** Ele pedia pré-roll de 600 ms numa seção e 300 ms em
+duas outras. Ficou 600 — e o motivo importa: como o VAD retroativo transmite a
+partir do início **detectado** da fala, ampliar a janela aumenta a margem de busca,
+não o que vai para o rádio. É a diferença entre "guardamos 300 ms sempre" e
+"transmitimos a partir de onde você começou a falar".
+
+### O portão da fase NÃO fechou, e isso é honesto
+
+O critério era "a voz sai do aparelho A e entra no ouvido em B". Não fechou, e não
+por falta de código: falta **um celular Android com fone HFP** e **um projeto
+Supabase**. Tudo que não depende deles está pronto e testado; o que depende está
+declarado como não verificado, no KDoc e em `docs/VERIFICACOES_COM_HARDWARE.md`.
+
+Declarar a fase concluída com o portão aberto seria repetir exatamente o defeito
+que a Fase 1 corrigiu — afirmar uma coisa que não aconteceu.
+
 ## Estado atual (fim de 2026-08-14)
 
 - **Marcos concluídos:** M0, MCP, M1, M2, M3, **M4** (whisper.cpp nativo +

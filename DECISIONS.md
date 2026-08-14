@@ -347,3 +347,52 @@ Ordem cronológica inversa (mais recente no topo).
   áudio. Em vez de testes que passam sem exercitar nada, os cenários ficam com `Assume` e
   a lista de execução mora num documento próprio. Aguarda celular Android (15/08) e fone
   Bluetooth com HFP.
+
+## Fase 2 — rádio tático: fatia vertical (2026-08-14)
+
+- **`core-net` criado; depende apenas de `core-common`.** Mantém a regra de que os
+  `core-*` não dependem uns dos outros. `PrioridadeTransmissao` é definida no próprio
+  módulo em vez de importada de `core-agent` — e a distinção é real: prioridade *de
+  transmissão* (quem recebe, em que raio) não é prioridade *de reprodução* (o que
+  interrompe o quê).
+
+- **✅ V2 — MEDIDO: `c2.android.opus.encoder` existe.** Sonda no emulador (Android 15):
+  encoder e decoder Opus presentes, decoder aceitando 8 kHz nativamente (nossa taxa HFP)
+  com bitrate a partir de 6 kbps. **Caminho: MediaCodec**, sem dependência nativa nova.
+  Ressalva registrada: a lista de codecs de um emulador é a do sistema convidado e difere
+  de aparelho real — a confirmação que decide fica em `docs/VERIFICACOES_COM_HARDWARE.md`.
+  Se o encoder faltar no aparelho, o plano B é libopus via NDK, cuja toolchain já existe.
+
+- **Pré-roll de 600 ms com VAD retroativo, e não recuo fixo de 300 ms.**
+  O aditivo divergia de si mesmo (600 numa seção, 300 em duas outras); fica 600. O ponto
+  não é "guardar mais": o VAD retroativo transmite **a partir do início detectado da fala**,
+  então a janela maior aumenta a margem de busca, não o que é transmitido. Uma fala iniciada
+  450 ms antes do toque — comum sob estresse — seria cortada pelo recuo fixo.
+  Limite explícito, testado: buffer circular, só em RAM, nunca persistido, zerado ao fim de
+  cada transmissão e no descarte por canal ocupado.
+
+- **Buffer de jitter começa em 100 ms e cresce só sob perda medida** (piso 60, teto 300).
+  Buffer fixo grande é a forma mais comum de jogar fora 200 ms sem necessidade. Quadro
+  perdido vira PLC, nunca silêncio — silêncio soa como corte, interpolação soa como voz.
+  Quadro que chega tarde demais é **descartado**: tocá-lo fora de ordem inverteria a fala.
+
+- **Emergência toma o canal de prioridade menor, mas não de outra emergência.**
+  Cortar quem já está numa ocorrência em curso é pior que esperar, e duas P1 se revezando
+  indefinidamente calariam as duas. TTL de 30 s na concessão: se o cliente morre no meio,
+  a trava expira e o canal volta ao grupo — sem isso, um crash calaria a guarnição.
+
+- **Soltar o PTT é cancelamento, e o encerramento roda em `NonCancellable` com timeout.**
+  Defeito encontrado relendo o próprio código: chamada suspensa em `finally` sob
+  cancelamento falha na hora, então o último quadro nunca sairia e **o receptor esperaria
+  indefinidamente por uma fala que já acabou** — o modo de falha mais confuso possível num
+  rádio. O timeout de 2 s impede que um socket morto trave o botão.
+
+- **`java.util.Base64` no protocolo, não `android.util.Base64`.**
+  O do JDK existe desde a API 26 (mínimo do projeto é 31) e funciona fora do Android,
+  mantendo a camada verificável sem emulador quando o JSON não estiver no caminho.
+
+- **Formato de fio isolado em `ProtocoloRealtime`; transporte é encanamento fino.**
+  O que muda num serviço em evolução é o envelope, e concentrá-lo faz a correção ser de um
+  arquivo. Round-trip de quadro (inclusive bytes altos e a marca de último) é testado; o
+  `TransporteRealtime` em si **não foi verificado contra projeto real** — depende de
+  credencial, e está declarado como tal no KDoc.
