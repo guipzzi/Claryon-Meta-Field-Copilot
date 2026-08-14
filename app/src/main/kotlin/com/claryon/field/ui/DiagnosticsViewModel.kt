@@ -10,8 +10,12 @@ import com.claryon.common.Result
 import com.claryon.field.BuildConfig
 import com.claryon.glasses.DatGlassesFacade
 import com.claryon.glasses.MockDeviceController
+import com.claryon.field.voice.VoiceCycle
 import com.claryon.voice.AndroidOnDeviceStt
 import com.claryon.voice.AndroidTts
+import com.claryon.voice.EnergyVoiceActivityDetector
+import com.claryon.voice.WhisperCppStt
+import java.io.File
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -151,6 +155,47 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
             }
             is Result.Failure ->
                 _commandStatus.value = "$nome → \"$resposta\" (TTS: ${syn.error.message})"
+        }
+    }
+
+    /**
+     * Ciclo de voz COMPLETO (push-to-talk): captura HFP → VAD → earcon → STT
+     * (whisper se o modelo estiver em filesDir; senão degrada) → roteador →
+     * resposta → TTS → reprodução. É o [VoiceCycle] com os engines reais.
+     */
+    fun cicloDeVoz() {
+        viewModelScope.launch {
+            when (val rota = audio.iniciar()) {
+                is Result.Failure -> {
+                    _commandStatus.value = "ciclo: sem rota de áudio (${rota.error.message})"
+                    audio.liberar(); return@launch
+                }
+                is Result.Success -> Unit
+            }
+            val modelo = File(getApplication<Application>().filesDir, "ggml-tiny.bin")
+            val whisper = if (modelo.exists()) WhisperCppStt(modelo.path) else null
+            _commandStatus.value = "ciclo: ouvindo… (STT=${if (whisper != null) "whisper" else "indisponível"})"
+
+            val cycle = VoiceCycle(
+                pcmInput = { audio.microfonePcm() },
+                vad = EnergyVoiceActivityDetector(sampleRateHz = 16_000),
+                sttFn = { pcm, sr ->
+                    (whisper?.transcribe(pcm, sr) as? Result.Success)?.value?.text.orEmpty()
+                },
+                router = router,
+                ttsFn = { texto -> (tts.synthesize(texto) as? Result.Success)?.value },
+                playFn = { audio.reproduzir(it.samples, it.sampleRateHz) },
+                onOuviVoce = { _commandStatus.value = "ciclo: ouvi você (earcon)" },
+                sampleRateHz = 16_000,
+            )
+            val r = runCatching { withTimeoutOrNull(8_000) { cycle.runOnce() } }.getOrNull()
+            audio.liberar()
+            whisper?.release()
+            _commandStatus.value = if (r != null) {
+                "\"${r.transcricao}\" → ${r.intent::class.simpleName} → \"${r.resposta}\""
+            } else {
+                "ciclo: sem fala detectada (8 s)"
+            }
         }
     }
 

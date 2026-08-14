@@ -128,6 +128,10 @@ fun DiagnosticsScreen(
             ) { Text("Enviar comando") }
             OutlinedButton(onClick = vm::falarComando) { Text("Falar comando (STT)") }
         }
+        Button(
+            onClick = vm::cicloDeVoz,
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("▶ Ciclo de voz completo (push-to-talk)") }
     }
 }
 
