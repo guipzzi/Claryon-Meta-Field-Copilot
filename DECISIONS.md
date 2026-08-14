@@ -237,3 +237,11 @@ Ordem cronológica inversa (mais recente no topo).
 
 - **`START_STICKY` + serviço iniciado sempre de tela visível.**
   Iniciar FGS em background é `ForegroundServiceStartNotAllowedException` — por isso os botões de modo vivem no painel e `CopilotService.iniciar` é chamado da UI. `START_STICKY` faz o pipeline voltar se o sistema matar por memória.
+
+## Auditoria final (2026-08-14)
+
+- **`MockDeviceController` idempotente.**
+  `MockDeviceKit.getInstance` é singleton de processo e `enable()` duas vezes sem `disable()` no meio **aborta o processo** nativamente (`MediaCodec CHECK_EQ(mState, UNINITIALIZED)`). O painel de diagnóstico já tinha um guarda, mas ele falhava quando o pareamento retornava `false` (o `enable()` já havia acontecido). O guarda agora vive no controller.
+
+- **`MockDeviceKitStreamTest` fora da suíte padrão (`@Ignore` com motivo), rodável isolado.**
+  Passa quando é o único teste da execução; aborta com `MediaCodec CHECK_EQ` sempre que outra classe divide o processo — reproduzido inclusive com `PlacaOcrTest`, que não toca áudio nem vídeo. O `MediaCodec` é do decodificador do **MockDeviceKit** (artefato de debug do SDK em preview), não nosso. Alternativa descartada: deixar a suíte vermelha por defeito de ferramenta. O KDoc traz o comando de execução isolada; reavaliar a cada atualização do `mwdat-mockdevice`.
