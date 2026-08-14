@@ -194,3 +194,26 @@ Ordem cronológica inversa (mais recente no topo).
 
 - **`security-crypto = 1.1.0-alpha06`.**
   A 1.0.0 estável arrasta uma versão antiga do Tink com problemas em APIs novas; a alpha06 é a linha usada de fato em produção para `EncryptedFile`/`MasterKey`. Reavaliar quando a 1.1.0 estabilizar.
+
+## M7 — Rede (Supabase + fila offline) (2026-08-14)
+
+- **WhatsApp fora do escopo por ora (decisão do produto).**
+  `MessagingGateway` e `TacticalMessage` permanecem como contrato (M0); nenhuma implementação de WhatsApp foi escrita. A saída de rede do M7 é o **Supabase**. Reavaliar quando o escopo do canal de mensageria for definido.
+
+- **Fila offline durável em disco (`FileOutbox`): um arquivo por item, nome = sequência com zero-pad.**
+  Alternativa: Room. Descartada por peso (compilador de anotação, esquema, migrações) para uma fila de chave-valor FIFO. Um arquivo por item dá ordem FIFO pelo nome, escrita **atômica** (`.tmp` + rename — não deixa item meio-escrito se o processo morrer) e remoção sem reescrever o resto. `payload` em Base64 porque pode conter quebras de linha. Só `java.io` ⇒ testável em JVM pura.
+
+- **A fila é agnóstica ao conteúdo (`payload: String` opaco).**
+  Motivo: não acoplar a fila a `TacticalMessage`/Supabase. `TacticalMessageCodec` traduz; quem drena interpreta. Evidência, telemetria e mensagem tática usam a mesma fila com `type` diferente.
+
+- **`OutboxDrainer` para na primeira falha do lote; item veneno é descartado após 5 tentativas.**
+  Parar cedo: se a rede caiu, insistir nos próximos do lote só gasta bateria. Descarte após N: senão um item malformado trava a fila para sempre — o descarte é contado no `DrainReport`.
+
+- **Honestidade no despacho (`TacticalDispatcher` → `Despacho.Enviada` | `Despacho.Enfileirada`).**
+  Materializa a regra do M0 em **tipo**, não em comentário: o chamador é obrigado a distinguir os dois casos, então o TTS não tem como dizer "enviado" quando só enfileirou. Testado nos dois caminhos.
+
+- **Supabase por PostgREST com OkHttp, sem SDK.**
+  Alternativa: `supabase-kt`. Descartada por arrastar Ktor + serialização para um único `POST`. `Prefer: resolution=merge-duplicates` torna o reenvio **idempotente** (retry após queda de rede não duplica ocorrência). Credenciais em runtime, nunca versionadas.
+
+- **Duas faixas de WorkManager: tática (`CONNECTED`) e pesada (`UNMETERED` + `requiresCharging` + `requiresBatteryNotLow`).**
+  Mensagem tática não pode esperar o celular ir para o carregador; evidência e modelos podem. Ambas com backoff exponencial e `enqueueUniqueWork(KEEP)` para não empilhar drenagens concorrentes. O gateway (com a chave) vive num holder de processo — não vai para a base do WorkManager.

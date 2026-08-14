@@ -28,6 +28,10 @@ android {
 
 dependencies {
     implementation(project(":core-common"))
+    implementation(libs.kotlinx.coroutines.core)
+    implementation(libs.androidx.work.runtime)
+    implementation(libs.okhttp)
 
     testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
 }

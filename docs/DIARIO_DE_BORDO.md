@@ -331,18 +331,42 @@ cortesia já tinham teste desde o M4.
   `verificar()` aponta o segmento 2. Dupla camada: o GCM apanha byte adulterado,
   a cadeia apanha troca/remoção/reordenação.
 
+## 2026-08-14 — M7: rede (Supabase + fila offline)
+
+WhatsApp saiu do escopo por ora (decisão de produto); o contrato
+`MessagingGateway` fica de pé, sem implementação. A saída de rede é o Supabase.
+
+O que importa aqui não é o `POST` — é o **comportamento sem rede**. Três peças:
+
+- `FileOutbox`: fila durável em disco, um arquivo por item, escrita atômica
+  (`.tmp` + rename). Sobrevive à morte do processo, que é o ponto inteiro.
+  Testado: enfileira em uma instância, lê em outra, FIFO e payload íntegros.
+- `OutboxDrainer`: drena FIFO, para na primeira falha (se a rede caiu, insistir
+  só gasta bateria) e descarta item veneno após 5 tentativas — senão um item
+  malformado tranca a fila para sempre.
+- `TacticalDispatcher`: devolve `Enviada` **ou** `Enfileirada`. A regra "não
+  mente dizendo que enviou" virou **tipo**, não comentário — quem chama é
+  obrigado a distinguir, então o TTS não tem como escorregar.
+
+`SupabaseSyncGateway` fala PostgREST com OkHttp (sem SDK) e usa
+`Prefer: resolution=merge-duplicates` para o reenvio ser idempotente. Duas
+faixas de WorkManager: tática (só `CONNECTED`) e pesada (`UNMETERED` +
+carregando + bateria ok) — mensagem tática não espera o carregador; evidência
+espera.
+
 ## Estado atual (fim de 2026-08-14)
 
 - **Marcos concluídos:** M0, MCP, M1, M2, M3, **M4** (whisper.cpp nativo +
   Piper/sherpa-onnx verificados), ciclo de voz, **M5** (som), **M6** (visão +
-  evidência).
+  evidência), **M7** (rede).
 - **Build:** verde, **lint reabilitado** (AGP 8.9.2 corrige o bug com Kotlin 2.2).
 - **Toolchain:** JDK 17 · Gradle 8.11.1 · AGP 8.9.2 · Kotlin 2.2.0 · compileSdk 35 · minSdk 31 · **NDK 27 · CMake 3.22.1**.
 - **Voz:** roteador determinístico + VAD + TTS (Piper/Android) + **STT whisper.cpp
   on-device (provado)** + fallback (SpeechRecognizer) + resample 8→16 kHz.
-- **Próximas tarefas:** **M7** (rede — Supabase + fila offline; WhatsApp fora do
-  escopo por ora), **M8** (energia — FGS + WorkManager + modos + térmico),
-  auditoria final + compliance + verificação de docs.
+- **Rede:** fila offline durável + drenagem por WorkManager (duas faixas) +
+  Supabase por PostgREST. WhatsApp fora do escopo por ora.
+- **Próximas tarefas:** **M8** (energia — FGS + modos Standby/Ativo/Ocorrência +
+  térmico), auditoria final + compliance + verificação de docs.
 
 **Pendências conhecidas (registradas para não se perderem):**
 - Revogar e rotacionar o PAT do GitHub (foi exposto em conversa durante o setup).
