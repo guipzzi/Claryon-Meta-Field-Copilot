@@ -1,5 +1,8 @@
 package com.claryon.net
 
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -29,8 +32,12 @@ class CanalDePosicoesTest {
         override suspend fun publicar(lat: Double, lon: Double, precisaoM: Float, velocidadeMs: Float?) {
             publicadas += Triple(lat, lon, velocidadeMs)
         }
+        /** Trava para segurar `assinarPares` no meio e reproduzir a corrida. */
+        var portaoDaRede: CompletableDeferred<Unit>? = null
+
         override suspend fun assinarPares(talkGroupId: String): Boolean {
             assinaturas++
+            portaoDaRede?.await()
             return aceitaAssinatura
         }
         override suspend fun desassinarPares() { desassinaturas++ }
@@ -187,6 +194,90 @@ class CanalDePosicoesTest {
         canal.assinar("tg-1")
         canal.aoReceber(par("Alfa Dois"))
         assertNull(canal.marcadorDe("Zulu Nove", minhaLat, minhaLon))
+    }
+
+    // ── Regressões da revisão adversarial ─────────────────────────────────────
+
+    @Test
+    fun fecharOMapaDuranteAAssinatura_naoDeixaAAssinaturaViva(): Unit = runTest {
+        // A corrida: `assinar` suspende na chamada de rede; o agente fecha o mapa;
+        // `desassinar` roda inteiro; então `assinar` retoma e grava
+        // `assinado = true`. Resultado sem o mutex: **assinatura viva com o mapa
+        // fechado** — a difusão de posição de todos para todos o turno inteiro,
+        // que é justamente a regra que esta classe existe para impor.
+        val portao = CompletableDeferred<Unit>()
+        pub.portaoDaRede = portao
+
+        val assinando = launch { canal.assinar("tg-1") }
+        runCurrent()
+        assertEquals("assinar deve ter chegado na rede", 1, pub.assinaturas)
+
+        // Mapa fecha enquanto a rede não respondeu.
+        val fechando = launch { canal.desassinar() }
+        runCurrent()
+
+        portao.complete(Unit)
+        assinando.join()
+        fechando.join()
+
+        assertFalse(
+            "assinatura sobreviveu ao fechamento do mapa",
+            canal.assinando(),
+        )
+        assertTrue(canal.marcadores(minhaLat, minhaLon).isEmpty())
+    }
+
+    @Test
+    fun pacoteQueChegaJuntoComOFechamento_naoRessuscitaOEspelho(): Unit = runTest {
+        // Sem `@Volatile` e sem a reconferência depois da escrita, um pacote em
+        // voo era gravado depois do `clear()` — e o mapa reabria com posição do
+        // turno anterior.
+        canal.assinar("tg-1")
+        canal.desassinar()
+        canal.aoReceber(par("Alfa Dois"))
+
+        canal.assinar("tg-1")
+        assertTrue("espelho ressuscitou", canal.marcadores(minhaLat, minhaLon).isEmpty())
+    }
+
+    @Test
+    fun indicativoQueNormalizaParaVazio_naoCasaComNinguem(): Unit = runTest {
+        // `startsWith("")` é sempre true: o STT devolvendo só pontuação fazia o
+        // app responder distância e rumo de um companheiro qualquer, com
+        // confiança total.
+        canal.assinar("tg-1")
+        canal.aoReceber(par("Alfa Dois"))
+        assertNull(canal.marcadorDe("?", minhaLat, minhaLon))
+        assertNull(canal.marcadorDe("", minhaLat, minhaLon))
+        assertNull(canal.marcadorDe("  ...  ", minhaLat, minhaLon))
+    }
+
+    @Test
+    fun prefixoAmbiguo_naoEscolheUmParQualquer(): Unit = runTest {
+        // Com Alfa-01 e Alfa-02 na guarnição, "alfa" devolvia o primeiro por
+        // ordem de inserção — o agente ouvia a posição do par errado.
+        canal.assinar("tg-1")
+        canal.aoReceber(par("Alfa-01", lat = -16.6700))
+        canal.aoReceber(par("Alfa-02", lat = -16.6600))
+
+        assertNull("ambíguo é o mesmo que não encontrado", canal.marcadorDe("alfa", minhaLat, minhaLon))
+        // Mas o indicativo completo continua casando.
+        assertNotNull(canal.marcadorDe("alfa 01", minhaLat, minhaLon))
+    }
+
+    @Test
+    fun coordenadaInvalida_naoEntraNoEspelho(): Unit = runTest {
+        // NaN faria `Geo.distanciaM` devolver NaN, `.toInt()` viraria ZERO, e zero
+        // ordena o par em primeiro: o mapa afirmaria que o companheiro está em
+        // cima do agente. É o pior valor possível para inventar.
+        canal.assinar("tg-1")
+        canal.aoReceber(par("Ruído NaN", lat = Double.NaN))
+        canal.aoReceber(par("Ruído Inf", lon = Double.POSITIVE_INFINITY))
+        canal.aoReceber(par("Fora de domínio", lat = 200.0))
+        assertTrue(canal.marcadores(minhaLat, minhaLon).isEmpty())
+
+        canal.aoReceber(par("Alfa Dois"))
+        assertEquals(1, canal.marcadores(minhaLat, minhaLon).size)
     }
 
     @Test

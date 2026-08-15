@@ -16,14 +16,21 @@ import com.claryon.common.Result
 import com.claryon.evidence.EncryptedEvidenceVault
 import com.claryon.field.BuildConfig
 import com.claryon.field.agent.ClaryonIntentExecutor
+import android.content.pm.PackageManager
 import com.claryon.agent.BuscaDePar
+import com.claryon.common.Earcon
+import com.claryon.common.Priority
+import com.claryon.field.permissoes.PermissoesEssenciais
 import com.claryon.agent.FalaDePosicao
 import com.claryon.agent.PosicaoRelativa
 import com.claryon.agent.Rumo
 import com.claryon.field.auth.CofreDeSessaoCifrado
 import com.claryon.net.AutenticacaoSupabase
 import com.claryon.net.ConfigRealtime
+import com.claryon.net.CanalDePosicoes
 import com.claryon.net.ConsultaDePosicao
+import com.claryon.field.mapa.EstadoDoMapa
+import com.claryon.field.mapa.MapaDePares
 import com.claryon.net.PublicadorDePosicaoSupabase
 import com.claryon.field.agent.Identidade
 import com.claryon.field.local.ProvedorDeLocal
@@ -212,6 +219,114 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
         config = configRede,
         tokenDeSessao = { autenticacao.tokenValido()?.also { tokenCorrente = it } },
     )
+
+    // ── Mapa da guarnição (C5) ────────────────────────────────────────────────
+
+    private val canalDePosicoes = CanalDePosicoes(publicador) { System.currentTimeMillis() }
+
+    private val _estadoDoMapa = MutableStateFlow(
+        EstadoDoMapa.indisponivel("Abra o mapa para ver a guarnição."),
+    )
+    val estadoDoMapa: StateFlow<EstadoDoMapa> = _estadoDoMapa.asStateFlow()
+
+    private var bombaDoMapa: Job? = null
+
+    /**
+     * Chamado pelo `ON_START` da tela do mapa.
+     *
+     * É aqui que a regra de bateria vira código: **a assinatura do canal de
+     * posições nasce com a tela e morre com ela**. Numa guarnição de oito,
+     * mantê-la aberta o turno inteiro seria 8 × 8 de tráfego permanente para uma
+     * tela fechada 95% do tempo.
+     *
+     * E a reciprocidade é pré-condição, não convenção: [CanalDePosicoes.assinar]
+     * recusa se a publicação própria não estiver ativa. Quem vê é visto.
+     */
+    fun abrirMapa() {
+        if (bombaDoMapa != null) return
+        bombaDoMapa = viewModelScope.launch {
+            if (!redeConfigurada || autenticacao.tokenValido()?.also { tokenCorrente = it } == null) {
+                _estadoDoMapa.value =
+                    EstadoDoMapa.indisponivel("Sem sessão. Entre para ver a guarnição.")
+                return@launch
+            }
+            // Publicar ANTES de assinar. A ordem é a reciprocidade: sem a própria
+            // posição no ar, `assinar` recusa — e recusa é o comportamento certo,
+            // não um obstáculo a contornar.
+            publicarPosicao()
+
+            if (!canalDePosicoes.assinar(TALK_GROUP_DEMO)) {
+                _estadoDoMapa.value = EstadoDoMapa.indisponivel(
+                    "Sem publicar sua posição, não é possível ver a dos outros.",
+                )
+                return@launch
+            }
+
+            while (true) {
+                val minha = local.ultimaPosicao()
+                _estadoDoMapa.value = if (minha == null) {
+                    // Sem posição própria não há de onde medir distância nem rumo.
+                    // Mostrar os pares sem isso seria uma lista de nomes.
+                    EstadoDoMapa.indisponivel("Sem sinal de GPS. Posições indisponíveis.")
+                } else {
+                    MapaDePares.montar(
+                        canalDePosicoes.marcadores(minha.latitude, minha.longitude),
+                        assinado = canalDePosicoes.assinando(),
+                    )
+                }
+                // Redesenhar por tempo, e não só por pacote recebido: o
+                // esmaecimento depende do relógio, não da chegada de dado novo. Um
+                // par que parou de publicar tem de esmaecer sozinho — é
+                // exatamente esse o caso que a regra existe para cobrir.
+                kotlinx.coroutines.delay(INTERVALO_DE_REDESENHO_MS)
+                publicarPosicao()
+            }
+        }
+    }
+
+    /** Chamado pelo `ON_STOP` da tela. Fecha a assinatura e descarta o espelho. */
+    fun fecharMapa() {
+        bombaDoMapa?.cancel()
+        bombaDoMapa = null
+        // `viewModelScope`, não o escopo cancelado: `desassinar` precisa rodar até
+        // o fim para avisar o servidor. Lançar no job que acabou de ser cancelado
+        // deixaria a assinatura aberta do outro lado.
+        viewModelScope.launch { canalDePosicoes.desassinar() }
+        _estadoDoMapa.value = EstadoDoMapa.indisponivel("Abra o mapa para ver a guarnição.")
+    }
+
+    /**
+     * Diz em voz alta o que está morto por falta de permissão.
+     *
+     * Isto fechava um buraco entre a documentação e o código: o catálogo prometia
+     * que "toda negativa tem uma frase própria, dita em voz alta, e não um
+     * silêncio educado", e `avisoFalado` só era chamado pelos testes. Na prática
+     * nenhuma negativa produzia som — o agente com localização negada dava o
+     * comando, nada acontecia, e ele concluía que o produto é ruim.
+     *
+     * Dito **uma vez por abertura**, no nível informativo: repetir a cada comando
+     * viraria ruído que o agente aprende a ignorar, e o Modo Tático o suprime
+     * durante ocorrência, que é quando ele mais atrapalharia.
+     */
+    fun anunciarCapacidadesPerdidas() {
+        if (jaAnunciouPermissoes) return
+        jaAnunciouPermissoes = true
+
+        val concedidas = PermissoesEssenciais.catalogo()
+            .map { it.permissao }
+            .filter {
+                getApplication<Application>().checkSelfPermission(it) ==
+                    PackageManager.PERMISSION_GRANTED
+            }
+            .toSet()
+
+        val aviso = PermissoesEssenciais.avisoFalado(PermissoesEssenciais.avaliar(concedidas))
+            ?: return
+
+        saida.emitir(Utterance.SinalizarEFalar(Earcon.FALHA, aviso, Priority.INFORMATIVO))
+    }
+
+    private var jaAnunciouPermissoes = false
 
     /**
      * Sobe a posição própria. É ela que dá ao servidor o ponto de onde medir a
@@ -558,6 +673,20 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private companion object {
+        /**
+         * Talk group da demonstração. No produto vem do cadastro, junto da
+         * identidade — um agente pertence a um ou mais grupos, e o servidor já
+         * impõe isso por RLS.
+         */
+        const val TALK_GROUP_DEMO = "demo"
+
+        /**
+         * 5 s. Curto o bastante para o esmaecimento acompanhar o relógio, longo o
+         * bastante para não custar bateria com a tela aberta — e a tela do mapa
+         * fica aberta pouco tempo, por desenho.
+         */
+        const val INTERVALO_DE_REDESENHO_MS = 5_000L
+
         const val TAG = "ClaryonField"
     }
 }

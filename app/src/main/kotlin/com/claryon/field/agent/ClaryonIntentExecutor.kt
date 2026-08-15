@@ -69,6 +69,9 @@ class ClaryonIntentExecutor(
     private val mutex = Mutex()
     private var gravacaoAtual: RecordingHandle? = null
 
+    /** Falhas consecutivas ao fechar o cofre. Ver [encerrarGravacao]. */
+    private var falhasAoFechar = 0
+
     /** Último resultado, para [Intent.Detalhar]. Não guarda o próprio repetir. */
     private var ultimoResultado: ActionOutcome? = null
 
@@ -258,19 +261,55 @@ class ClaryonIntentExecutor(
         return when (val r = cofre.finalize(handle)) {
             is Result.Success -> {
                 gravacaoAtual = null
+                falhasAoFechar = 0
                 ActionOutcome.GravacaoEncerrada(r.value.chain.size)
             }
-            // Handle preservado: o cofre pode ter falhado só ao escrever o
-            // manifesto, e zerar aqui deixaria a gravação órfã e impossível de
-            // fechar por comando de voz.
-            is Result.Failure -> ActionOutcome.Falhou(FalhaOperacional.COFRE_INDISPONIVEL)
+            is Result.Failure -> {
+                falhasAoFechar++
+                // Preservar o handle é o certo na primeira falha: o cofre pode ter
+                // falhado só ao escrever o manifesto, e zerar deixaria a gravação
+                // órfã e impossível de fechar por voz.
+                //
+                // Mas preservar PARA SEMPRE era um beco sem saída. Numa falha
+                // persistente — disco cheio, Keystore inacessível — `iniciar`
+                // respondia "Já gravando." e `encerrar` respondia "Cofre falhou."
+                // pelo resto do turno, e o agente perdia a capacidade de gravar
+                // evidência sem nenhum caminho de volta por comando de voz.
+                //
+                // Depois de [MAX_FALHAS_AO_FECHAR] tentativas, o handle é
+                // liberado. Os segmentos já gravados continuam no disco e
+                // cifrados; o que se perde é o manifesto — e uma evidência sem
+                // manifesto ainda pode ser periciada, enquanto um app que não grava
+                // mais nada não produz evidência nenhuma.
+                if (falhasAoFechar >= MAX_FALHAS_AO_FECHAR) {
+                    gravacaoAtual = null
+                    falhasAoFechar = 0
+                }
+                ActionOutcome.Falhou(FalhaOperacional.COFRE_INDISPONIVEL)
+            }
         }
     }
 
-    /** Anexa um segmento à gravação em curso, se houver. Usado pelo pipeline de áudio. */
-    suspend fun anexarEvidencia(chunk: ByteArray): Boolean {
-        val handle = mutex.withLock { gravacaoAtual } ?: return false
-        return cofre.append(handle, chunk) is Result.Success
+    /**
+     * Anexa um segmento à gravação em curso, se houver. Usado pelo pipeline de
+     * áudio.
+     *
+     * O `append` roda **dentro** do mutex, não só a leitura do handle.
+     *
+     * A versão anterior pegava o handle sob o lock e escrevia fora dele, e o
+     * pipeline de áudio anexa continuamente enquanto o agente pode dizer
+     * "encerrar gravação": `finalize` e `append` corriam em paralelo sobre o mesmo
+     * handle, e o segmento podia entrar **depois** do manifesto. Uma cadeia de
+     * custódia com um bloco fora da cadeia é exatamente o que este módulo existe
+     * para impedir.
+     *
+     * O custo é serializar a escrita com os comandos de voz. Aceitável: o `append`
+     * é I/O curto em arquivo local, e a alternativa é evidência que um advogado
+     * derruba.
+     */
+    suspend fun anexarEvidencia(chunk: ByteArray): Boolean = mutex.withLock {
+        val handle = gravacaoAtual ?: return@withLock false
+        cofre.append(handle, chunk) is Result.Success
     }
 
     /** `true` se há gravação aberta (para o painel e para o encerramento do app). */
@@ -279,5 +318,12 @@ class ClaryonIntentExecutor(
     private companion object {
         /** Limite do campo de situação no template aprovado. */
         const val SITUACAO_MAX = 120
+
+        /**
+         * Três tentativas de fechar o cofre antes de liberar o handle. Uma só
+         * seria pouco (falha transitória de I/O acontece); sem limite, o app
+         * perde a gravação de evidência pelo resto do turno.
+         */
+        const val MAX_FALHAS_AO_FECHAR = 3
     }
 }

@@ -6,6 +6,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -16,6 +17,7 @@ import com.claryon.field.ui.DiagnosticsScreen
 import com.claryon.field.ui.DiagnosticsViewModel
 import com.claryon.field.ui.TelaDeLogin
 import com.claryon.field.ui.TelaDePermissoes
+import com.claryon.field.ui.TelaDoMapa
 
 /**
  * Ponto de entrada do app.
@@ -50,6 +52,7 @@ class MainActivity : ComponentActivity() {
             // turno é barato; uma capacidade morta em definitivo não é.
             var mostrarPermissoes by remember { mutableStateOf(!tudoConcedido()) }
             var mostrarLogin by remember { mutableStateOf(true) }
+            var mostrarMapa by remember { mutableStateOf(false) }
 
             MaterialTheme {
                 Surface {
@@ -66,7 +69,19 @@ class MainActivity : ComponentActivity() {
                             aoSeguirSemRede = { mostrarLogin = false },
                         )
 
-                        else -> DiagnosticsScreen()
+                        mostrarMapa -> {
+                            val estado by vm.estadoDoMapa.collectAsState()
+                            TelaDoMapa(
+                                estado = estado,
+                                // Esses dois lambdas são a regra de bateria: a
+                                // assinatura do canal de posições nasce e morre
+                                // com esta tela, nunca com o app.
+                                aoAbrir = vm::abrirMapa,
+                                aoFechar = vm::fecharMapa,
+                            )
+                        }
+
+                        else -> DiagnosticsScreen(aoAbrirMapa = { mostrarMapa = true })
                     }
                 }
             }

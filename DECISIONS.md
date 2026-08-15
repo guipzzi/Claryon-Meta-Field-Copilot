@@ -659,3 +659,79 @@ Ordem cronológica inversa (mais recente no topo).
   recusando a fazer o que ainda sabe fazer, com o agente já no pátio. Sem Bluetooth o ciclo
   de voz roda inteiro com fone comum — perde-se o beamforming, o que muda quem é gravado, e
   isso é dito em voz alta.
+
+## Achados da revisão adversarial e C5 (2026-08-15)
+
+- **⚠️ O léxico casava gatilho por substring.** `contains` cru fazia qualquer palavra que
+  *contivesse* um gatilho disparar alerta para a guarnição inteira, com prioridade P1/P2, sem
+  confirmação e sem desfazer. Verificado executando: "obrigado" e "chama a brigada militar"
+  → BRIGA/ALTA; "vou pegar o suspeito" → RACHA; "soltaram fogos" → INCÊNDIO/EMERGÊNCIA;
+  "cobrança de pensão" → ANIMAL PERIGOSO. Em RS/SC a corporação **se chama** Brigada Militar:
+  o falso positivo seria diário. A função que conserta — `palavraInteira` — já existia no
+  arquivo e estava morta. Lição de processo: código morto ao lado de código errado é sinal de
+  que a versão certa foi escrita e não ligada.
+
+- **"de novo" é locução de rádio, não comando.** Estava em `DETALHAR`, avaliado antes do
+  léxico: "tiroteio de novo na Rui Barbosa" virava `Detalhar` e o app repetia a última
+  resposta — ou dizia "Nada a repetir." — enquanto nenhum alerta saía.
+
+- **Índice de texto normalizado não vale no texto original.** `normalizarTexto` remove
+  pontuação e colapsa espaços, então `original.substring(normalizado.indexOf(x))` diverge:
+  "Tiroteio, na Rui Barbosa" produzia o logradouro **"Rui Barbos"**. O gazetteer passou a ser
+  `normalizado → grafia canônica`, e devolve a canônica.
+
+- **`Math.round(NaN)` é 0**, então `Rumo.deGraus(NaN)` devolvia **norte** — rumo afirmado com
+  confiança total a partir de um número inválido. E `NaN` é o que o PostGIS produz em
+  `ST_Azimuth` para pontos coincidentes: dupla na mesma viatura, que não é borda. `Rumo?`
+  agora, e a fala vira "com você".
+
+- **Laconicidade testada só com o caso fácil.** A frase de posição cabia em 7 palavras com
+  "Alfa Dois" e estourava com "Alfa Dois Zero" — indicativo de três palavras que existe e que
+  o roteador produz. A regra dura passava verde e quebraria em campo. A fala agora degrada por
+  corte, do detalhe menos essencial para o mais.
+
+- **`shouldShowRequestPermissionRationale` e recomposição.** Negar produzia um
+  `EstadoDePermissoes` estruturalmente **igual** ao anterior, então o Compose não recompunha e
+  o ramo "Abrir ajustes" era inalcançável: o botão continuava "Permitir", abrindo um diálogo
+  que o sistema não mostra mais. `neverEqualPolicy` + observador de `ON_RESUME` (conceder
+  pelos ajustes não reinicia o processo; só revogar reinicia).
+
+- **`podeOperar` como portão de entrada criava beco sem saída.** Quem concedesse o microfone e
+  negasse a localização ia direto ao painel da segunda abertura em diante, e C2, C3 e o mapa
+  ficavam mortos em silêncio para sempre. O portão passou a ser `tudoConcedido`, e "seguir
+  assim mesmo" vale só para a sessão.
+
+- **O `append` de evidência rodava fora do mutex.** Só a leitura do handle estava protegida, e
+  o pipeline de áudio anexa continuamente enquanto o agente pode dizer "encerrar gravação":
+  `finalize` e `append` corriam em paralelo sobre o mesmo handle, e um bloco podia entrar
+  depois do manifesto. Cadeia de custódia com bloco fora da cadeia é o que o módulo existe
+  para impedir.
+
+- **Preservar o handle do cofre para sempre era beco sem saída.** Numa falha persistente,
+  `iniciar` respondia "Já gravando." e `encerrar` respondia "Cofre falhou." pelo resto do
+  turno. Agora o handle é liberado após 3 tentativas: os segmentos continuam no disco e
+  cifrados, perde-se o manifesto — e evidência sem manifesto ainda se pericia, enquanto app
+  que não grava não produz evidência nenhuma.
+
+- **`CanalDePosicoes` não tinha exclusão mútua.** `assinar` e `desassinar` suspendem no meio
+  (rede). Fechar o mapa enquanto `assinar` estava suspenso fazia `desassinar` rodar inteiro e,
+  **depois**, `assinar` gravar `assinado = true`: assinatura viva com o mapa fechado — a
+  difusão de todos para todos o turno inteiro, que é a regra que a classe existe para impor.
+  Mutex + `@Volatile` + `ConcurrentHashMap`. **O teste de regressão foi validado por mutação**:
+  com um `Mutex()` novo por chamada ele falha; com o mutex compartilhado, passa.
+
+- **Prefixo ambíguo devolvia par arbitrário.** Com Alfa-01 e Alfa-02 na guarnição, "alfa"
+  devolvia o primeiro por ordem de inserção — o agente ouvia a posição do par errado. E
+  indicativo que normaliza para vazio casava com tudo, porque `startsWith("")` é sempre
+  verdadeiro. Ambíguo passou a ser o mesmo que não encontrado.
+
+- **C5: o mapa para de afirmar o que não sabe mais.** Três estados, não dois — atual, esmaecido
+  (2 min) e antigo (10 min, e aí o marcador troca posição por idade). "Deslocando" só é
+  afirmado sobre posição atual: dizer isso a partir de um dado de dez minutos é uma afirmação
+  sobre o presente feita com informação do passado. E o redesenho é por tempo, não por pacote
+  recebido — um par que **parou** de publicar precisa esmaecer sozinho, que é exatamente o
+  caso que a regra cobre.
+
+- **Mapa vazio e mapa indisponível são estados diferentes.** São indistinguíveis para quem
+  olha, e a leitura errada é a perigosa: "ninguém por perto" quando a verdade é "não estou
+  recebendo". A causa aparece escrita na tela.

@@ -45,6 +45,7 @@ import com.claryon.glasses.StreamStatus
 @Composable
 fun DiagnosticsScreen(
     modifier: Modifier = Modifier,
+    aoAbrirMapa: () -> Unit = {},
     vm: DiagnosticsViewModel = viewModel(),
 ) {
     val registration by vm.registration.collectAsState()
@@ -78,6 +79,10 @@ fun DiagnosticsScreen(
 
         if (vm.mockAvailable) {
             StatusCard("MockDeviceKit", mockStatus)
+
+            Button(onClick = aoAbrirMapa, modifier = Modifier.fillMaxWidth()) {
+                Text("Mapa da guarnição")
+            }
         }
         StatusCard("Áudio HFP (M3)", audioStatus)
 
