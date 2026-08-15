@@ -3,15 +3,20 @@
 Uma linha por arquivo. **Leia só o que a tarefa em curso pede** — carregar tudo é
 o que faz um agente perder o meio do documento e misturar versão de API.
 
-As regras permanentes ficam em [`AGENTS.md`](../AGENTS.md), na raiz, e cabem numa
-tela. Este índice existe para o resto: o material grosso, quebrado por assunto.
+Sempre carregados, sem passar por aqui: [`../AGENTS.md`](../AGENTS.md) (regras
+permanentes) e [`../ESTADO.md`](../ESTADO.md) (onde estamos hoje). Este índice
+existe para o resto: o material grosso, quebrado por assunto.
 
-## Regras e decisões
+O gatilho de leitura fica em `AGENTS.md` § "Antes de tocar": ele diz qual **seção**
+abrir antes de mexer em áudio, posição ou fala. Este índice diz qual **arquivo**.
+
+## Estado e decisões
 
 | Arquivo | Consulte quando |
 |---|---|
+| [`../ESTADO.md`](../ESTADO.md) | "Onde estamos?" — o que funciona, o que está quebrado e conhecido, o que vem a seguir. Reescrito a cada sessão, teto de 60 linhas. **Comece por aqui** |
+| [`../DECISIONS.md`](../DECISIONS.md) | "Por que está assim?" — uma entrada por decisão não óbvia, com a alternativa descartada e o motivo. Só cresce; é arqueologia, não estado |
 | [`PADROES_DE_ENGENHARIA.md`](PADROES_DE_ENGENHARIA.md) | Sequência de boot, tabela de armadilhas, design de áudio, energia, metas. É a fonte das regras que o `AGENTS.md` resume |
-| [`../DECISIONS.md`](../DECISIONS.md) | "Por que está assim?" — uma linha por decisão não óbvia, com a alternativa descartada e o motivo. Ordem cronológica |
 | [`COMPLIANCE.md`](COMPLIANCE.md) | O que o edital exige × o que existe. Antes de afirmar que uma capacidade está pronta |
 
 ## Arquitetura e implementação
@@ -26,12 +31,13 @@ tela. Este índice existe para o resto: o material grosso, quebrado por assunto.
 
 | Arquivo | Consulte quando |
 |---|---|
-| [`DIARIO_DE_BORDO.md`](DIARIO_DE_BORDO.md) | Narrativa por marco, com o que quebrou e como foi achado |
+| [`DIARIO_DE_BORDO.md`](DIARIO_DE_BORDO.md) | Narrativa por marco, com o que quebrou e como foi achado. **Não contém estado atual** — isso é `ESTADO.md` |
 
 ## Specs
 
 Uma por feature, em [`../specs/`](../specs/). Critério de aceite em EARS, cada um
 mapeando para pelo menos um teste. **É o que se revisa antes de existir diff.**
+Spec que sobrepõe regra dura entra como *proposta* e espera revisão humana.
 
 | Spec | Estado |
 |---|---|

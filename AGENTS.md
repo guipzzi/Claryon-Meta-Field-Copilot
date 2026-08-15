@@ -1,44 +1,41 @@
 # Claryon Field — regras permanentes
 
-App Android/Kotlin companion para Ray-Ban Meta (**sem display**). Copiloto de voz
-para agentes de segurança pública. Hackathon AI Glasses Brasil, 18/09/2026.
+Companion Android/Kotlin para Ray-Ban Meta **sem display**: o código roda no celular, os
+óculos são sensores e alto-falantes. Copiloto de voz para segurança pública. Hackathon AI
+Glasses Brasil, 18/09/2026. **Onde estamos hoje: [`ESTADO.md`](ESTADO.md) — leia primeiro.**
 
-**Stack:** Kotlin · Compose (sem navigation-compose) · minSdk 31 · JDK 17 ·
-mwdat **0.9.0** · MapLibre 11.11.0 · whisper.cpp + sherpa-onnx (locais) · Supabase.
-
-**Módulos:** `app` orquestra. `core-*` não dependem uns dos outros (exceto
-`core-common`). Todo acesso ao DAT passa por `GlassesFacade` em `core-glasses`.
+**Stack:** Kotlin 2.2 · Compose (sem navigation-compose) · JDK 17 · AGP 8.9.2 · minSdk 31 ·
+mwdat **0.9.0** · MapLibre 11.11.0 · whisper.cpp + sherpa-onnx (locais) · Supabase. `app`
+orquestra; `core-*` só dependem de `core-common`; todo DAT via `GlassesFacade`.
+`./gradlew build · :app:installDebug · connectedAndroidTest` · `adb logcat -s ClaryonField`
 
 ## Proibido
 
 - ❌ Reconhecimento facial ou base biométrica. Nenhuma versão, nenhuma flag.
+- ❌ Transcrever, classificar ou indexar a fala de **terceiros**. O beamforming isola quem
+  veste os óculos — transcrevemos o agente, não o interlocutor: é intencional, não conserte.
+  O pré-roll do PTT vive em RAM e nunca é persistido.
 - ❌ Enviar áudio, transcrição ou frame para serviço externo no caminho crítico.
+- ❌ Função de servidor que receba como parâmetro a identidade de quem pergunta: com ela,
+  distâncias trilateram a posição absoluta de qualquer par. Solicitante vem do JWT; o
+  parâmetro só existe dentro do schema `private`.
+- ❌ Áudio pelo DAT. Não existe `session.audioStream`: microfone e alto-falante dos óculos
+  são HFP/SCO. Classe de áudio em pacote `internal` não é API pública.
 - ❌ LLM escolhendo ação. Ele só preenche campos de intenção já definida.
 - ❌ Credencial versionada. Evidência fora de `EncryptedFile` + Keystore.
-- ❌ Escrever assinatura do DAT ou do MapLibre de memória. Confirme no artefato
-  (`javap`) ou na doc oficial. Não confirmou? **Pare e pergunte.**
-- ❌ Dependência nova sem justificar tamanho, licença e alternativa nativa.
+- ❌ Assinatura do DAT ou do MapLibre escrita de memória — confirme por `javap` no artefato
+  ou na doc oficial. Idem dependência nova: tamanho, licença, alternativa nativa. Não
+  confirmou? **Pare e pergunte.**
 
-## Invariantes que o compilador sustenta
+## Antes de tocar, leia o trecho em `docs/PADROES_DE_ENGENHARIA.md`
 
-- Capturar exige `GlassesAudioRoute`. Gravar pelo microfone do celular não compila.
-- `utteranceFor` aceita **apenas** `ActionOutcome` — a fala deriva do resultado da
-  ação, nunca do comando. Há teste que falha se alguém acrescentar sobrecarga.
-- `IntentExecutor` nunca lança: falha vira `ActionOutcome.Falhou` tipado.
-- Falha nunca é silêncio: todo caminho de erro tem earcon próprio.
-- Máximo 7 palavras por resposta de TTS operacional (há teste).
-
-## Comandos
-
-```
-./gradlew build · :app:installDebug · connectedAndroidTest · adb logcat -s ClaryonField
-```
+- áudio, HFP, PTT, rádio → §Sequências · §Rota de áudio · §Rádio tático
+- posição, mapa, RPC → §Localização e mapa · e `servidor/migracoes/0003,0006,0010`
+- fala, earcon, TTS, energia → §Honestidade · §Design de áudio · §Energia
 
 ## Antes de dizer "pronto"
 
-Leia o código procurando o caminho de falha, não o feliz. Teste verde prova que o
-caminho feliz existe; não prova que os outros existem. **Toda capacidade precisa de
-caminho alcançável pelo agente** — construir, testar e não ligar já aconteceu cinco
-vezes neste projeto.
-
-Detalhe e justificativa: [`docs/INDICE.md`](docs/INDICE.md).
+Teste verde prova que o caminho feliz existe; não prova que os outros existem. **Toda
+capacidade precisa de caminho alcançável pelo agente** — construir, testar e não ligar já
+aconteceu cinco vezes aqui. Ao fechar o bloco: atualize `ESTADO.md`, `git push origin master`
+(o iCloud já esvaziou o índice deste repositório uma vez). Índice: `docs/INDICE.md`.

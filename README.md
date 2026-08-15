@@ -201,20 +201,20 @@ adb logcat -s ClaryonField          # logs do app
 **Todos os marcos do plano estão concluídos.** Padrão de trabalho: **um marco por
 sessão**, com revisão humana entre eles.
 
-### O que ainda não existe (leia antes de assumir)
+**Todos os marcos do plano estão concluídos.** Padrão de trabalho: **um marco por
+sessão**, com revisão humana entre eles. A tabela acima é histórica: marco concluído
+não quer dizer capacidade alcançável pelo agente.
 
-Os componentes acima são verificados **isoladamente**. O que falta é a
-**montagem do produto** — e isso é deliberadamente explícito aqui para ninguém
-se enganar lendo a tabela:
+### O que ainda não existe
 
-| Lacuna | Consequência |
-|---|---|
-| **Não há executor de intenções.** O roteador devolve `Intent`, a resposta é falada, e nada acontece | O app diz *"Apoio solicitado, guarnição avisada."* **sem tentar enviar** e *"Gravação iniciada."* **sem gravar** |
-| `core-sound`, `core-evidence` e `core-sync` **não são importados** por `app/src/main` | Nenhum earcon toca; o cofre nunca é aberto; a fila nunca recebe nada |
-| Os modelos (`ggml-tiny`, voz Piper) vivem em `app/src/androidTest/assets` | O **APK de produção não os contém** — no aparelho do evento, whisper e Piper não existem |
-| **Wake word não implementada** (`WakeWordDetector` é só interface) | O acionamento é push-to-talk por botão. O VAD é por energia, não Silero |
-| `Telemetry` não é chamado em lugar nenhum | As metas de latência e bateria são **alvos, não medições** |
-| `MessagingGateway` é contrato sem implementação | O canal de mensageria tática está por definir (o WhatsApp saiu do escopo — ver `DECISIONS.md`) |
+Esta seção mantinha uma lista própria de lacunas, e ela envelheceu mal — em
+2026-08-15 três das seis linhas já eram falsas (o executor de intenções passou a
+existir, os três módulos passaram a ser importados, os modelos foram para
+`app/src/main/assets/`). Duas listas de lacunas garantem que uma esteja errada.
+
+**O estado corrente vive em um lugar só: [`ESTADO.md`](ESTADO.md)** — o que funciona
+hoje, o que está quebrado e conhecido, e o que vem a seguir, com `arquivo:linha` em
+cada item. É reescrito ao fim de cada sessão.
 
 ---
 

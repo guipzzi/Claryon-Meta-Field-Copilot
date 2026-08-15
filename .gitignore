@@ -37,6 +37,16 @@ app/src/androidTest/assets/models/
 # AAR pré-compilado do sherpa-onnx (baixado no setup, ver README)
 core-voice/libs/*.aar
 
-# Arquivo de contexto da ferramenta de desenvolvimento (local, não versionado).
-# O conteúdo canônico vive em docs/PADROES_DE_ENGENHARIA.md.
-CLAUDE.md
+# CLAUDE.md É VERSIONADO. Já não foi, e custou caro.
+#
+# Entre 14/08 e 15/08 ele ficou aqui, ignorado, enquanto 96 linhas de regra dura
+# entravam em docs/PADROES_DE_ENGENHARIA.md. O arquivo que a sessão de fato
+# carregava congelou e passou a divergir em silêncio do documento canônico —
+# inclusive a regra da trilateração, a mais consequente do projeto, que nunca
+# chegou ao contexto automático. Nada aponta um arquivo fora do git, então nada
+# denuncia quando ele apodrece.
+#
+# A neutralidade de ferramenta que justificava ignorá-lo é barata de outro jeito:
+# o conteúdo neutro vive em AGENTS.md e ESTADO.md, versionados, e o CLAUDE.md só
+# os importa. O que resta nele é regra de fluxo de trabalho, que a próxima máquina
+# e a próxima pessoa precisam receber.
