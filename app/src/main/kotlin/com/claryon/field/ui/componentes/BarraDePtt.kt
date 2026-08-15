@@ -108,7 +108,7 @@ fun BarraDePtt(
         }
     }
 
-    val alturaAlvo = if (noAr) 152.dp else 168.dp
+    val alturaAlvo = if (noAr) 160.dp else 136.dp
     val altura by animateFloatAsState(
         targetValue = alturaAlvo.value,
         animationSpec = tween(durationMillis = 160, easing = LinearEasing),
@@ -186,98 +186,92 @@ private fun ConteudoNoAr(estado: EstadoDoPtt.NoAr) {
 }
 
 /**
- * Repouso: um interruptor de instrumento, não um botão de página.
+ * Repouso.
  *
- * O caminho até aqui teve duas versões descartadas, e cada uma ensinou algo. O
- * retângulo com texto centralizado dizia "toque", não "segure". O alvo circular
- * dizia o gesto certo mas destoava de um painel feito de fios retos. E os quatro
- * colchetes simétricos da primeira tentativa liam como **enfeite**, não como
- * marca de registro.
+ * Terceira reescrita, e a lição é sobre o que eu insisti em errar: **colchetes,
+ * âncoras e marcas de registro são maneirismo.** Duas vezes coloquei ornamento
+ * geométrico na borda achando que dava linguagem de instrumento, e as duas vezes
+ * o resultado foi o oposto — decoração aplicada por fora, que qualquer olho
+ * treinado reconhece como enfeite gerado.
  *
- * A referência do Gotham é HUD — instrumentação militar e de inteligência — e a
- * marca de registro nessa linguagem é **assimétrica e usinada**: duas âncoras em
- * cantos opostos, curtas e grossas, como as marcas de alinhamento de um visor.
- * Quatro finas e iguais são ornamento; duas na diagonal são referência.
+ * O que instrumento de verdade tem não é borda: é **hierarquia de superfície**.
+ * Um botão de rádio é mais claro que a placa em volta porque é uma peça
+ * diferente, não porque alguém desenhou um contorno nele. Aqui o botão é o único
+ * bloco claro da tela inteira, e é só isso que o separa — sem borda, sem canto
+ * arredondado, sem marca.
  *
- * A estrutura é a de um interruptor de painel, e cada parte carrega dado:
- *
- *  - **Trilho de estado à esquerda**, 4 px, na cor do estado. É o que a visão
- *    periférica pega com o aparelho no suporte da viatura, sem foco.
- *  - **Rótulo alinhado à esquerda** — texto centralizado é gramática de botão de
- *    página; instrumento alinha à esquerda e deixa a leitura à direita.
- *  - **Leitura à direita**, em monoespaçada: o estado por extenso, no lugar onde
- *    um mostrador o colocaria.
- *  - **Barra de pressão na base**, que preenche enquanto o dedo desce.
+ * A disponibilidade fica no próprio bloco, não num rótulo ao lado. Bloco claro e
+ * texto legível = dá para falar. Bloco apagado e texto rebaixado = não dá, com a
+ * causa escrita dentro dele. O agente lê o estado pela **massa**, de relance, sem
+ * precisar decodificar um ponto colorido de 7 px.
  */
 @Composable
 private fun ConteudoPronto(canal: String, pressao: Float) {
+    LinhaDeCanal(canal, "meio-duplex", Cores.Vivo)
+    Box(Modifier.height(Espaco.Medio))
+    BlocoDeFala(
+        rotulo = "SEGURE PARA FALAR",
+        habilitado = true,
+        pressao = pressao,
+    )
+}
+
+/** Cabeçalho da barra: canal à esquerda, modo à direita. */
+@Composable
+private fun LinhaDeCanal(canal: String, direita: String, corDoPonto: Color) {
     Row(
         Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            PontoDeEstado(Cores.Vivo)
+            PontoDeEstado(corDoPonto)
             Box(Modifier.size(Espaco.Curto))
             Etiqueta(canal, cor = Cores.TintaMedia)
         }
-        Etiqueta("meio-duplex", cor = Cores.TintaFraca)
+        Etiqueta(direita, cor = Cores.TintaFraca)
     }
-
-    Box(Modifier.height(Espaco.Medio))
-    InterruptorDePtt(pressao = pressao, corDoTrilho = Cores.Vivo, leitura = "PRONTO")
 }
 
 /**
- * O interruptor.
+ * O bloco de fala.
  *
- * Desenhado inteiro em `drawBehind` para que trilho, âncoras e barra de pressão
- * fiquem no mesmo sistema de coordenadas — compor isso com `Box` aninhado exigiria
- * alinhar três caixas por padding, e qualquer mudança de altura quebraria o
- * conjunto.
+ * Sem borda, sem canto, sem ornamento. A disponibilidade é a **claridade da
+ * superfície**: bloco claro convida, bloco apagado recusa. É a mesma leitura que
+ * um botão físico dá pelo relevo, traduzida para uma tela plana.
+ *
+ * A barra de pressão nasce na base e cresce — fica na borda inferior justamente
+ * para não competir com o rótulo, e some junto com o dedo.
  */
 @Composable
-private fun InterruptorDePtt(
+private fun BlocoDeFala(
+    rotulo: String,
+    habilitado: Boolean,
     pressao: Float,
-    corDoTrilho: Color,
-    leitura: String,
+    detalhe: String? = null,
 ) {
     val avanco = pressao.coerceIn(0f, 1f)
     val fundo by animateColorAsState(
-        targetValue = if (avanco > 0f) Cores.Pressionado else Cores.Elevado,
+        targetValue = when {
+            !habilitado -> Cores.Painel
+            avanco > 0f -> Cores.Tinta
+            else -> Cores.Elevado
+        },
         animationSpec = tween(durationMillis = 90),
-        label = "fundo-interruptor",
+        label = "fundo-bloco",
     )
+    val tinta = when {
+        !habilitado -> Cores.TintaFraca
+        avanco > 0f -> Cores.Vazio
+        else -> Cores.Tinta
+    }
 
-    Box(
+    Column(
         Modifier
             .fillMaxWidth()
-            .height(60.dp)
+            .height(if (detalhe == null) 60.dp else 72.dp)
             .background(fundo)
             .drawBehind {
-                val trilho = 4.dp.toPx()
-                // Trilho de estado. Engrossa sob pressão — o mesmo dado, mais
-                // presente, sem mudar de cor e sem pedir foco.
-                drawRect(
-                    color = corDoTrilho,
-                    size = androidx.compose.ui.geometry.Size(
-                        trilho * (1f + avanco * 0.8f),
-                        size.height,
-                    ),
-                )
-
-                // Âncoras de registro: superior-direita e inferior-esquerda.
-                // Assimétricas de propósito — duas na diagonal são referência de
-                // alinhamento; quatro iguais viram moldura.
-                val braco = 11.dp.toPx()
-                val esp = 2.dp.toPx()
-                val cor = Cores.TracoForte
-                drawLine(cor, Offset(size.width - braco, 0f), Offset(size.width, 0f), esp)
-                drawLine(cor, Offset(size.width, 0f), Offset(size.width, braco), esp)
-                drawLine(cor, Offset(0f, size.height), Offset(braco, size.height), esp)
-                drawLine(cor, Offset(0f, size.height - braco), Offset(0f, size.height), esp)
-
-                // Barra de pressão na base, do trilho para a direita.
                 if (avanco > 0f) {
                     drawRect(
                         color = Cores.NoAr,
@@ -287,48 +281,42 @@ private fun InterruptorDePtt(
                 }
             }
             .padding(horizontal = Espaco.Padrao),
-        contentAlignment = Alignment.CenterStart,
+        verticalArrangement = Arrangement.Center,
     ) {
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("SEGURE PARA FALAR", style = Tipo.Acao, color = Cores.Tinta)
-            Etiqueta(leitura, cor = Cores.TintaMedia)
+        Text(rotulo, style = Tipo.Acao, color = tinta)
+        detalhe?.let {
+            Box(Modifier.height(Espaco.Micro))
+            TextoCorpoMenor(it, cor = Cores.TintaFraca, maxLinhas = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
 
 @Composable
 private fun ConteudoOcupado(porQuem: String) {
-    Row(
-        Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            PontoDeEstado(Cores.P2, pulsando = true)
-            Box(Modifier.size(Espaco.Curto))
-            TextoDado(porQuem, cor = Cores.Tinta)
-        }
-        // "Falando", e não "canal ocupado": diz quem, não o estado do recurso.
-        Etiqueta("FALANDO", cor = Cores.TintaMedia)
-    }
+    LinhaDeCanal(porQuem, "falando", Cores.P2)
+    Box(Modifier.height(Espaco.Medio))
+    // Mesmo bloco, apagado. Meio-duplex: falar por cima não é uma opção que o
+    // botão deva oferecer e depois recusar.
+    BlocoDeFala(
+        rotulo = "CANAL OCUPADO",
+        habilitado = false,
+        pressao = 0f,
+        detalhe = "$porQuem está transmitindo.",
+    )
 }
 
 @Composable
 private fun ConteudoIndisponivel(motivo: String) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        PontoDeEstado(Cores.Falha)
-        Box(Modifier.size(Espaco.Curto))
-        TextoCorpoMenor(
-            motivo,
-            cor = Cores.TintaMedia,
-            maxLinhas = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
+    LinhaDeCanal("sem canal", "indisponível", Cores.Falha)
+    Box(Modifier.height(Espaco.Medio))
+    // A causa vive DENTRO do bloco desabilitado, não num aviso separado: quem
+    // olha o botão para falar é quem precisa saber por que não dá.
+    BlocoDeFala(
+        rotulo = "NÃO É POSSÍVEL FALAR",
+        habilitado = false,
+        pressao = 0f,
+        detalhe = motivo,
+    )
 }
 
 /**
