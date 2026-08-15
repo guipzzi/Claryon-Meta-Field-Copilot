@@ -63,6 +63,10 @@ object PowerPolicy {
         val p = perfil(modo)
         return buildSet {
             add(TipoServico.CONNECTED_DEVICE) // sessão com os óculos, sempre
+            // Posição em **todos** os modos, Standby incluso. O que muda com o
+            // modo é a cadência e o provedor — não a existência da coleta.
+            // Sumir do mapa em pausa criaria a expectativa errada.
+            add(TipoServico.LOCATION)
             if (p.hfpAberto) add(TipoServico.MICROPHONE)
             if (p.cameraPorPadrao) add(TipoServico.CAMERA)
         }
@@ -73,4 +77,17 @@ object PowerPolicy {
 }
 
 /** Espelho independente de Android dos `FOREGROUND_SERVICE_TYPE_*` que usamos. */
-enum class TipoServico { CONNECTED_DEVICE, MICROPHONE, CAMERA }
+enum class TipoServico {
+    CONNECTED_DEVICE,
+    MICROPHONE,
+    CAMERA,
+
+    /**
+     * Coleta de posição em segundo plano.
+     *
+     * Presente em **todos** os modos, inclusive Standby: é o que sustenta o
+     * compartilhamento contínuo com a guarnição. Sumir do mapa em pausa criaria a
+     * expectativa errada — companheiro que desaparece parece em perigo.
+     */
+    LOCATION,
+}

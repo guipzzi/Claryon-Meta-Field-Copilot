@@ -83,6 +83,6 @@
         <service
             android:name=".service.CopilotService"
             android:exported="false"
-            android:foregroundServiceType="connectedDevice|microphone|camera" />
+            android:foregroundServiceType="connectedDevice|microphone|camera|location" />
     </application>
 </manifest>

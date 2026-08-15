@@ -15,7 +15,14 @@ import androidx.compose.material3.Text
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.drawscope.Stroke
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -88,7 +95,19 @@ fun BarraDePtt(
     val noAr = estado is EstadoDoPtt.NoAr
     val habilitado = estado is EstadoDoPtt.Pronto || noAr
 
-    val alturaAlvo = if (noAr) 132.dp else 104.dp
+    // Progresso da pressão: 0 em repouso, cresce enquanto o dedo desce. É o
+    // retorno visual no intervalo entre o toque e o primeiro quadro sair.
+    var pressao by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(pressao > 0f) {
+        if (pressao > 0f) {
+            while (pressao < 1f) {
+                pressao = (pressao + 0.12f).coerceAtMost(1f)
+                delay(16)
+            }
+        }
+    }
+
+    val alturaAlvo = if (noAr) 152.dp else 168.dp
     val altura by animateFloatAsState(
         targetValue = alturaAlvo.value,
         animationSpec = tween(durationMillis = 160, easing = LinearEasing),
@@ -119,12 +138,14 @@ fun BarraDePtt(
                 detectTapGestures(
                     onPress = {
                         haptico.performHapticFeedback(HapticFeedbackType.LongPress)
+                        pressao = 0.05f
                         aoPressionar()
                         // Espera a soltura **aqui**, e não num `onTap`: garante que
                         // soltar por qualquer motivo — dedo escorregando, chamada
                         // entrando, tela apagando — encerre a transmissão.
                         tryAwaitRelease()
                         haptico.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        pressao = 0f
                         aoSoltar()
                     },
                 )
@@ -142,7 +163,7 @@ fun BarraDePtt(
     ) {
         when (estado) {
             is EstadoDoPtt.NoAr -> ConteudoNoAr(estado)
-            is EstadoDoPtt.Pronto -> ConteudoPronto(estado.canal)
+            is EstadoDoPtt.Pronto -> ConteudoPronto(estado.canal, pressao)
             is EstadoDoPtt.Ocupado -> ConteudoOcupado(estado.porQuem)
             is EstadoDoPtt.Indisponivel -> ConteudoIndisponivel(estado.motivo)
         }
@@ -164,17 +185,22 @@ private fun ConteudoNoAr(estado: EstadoDoPtt.NoAr) {
 }
 
 /**
- * Repouso: o controle tem de **parecer** o controle.
+ * Repouso: o gesto tem de estar no desenho.
  *
- * A primeira versão era um rodapé — dois textos pequenos numa faixa de 64 dp — e
- * na tela ela desaparecia. Num aplicativo onde este é o único gesto que importa,
- * o botão não pode competir em discrição com a lista.
+ * A versão anterior era texto centralizado num retângulo com colchetes — e
+ * retângulo com texto no meio é a forma universal de **toque**, não de
+ * pressão-e-segura. O agente lia "aperte", soltava, e nada acontecia.
  *
- * A afordância são os colchetes: dois cantos que enquadram o alvo de toque e
- * dizem "aqui" sem desenhar um botão de biblioteca.
+ * A forma agora carrega o gesto: um alvo circular grosso, com um anel que existe
+ * para ser preenchido enquanto o dedo está lá. Círculo grande é o vocabulário do
+ * botão de rádio — o do talkie, o do interfone, o do PTT de headset —, e o polegar
+ * o encontra sem a tela ser olhada, que é o requisito de verdade.
+ *
+ * Ocupa 96 dp de diâmetro: acima do alvo mínimo de acessibilidade por larga
+ * margem, porque o dedo que o procura está em movimento, com luva, e no escuro.
  */
 @Composable
-private fun ConteudoPronto(canal: String) {
+private fun ConteudoPronto(canal: String, pressao: Float) {
     Row(
         Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -190,15 +216,103 @@ private fun ConteudoPronto(canal: String) {
 
     Box(Modifier.height(Espaco.Medio))
 
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        AlvoDePtt(pressao)
+    }
+}
+
+/**
+ * O alvo circular.
+ *
+ * Três anéis concêntricos, e cada um diz uma coisa:
+ *
+ *  - o **externo** é o limite do alvo de toque, fino e discreto;
+ *  - o **de progresso** preenche em âmbar enquanto o dedo desce — é o retorno de
+ *    que a pressão foi registrada, no intervalo entre o toque e o primeiro quadro
+ *    de áudio sair;
+ *  - o **miolo** é a superfície, que escurece sob o dedo.
+ *
+ * O ícone é um traço de microfone desenhado, não uma fonte de ícones: uma
+ * dependência de 300 KB para um glifo, num app que fala por áudio, não se paga.
+ */
+@Composable
+private fun AlvoDePtt(pressao: Float) {
+    val escala by animateFloatAsState(
+        targetValue = if (pressao > 0f) 0.94f else 1f,
+        animationSpec = tween(durationMillis = 90),
+        label = "escala-alvo",
+    )
+
     Box(
         Modifier
-            .fillMaxWidth()
-            .height(40.dp)
-            .drawBehind { colchetes(this) },
-        contentAlignment = Alignment.Center,
-    ) {
-        Text("SEGURE PARA FALAR", style = Tipo.Acao, color = Cores.Tinta)
-    }
+            .size(96.dp)
+            .scale(escala)
+            .drawBehind {
+                val raio = size.minDimension / 2f
+                val centro = Offset(size.width / 2f, size.height / 2f)
+
+                drawCircle(color = Cores.Elevado, radius = raio, center = centro)
+                drawCircle(
+                    color = Cores.TracoForte,
+                    radius = raio - 1f,
+                    center = centro,
+                    style = Stroke(width = 1.5f),
+                )
+                if (pressao > 0f) {
+                    drawArc(
+                        color = Cores.NoAr,
+                        startAngle = -90f,
+                        sweepAngle = 360f * pressao.coerceIn(0f, 1f),
+                        useCenter = false,
+                        style = Stroke(width = 4f, cap = StrokeCap.Round),
+                    )
+                }
+                desenharMicrofone(this, centro, raio * 0.42f, Cores.Tinta)
+            },
+    )
+}
+
+/**
+ * Microfone em traços. Cápsula arredondada, arco de suporte e haste.
+ *
+ * Desenhado em vez de importado: é o único ícone do aplicativo inteiro, e trazer
+ * uma biblioteca de ícones para ele acrescentaria peso ao APK que já carrega dois
+ * modelos de IA.
+ */
+private fun desenharMicrofone(
+    escopo: androidx.compose.ui.graphics.drawscope.DrawScope,
+    centro: Offset,
+    tamanho: Float,
+    cor: Color,
+) = with(escopo) {
+    val larguraCapsula = tamanho * 0.62f
+    val alturaCapsula = tamanho * 1.15f
+    val topo = centro.y - alturaCapsula / 2f - tamanho * 0.15f
+
+    drawRoundRect(
+        color = cor,
+        topLeft = Offset(centro.x - larguraCapsula / 2f, topo),
+        size = androidx.compose.ui.geometry.Size(larguraCapsula, alturaCapsula),
+        cornerRadius = androidx.compose.ui.geometry.CornerRadius(larguraCapsula / 2f),
+    )
+    val raioArco = tamanho * 0.72f
+    drawArc(
+        color = cor,
+        startAngle = 0f,
+        sweepAngle = 180f,
+        useCenter = false,
+        topLeft = Offset(centro.x - raioArco, topo + alturaCapsula * 0.42f),
+        size = androidx.compose.ui.geometry.Size(raioArco * 2f, raioArco * 2f),
+        style = Stroke(width = tamanho * 0.16f, cap = StrokeCap.Round),
+    )
+    val baseArco = topo + alturaCapsula * 0.42f + raioArco
+    drawLine(
+        color = cor,
+        start = Offset(centro.x, baseArco),
+        end = Offset(centro.x, baseArco + tamanho * 0.3f),
+        strokeWidth = tamanho * 0.16f,
+        cap = StrokeCap.Round,
+    )
 }
 
 /**

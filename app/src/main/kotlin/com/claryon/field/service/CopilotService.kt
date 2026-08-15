@@ -106,6 +106,7 @@ class CopilotService : Service() {
             TipoServico.CONNECTED_DEVICE -> return true // não exige runtime
             TipoServico.MICROPHONE -> android.Manifest.permission.RECORD_AUDIO
             TipoServico.CAMERA -> android.Manifest.permission.CAMERA
+            TipoServico.LOCATION -> android.Manifest.permission.ACCESS_FINE_LOCATION
         }
         return checkSelfPermission(permissao) == android.content.pm.PackageManager.PERMISSION_GRANTED
     }
@@ -194,4 +195,5 @@ private fun TipoServico.androidFlag(): Int = when (this) {
     TipoServico.CONNECTED_DEVICE -> ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
     TipoServico.MICROPHONE -> ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
     TipoServico.CAMERA -> ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+    TipoServico.LOCATION -> ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
 }
