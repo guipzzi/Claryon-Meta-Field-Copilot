@@ -118,14 +118,22 @@ private fun Operacao(
     LaunchedEffect(Unit) { diag.anunciarEstadoDegradado() }
 
     DisposableEffect(Unit) {
-        radio.abrir(canal = CANAL_DEMO, agenteId = AGENTE_DEMO, indicativo = INDICATIVO_DEMO)
+        // O rádio lê o histórico com o token do agente; quem o guarda é o cofre
+        // cifrado, que vive no ViewModel de diagnóstico.
+        radio.tokenDeSessao = { diag.autenticacao.tokenValido() }
+        radio.abrir(
+            canal = CANAL_DEMO,
+            nomeDoCanal = NOME_DO_CANAL,
+            agenteId = AGENTE_DEMO,
+            indicativo = INDICATIVO_DEMO,
+        )
         onDispose { radio.fechar() }
     }
 
     CascoTatico(destino = destino, aoNavegar = aoNavegar, noAr = noAr) { modifier ->
         when (destino) {
             Destino.GUARNICAO -> TelaDeGuarnicao(
-                canal = CANAL_DEMO,
+                canal = NOME_DO_CANAL,
                 pares = pares,
                 falas = falas,
                 estadoDoPtt = estadoPtt,
@@ -145,7 +153,7 @@ private fun Operacao(
                 indicativo = INDICATIVO_DEMO,
                 matricula = AGENTE_DEMO,
                 unidade = "GTA-3",
-                canal = CANAL_DEMO,
+                canal = NOME_DO_CANAL,
                 capacidades = capacidadesDe(estadoPtt, registro.name, estadoMapa.assinado),
                 aoSair = aoEncerrarTurno,
                 modifier = modifier,
@@ -194,9 +202,18 @@ private fun capacidadesDe(
 }
 
 /**
- * Identidade de demonstração. No produto vem do cadastro junto da sessão — o
- * servidor já impõe o vínculo por RLS, e o `agent_id` das RPCs sai do JWT.
+ * Identidade de demonstração, casada com `servidor/seed_piloto.sql`.
+ *
+ * No produto isto vem do cadastro junto da sessão — o servidor já impõe o
+ * vínculo por RLS, e o `agent_id` das RPCs sai do JWT. Aqui é constante porque a
+ * tela de seleção de talk group ainda não existe.
+ *
+ * **O identificador e o nome são coisas separadas.** A consulta usa o UUID; a
+ * tela mostra "GTA-3 Alfa". Mostrar o UUID seria vazar chave primária para o
+ * agente, e usar o nome na consulta quebraria no dia em que dois grupos se
+ * chamassem igual.
  */
-private const val CANAL_DEMO = "demo"
-private const val AGENTE_DEMO = "007"
+private const val CANAL_DEMO = "22222222-0000-0000-0000-000000000001"
+private const val NOME_DO_CANAL = "GTA-3 Alfa"
+private const val AGENTE_DEMO = "41882"
 private const val INDICATIVO_DEMO = "Alfa Um"

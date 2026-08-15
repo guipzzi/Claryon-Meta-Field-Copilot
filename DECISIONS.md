@@ -912,3 +912,49 @@ A proibição do projeto vale para a fala de **terceiros** — o abordado, o tra
 histórico do grupo é tráfego de rádio entre agentes que apertaram um botão para transmitir a
 colegas, no exercício da função. A distinção é de consentimento e de papel, e está escrita
 onde o dado é definido (`FalaNoGrupo`).
+
+## Seed do piloto e a primeira vez que as telas tiveram conteúdo (2026-08-15)
+
+Rodar o app com dados reais rendeu quatro achados que nenhuma suíte pegaria.
+
+- **⚠️ "Rádio" é o modelo de interação, não o transporte — e a barra mentia sobre isso.**
+  `_estado` gravava `Pronto` uma vez, ao abrir, e nunca mais olhava: dizia "segure para
+  falar" com o WebSocket caído. Isto não é detalhe de interface. O produto é **PTT sobre IP**;
+  o rádio analógico da corporação funciona em túnel, em subsolo e com a torre caída, e este
+  não. Se a tela sugerir a mesma independência, mente sobre a única coisa que separa os dois —
+  e a mentira só é descoberta na hora em que a diferença importa. Vigia de 2 s, e a falha diz
+  a causa: *"Sem dados. O canal depende da rede."*
+
+- **⚠️ O modelo de leitura exige entrega explícita, e o seed não criou nenhuma.**
+  `transmissions_read` libera o que o agente transmitiu **ou** o que foi entregue a ele, via
+  `deliveries` — não tudo que passou pelo talk group. É mais forte que "membro vê tudo":
+  produz trilha auditável de quem foi de fato informado, que num contexto de segurança pública
+  é a diferença entre "a guarnição foi avisada" e "alguém falou no rádio". O app mostrava
+  exatamente uma fala — a própria — e parecia defeito de consulta. Era o modelo funcionando
+  como projetado, com dado pela metade.
+
+- **PostgREST recusa embed ambíguo (PGRST201).** Há **dois** caminhos de `transmissions` para
+  `agents`: a autoria e a tabela de entregas. `agents!inner` não basta; é preciso nomear a
+  chave estrangeira — `agents!transmissions_author_agent_id_fkey`.
+
+- **Embed um-para-um devolve objeto, não array.** `agent_positions` tem `agent_id` como chave
+  primária, então vem objeto. Ler só o array fazia a idade virar `null`, o par virar offline e
+  a contagem mostrar 0/2 com todo mundo publicando. O leitor aceita as duas formas.
+
+- **Seed direto em `auth.users` exige as colunas de token vazias, não nulas.** O GoTrue as lê
+  em `string` do Go; `NULL` produz "converting NULL to string is unsupported" e a resposta vira
+  HTTP 500 — que na tela aparece como "servidor indisponível", indistinguível de rede caída.
+
+### Identificador e nome do canal são coisas separadas
+
+A consulta usa o UUID do talk group; a tela mostra "GTA-3 Alfa". Mostrar o UUID seria vazar
+chave primária para o agente, e usar o nome na consulta quebraria no dia em que dois grupos se
+chamassem igual.
+
+### Sobre o aparelho de teste
+
+O **Galaxy A30 não roda este app**: topa em Android 11 (API 30) e o `minSdk` é 31, por causa de
+`setCommunicationDevice` — a API que roteia o HFP. Verificado no **Moto G15** (720×1600, 280
+dpi, Android 15), que é o perfil realista de aparelho de corporação e roda. Se o piloto
+precisar alcançar a faixa do A30, é preciso um caminho de compatibilidade com
+`startBluetoothSco()` — decisão de produto, não de código.

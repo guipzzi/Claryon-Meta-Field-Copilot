@@ -13,8 +13,10 @@ import com.claryon.field.ui.telas.FalaNoGrupo
 import com.claryon.field.ui.telas.ParPresente
 import com.claryon.net.ClienteDePisoLocal
 import com.claryon.net.CodecDeVoz
+import com.claryon.net.HistoricoDoCanal
 import com.claryon.net.ConfigRealtime
 import com.claryon.net.MediaCodecOpus
+import com.claryon.net.TransporteAoVivo
 import com.claryon.net.TransporteRealtime
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -53,6 +55,12 @@ import java.util.Locale
  */
 class RadioViewModel(app: Application) : AndroidViewModel(app) {
 
+    /**
+     * Token da sessão. Injetado de fora porque quem guarda a sessão é o cofre
+     * cifrado do `app`, e `core-net` não pode depender dele.
+     */
+    var tokenDeSessao: suspend () -> String? = { null }
+
     private val audio = GlassesAudioManagerImpl(app, allowFallbackToDefault = BuildConfig.DEBUG)
 
     private val _estado = MutableStateFlow<EstadoDoPtt>(
@@ -73,6 +81,8 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
     private var radio: RadioTatico? = null
     private var rota: GlassesAudioRoute? = null
     private var cronometro: Job? = null
+    private var vigiaDeRede: Job? = null
+    private var transporteAtual: TransporteAoVivo? = null
     private var inicioDaFalaMs = 0L
 
     private val redeConfigurada =
@@ -87,7 +97,7 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
      * antes da sessão**. HFP totalmente configurado antes de qualquer streaming;
      * o inverso produz captura de voz intermitente.
      */
-    fun abrir(canal: String, agenteId: String, indicativo: String) {
+    fun abrir(canal: String, nomeDoCanal: String, agenteId: String, indicativo: String) {
         if (radio != null) return
         if (!redeConfigurada) {
             _estado.value = EstadoDoPtt.Indisponivel("Servidor não configurado.")
@@ -130,14 +140,120 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
             )
             novo.entrarEmModoAtivo(r)
             radio = novo
-            _estado.value = EstadoDoPtt.Pronto(canal)
+            transporteAtual = transporte
+            indicativoProprio = indicativo
+            nomeDoCanalAtual = nomeDoCanal
+            vigiaDeRede = viewModelScope.launch { vigiarRede(nomeDoCanal, transporte) }
+
+            val historico = HistoricoDoCanal(
+                config = ConfigRealtime(
+                    projetoUrl = BuildConfig.SUPABASE_URL.trimEnd('/'),
+                    apiKey = BuildConfig.SUPABASE_ANON_KEY,
+                ),
+                tokenDeSessao = tokenDeSessao,
+            )
+            historicoDoCanal = historico
+            recarga = viewModelScope.launch {
+                while (true) {
+                    carregarCanal(canal, historico)
+                    delay(INTERVALO_DE_RECARGA_MS)
+                }
+            }
         }
     }
+
+    /**
+     * Carrega o histórico e a presença do canal.
+     *
+     * Chamado ao abrir e a cada [INTERVALO_DE_RECARGA_MS]. Não é tempo real — o
+     * tempo real é o áudio; o histórico escrito pode chegar com atraso de
+     * segundos sem prejuízo, e uma assinatura permanente para texto custaria
+     * bateria pelo turno inteiro por um ganho que ninguém percebe.
+     */
+    private suspend fun carregarCanal(canal: String, historico: HistoricoDoCanal) {
+        historico.falas(canal).onSuccess { lista ->
+            _falas.value = lista.map { f ->
+                FalaNoGrupo(
+                    id = f.id,
+                    indicativo = f.indicativo,
+                    hora = horaDe(f.criadaEmIso),
+                    texto = f.transcricao,
+                    propria = f.indicativo == indicativoProprio,
+                    // Só alerta carrega faixa de prioridade. Conversa de rotina com
+                    // faixa colorida transformaria a régua em enfeite, e a cor
+                    // deixaria de significar urgência.
+                    prioridade = f.prioridade.takeIf { f.tipo == "alerta" },
+                    entrega = FalaNoGrupo.Entrega.RECEBIDA,
+                )
+            }
+        }
+
+        historico.membros(canal).onSuccess { lista ->
+            _pares.value = lista
+                .filter { it.indicativo != indicativoProprio }
+                .map { m ->
+                    ParPresente(
+                        indicativo = m.indicativo,
+                        // "Online" = publicou posição faz pouco. Um booleano de
+                        // presença fica `true` quando o processo morre sem avisar,
+                        // e um agente que sumiu apareceria disponível.
+                        online = m.idadeDaPosicaoS?.let { it <= LIMIAR_DE_PRESENCA_S } == true,
+                        falando = false,
+                    )
+                }
+        }
+    }
+
+    private fun horaDe(iso: String): String = runCatching {
+        HORA.format(java.util.Date.from(java.time.OffsetDateTime.parse(iso).toInstant()))
+    }.getOrDefault("--:--:--")
+
+    /**
+     * **Mantém a barra honesta sobre a rede.**
+     *
+     * A versão anterior gravava `Pronto` uma vez, ao abrir, e nunca mais olhava:
+     * a barra dizia "segure para falar" com o WebSocket caído, e o agente
+     * descobriria no pior momento possível — apertando o botão numa ocorrência.
+     *
+     * Isto não é detalhe de interface. Este produto é **PTT sobre IP**, não rádio
+     * de radiofrequência: sem dados, não há canal. O rádio analógico da
+     * corporação funciona em túnel, em subsolo e com a torre caída; este não. Se a
+     * tela sugerir a mesma independência, ela mente sobre a única coisa que
+     * diferencia os dois — e a mentira só é descoberta na hora em que a diferença
+     * importa.
+     */
+    private suspend fun vigiarRede(canal: String, transporte: TransporteAoVivo) {
+        while (true) {
+            val conectado = transporte.conectado()
+            val atual = _estado.value
+            // Não sobrescreve o estado NoAr: a transmissão em curso tem prioridade
+            // sobre o relatório de conectividade, e o pré-roll cobre a queda.
+            if (atual !is EstadoDoPtt.NoAr) {
+                _estado.value = if (conectado) {
+                    EstadoDoPtt.Pronto(canal)
+                } else {
+                    EstadoDoPtt.Indisponivel("Sem dados. O canal depende da rede.")
+                }
+            }
+            delay(INTERVALO_DA_VIGIA_MS)
+        }
+    }
+
+    private var historicoDoCanal: HistoricoDoCanal? = null
+    private var recarga: Job? = null
+    private var indicativoProprio: String = ""
+    private var nomeDoCanalAtual: String = ""
 
     /** Fecha o rádio e devolve a rota. Chamado ao sair da tela ou encerrar o turno. */
     fun fechar() {
         cronometro?.cancel()
         cronometro = null
+        vigiaDeRede?.cancel()
+        vigiaDeRede = null
+        recarga?.cancel()
+        recarga = null
+        historicoDoCanal = null
+        transporteAtual = null
         radio?.sairDeModoAtivo()
         radio = null
         rota = null
@@ -187,13 +303,17 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
         cronometro = null
         _noAr.value = false
         radio?.aoSoltar()
-        _estado.value = _estado.value.let { atual ->
-            if (atual is EstadoDoPtt.Indisponivel) atual else EstadoDoPtt.Pronto(canalAtual())
+        // Não presume `Pronto`: a rede pode ter caído durante a fala, e afirmar
+        // prontidão logo depois de transmitir é o pior instante para errar.
+        _estado.value = if (transporteAtual?.conectado() == true) {
+            EstadoDoPtt.Pronto(canalAtual())
+        } else {
+            EstadoDoPtt.Indisponivel("Sem dados. O canal depende da rede.")
         }
     }
 
     private fun canalAtual(): String =
-        (_estado.value as? EstadoDoPtt.Pronto)?.canal ?: TALK_GROUP_PADRAO
+        nomeDoCanalAtual.ifBlank { TALK_GROUP_PADRAO }
 
     // ── Peças auxiliares ──────────────────────────────────────────────────────
 
@@ -211,6 +331,21 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
 
     private companion object {
         const val TALK_GROUP_PADRAO = "demo"
+
+        /**
+         * 2 s. A queda de rede não precisa ser detectada em milissegundos — mas
+         * precisa aparecer antes de o agente apertar o botão contando com ela.
+         */
+        const val INTERVALO_DA_VIGIA_MS = 2_000L
+
+        /**
+         * 10 s. O histórico escrito não é tempo real — o tempo real é o áudio.
+         * Recarregar mais rápido gastaria bateria por um ganho imperceptível.
+         */
+        const val INTERVALO_DE_RECARGA_MS = 10_000L
+
+        /** Acima disso o par deixa de contar como presente no canal. */
+        const val LIMIAR_DE_PRESENCA_S = 120
         val HORA: SimpleDateFormat = SimpleDateFormat("HH:mm:ss", Locale("pt", "BR"))
     }
 }
