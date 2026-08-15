@@ -36,6 +36,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -103,6 +104,11 @@ fun TelaDoMapa(
     var listaAberta by remember { mutableStateOf(false) }
     // `null` = câmera no portador. Trocar este valor é o comando de voo.
     var foco by remember { mutableStateOf<String?>(null) }
+    // Segue o portador até ele pegar o mapa com a mão. Uber e Waze fazem assim, e
+    // o motivo é o mesmo: quem está andando quer ver para onde vai; quem arrastou
+    // o mapa quer ver o que arrastou. Adivinhar qual dos dois é errar metade das
+    // vezes — então o gesto decide, e o botão de recentrar desfaz.
+    var seguindo by remember { mutableStateOf(true) }
 
     Box(modifier.fillMaxSize().background(Cores.Vazio)) {
         val lat = estado.minhaLatitude
@@ -115,6 +121,8 @@ fun TelaDoMapa(
                 meuRumoGraus = estado.meuRumoGraus,
                 pares = estado.pares,
                 focoNoIndicativo = foco,
+                seguindo = seguindo,
+                aoGestoManual = { seguindo = false },
                 modifier = Modifier.fillMaxSize(),
             )
         } else {
@@ -142,15 +150,33 @@ fun TelaDoMapa(
             modifier = Modifier.align(Alignment.TopCenter),
         )
 
+        // Só aparece quando a câmera saiu do portador. Botão permanente seria
+        // ruído 90% do tempo; ausente, o agente que arrastou o mapa não teria
+        // como voltar sem fechar e reabrir a tela.
+        if (!seguindo || foco != null) {
+            BotaoRecentrar(
+                aoTocar = { foco = null; seguindo = true },
+                modifier = Modifier.align(Alignment.CenterEnd),
+            )
+        }
+
         GavetaDaGuarnicao(
             pares = estado.pares,
             aberta = listaAberta,
             focado = foco,
             aoAlternar = { listaAberta = !listaAberta },
             aoTocarPar = { indicativo ->
-                // Tocar de novo no mesmo par devolve a câmera ao portador — é o
-                // gesto de "voltar para mim" sem precisar de um botão a mais.
-                foco = if (foco == indicativo) null else indicativo
+                // Tocar de novo no mesmo par devolve a câmera ao portador.
+                if (foco == indicativo) {
+                    foco = null
+                    seguindo = true
+                } else {
+                    foco = indicativo
+                    // Olhar um par suspende o acompanhamento: senão a próxima
+                    // correção de GPS arrancaria a câmera de volta em 260 ms, e o
+                    // toque do agente pareceria não ter funcionado.
+                    seguindo = false
+                }
             },
             motivoIndisponivel = estado.motivoIndisponivel,
             modifier = Modifier.align(Alignment.BottomCenter),
@@ -192,6 +218,44 @@ private fun CabecalhoFlutuante(assinado: Boolean, quantos: Int, modifier: Modifi
             cor = Cores.TintaMedia,
         )
     }
+}
+
+/**
+ * Recentrar.
+ *
+ * Fica na borda direita, na altura do polegar de quem segura o aparelho com uma
+ * mão só — que é como um agente segura o celular, porque a outra mão está
+ * ocupada. Alvo de 48 dp: o mínimo tocável com luva.
+ */
+@Composable
+private fun BotaoRecentrar(aoTocar: () -> Unit, modifier: Modifier = Modifier) {
+    Box(
+        modifier
+            .padding(end = Espaco.Padrao)
+            .size(48.dp)
+            .background(Cores.Painel.copy(alpha = 0.92f))
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = aoTocar,
+            )
+            .drawBehind {
+                val c = Offset(size.width / 2f, size.height / 2f)
+                val r = size.minDimension / 2f - 14f
+                drawCircle(color = Cores.NoAr, radius = r, center = c, style = Stroke(width = 2f))
+                drawCircle(color = Cores.NoAr, radius = 2.5f, center = c)
+                // Quatro riscos cardeais: é a mira de "centralizar em mim" que a
+                // Uber e o Waze usam, e o agente já lê sem aprender.
+                listOf(
+                    Offset(c.x, c.y - r - 5f) to Offset(c.x, c.y - r + 1f),
+                    Offset(c.x, c.y + r - 1f) to Offset(c.x, c.y + r + 5f),
+                    Offset(c.x - r - 5f, c.y) to Offset(c.x - r + 1f, c.y),
+                    Offset(c.x + r - 1f, c.y) to Offset(c.x + r + 5f, c.y),
+                ).forEach { (a, b) ->
+                    drawLine(color = Cores.NoAr, start = a, end = b, strokeWidth = 2f)
+                }
+            },
+    )
 }
 
 /**

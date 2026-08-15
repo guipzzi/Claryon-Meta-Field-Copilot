@@ -6,6 +6,7 @@ import android.graphics.Paint
 import android.graphics.Path
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -71,6 +72,16 @@ fun MapaDeRuas(
      * mapa decide o percurso.
      */
     focoNoIndicativo: String?,
+    /**
+     * `true` = a câmera acompanha o portador a cada correção de GPS.
+     *
+     * É o contrato da Uber e do Waze, e o teste em movimento provou que ele não é
+     * opcional: sem seguir, o agente que anda 500 m sai do próprio mapa e vê o
+     * quarteirão que já deixou para trás.
+     */
+    seguindo: Boolean,
+    /** O agente arrastou ou deu pinça — a câmera passa a ser dele. */
+    aoGestoManual: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val contexto = LocalContext.current
@@ -101,6 +112,34 @@ fun MapaDeRuas(
         }
     }
 
+    // **Por que existem duas assinaturas em vez de redesenhar sempre.**
+    //
+    // `AndroidView.update` roda a cada recomposição, e as posições chegam a cada
+    // poucos segundos. A versão anterior chamava `mapa.clear()` + `addMarker` de
+    // todos os pares em toda passada: os marcadores piscavam, a alocação de
+    // bitmap acontecia no meio do voo da câmera, e o resultado é o que se sentia
+    // como "delay" — não era a animação lenta, era a animação disputando quadro
+    // com um redesenho inteiro.
+    //
+    // Agora cada coisa tem seu gatilho: os marcadores redesenham quando os dados
+    // mudam, a câmera voa quando o foco muda, e as duas não se atrapalham.
+    val assinaturaDosDados = remember(minhaLatitude, minhaLongitude, meuRumoGraus, pares) {
+        buildString {
+            append(minhaLatitude).append(',').append(minhaLongitude).append(',').append(meuRumoGraus)
+            pares.forEach {
+                append('|').append(it.indicativo).append(it.distanciaM)
+                    .append(it.rumoGraus).append(it.frescor).append(it.emMovimento)
+            }
+        }
+    }
+    val ultimaAssinatura = remember { arrayOfNulls<String>(1) }
+    val ultimoFoco = remember { arrayOfNulls<String>(1) }
+    val jaAbriu = remember { booleanArrayOf(false) }
+    // Lido de dentro do listener do MapLibre, que não é recomposto: sem esta
+    // caixa o listener enxergaria para sempre o valor da primeira composição.
+    val gestoManual = remember { mutableStateOf(aoGestoManual) }
+    gestoManual.value = aoGestoManual
+
     AndroidView(
         modifier = modifier,
         factory = {
@@ -129,25 +168,51 @@ fun MapaDeRuas(
                         mapa.setMinZoomPreference(11.0)
                         mapa.setMaxZoomPreference(17.5)
 
+                        // `REASON_API_GESTURE` é o dedo do agente; as outras duas
+                        // razões são as nossas próprias animações. Sem essa
+                        // distinção, o `animateCamera` de seguir cancelaria o
+                        // modo seguir a cada quadro — o mapa se desligaria
+                        // sozinho na primeira atualização de posição.
+                        mapa.addOnCameraMoveStartedListener { razao ->
+                            if (razao == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) {
+                                gestoManual.value.invoke()
+                            }
+                        }
+
                         desenhar(mapa, icones, minhaLatitude, minhaLongitude, meuRumoGraus, pares)
+                        ultimaAssinatura[0] = assinaturaDosDados
                         mapa.moveCamera(
                             CameraUpdateFactory.newLatLngZoom(
                                 LatLng(minhaLatitude, minhaLongitude),
                                 ZOOM_PADRAO,
                             ),
                         )
+                        jaAbriu[0] = true
                     }
                 }
             }
         },
         update = { view ->
             view.getMapAsync { mapa ->
-                // Só redesenha com o estilo pronto: `addMarker` antes disso é
+                // Só mexe com o estilo pronto: `addMarker` antes disso é
                 // descartado em silêncio, e o mapa abriria vazio na primeira
                 // atualização de posição — que é a mais provável de todas.
-                if (mapa.style?.isFullyLoaded != true) return@getMapAsync
-                desenhar(mapa, icones, minhaLatitude, minhaLongitude, meuRumoGraus, pares)
-                animarPara(mapa, minhaLatitude, minhaLongitude, pares, focoNoIndicativo)
+                if (mapa.style?.isFullyLoaded != true || !jaAbriu[0]) return@getMapAsync
+
+                if (ultimaAssinatura[0] != assinaturaDosDados) {
+                    ultimaAssinatura[0] = assinaturaDosDados
+                    desenhar(mapa, icones, minhaLatitude, minhaLongitude, meuRumoGraus, pares)
+                }
+                if (ultimoFoco[0] != focoNoIndicativo) {
+                    ultimoFoco[0] = focoNoIndicativo
+                    animarPara(mapa, minhaLatitude, minhaLongitude, pares, focoNoIndicativo)
+                } else if (seguindo && focoNoIndicativo == null) {
+                    // Acompanhar é um deslize curto, não um voo: a cada correção
+                    // o agente andou alguns metros, e 260 ms de transição fazem o
+                    // mapa deslizar por baixo da seta em vez de saltar. Saltar é
+                    // o que faz um mapa em movimento parecer quebrado.
+                    seguir(mapa, minhaLatitude, minhaLongitude)
+                }
             }
         },
     )
@@ -183,21 +248,33 @@ private fun animarPara(
         LatLng(lat, lon)
     }
 
+    // **A duração sai da distância, não de uma constante.**
+    //
+    // Uma duração fixa erra dos dois lados: 700 ms para um par a 80 metros é uma
+    // pausa sem motivo, e 700 ms para um par a 3 km é um borrão em que o agente
+    // não vê o percurso — e é o percurso que informa para que lado o mapa andou.
+    // Entre 260 ms e 900 ms, proporcional à distância, o olho acompanha nos dois
+    // casos.
     val atual = mapa.cameraPosition.target
-    // Sem esse guarda a animação reinicia a cada recomposição — 600 ms de voo
-    // que nunca chega, e um mapa que treme.
-    if (atual != null && Geo.distanciaM(atual.latitude, atual.longitude, alvo.latitude, alvo.longitude) < 12.0) {
-        return
+    val salto = if (atual == null) 0.0 else {
+        Geo.distanciaM(atual.latitude, atual.longitude, alvo.latitude, alvo.longitude)
     }
+    val duracao = (260.0 + salto / 4.0).coerceAtMost(900.0).toInt()
 
-    // 700 ms: rápido o bastante para não fazer esperar, longo o bastante para o
-    // olho acompanhar o percurso — e é o percurso que informa. Um salto
-    // instantâneo até o par obrigaria o agente a reconstruir mentalmente para
-    // que lado o mapa andou; o voo mostra.
-    mapa.animateCamera(
-        CameraUpdateFactory.newLatLngZoom(alvo, ZOOM_PADRAO),
-        DURACAO_DO_VOO_MS,
-    )
+    mapa.animateCamera(CameraUpdateFactory.newLatLngZoom(alvo, ZOOM_PADRAO), duracao)
+}
+
+/**
+ * Mantém o portador no centro enquanto ele anda.
+ *
+ * Só se mexe acima de 8 m: o GPS treme parado, e uma câmera que persegue o ruído
+ * do receptor faz o mapa vibrar com o agente imóvel. Oito metros é maior que o
+ * tremor típico e menor que um passo largo de viatura.
+ */
+private fun seguir(mapa: MapLibreMap, lat: Double, lon: Double) {
+    val atual = mapa.cameraPosition.target ?: return
+    if (Geo.distanciaM(atual.latitude, atual.longitude, lat, lon) < 8.0) return
+    mapa.animateCamera(CameraUpdateFactory.newLatLng(LatLng(lat, lon)), 260)
 }
 
 /**
@@ -354,7 +431,6 @@ private fun androidx.compose.ui.graphics.Color.toArgb(): Int =
  */
 private const val ZOOM_PADRAO = 16.2
 
-private const val DURACAO_DO_VOO_MS = 700
 
 /** Estilo escuro do OpenFreeMap: 47 camadas, sem chave, sem cota declarada. */
 private const val ESTILO_ESCURO = "https://tiles.openfreemap.org/styles/dark"

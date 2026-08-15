@@ -1108,3 +1108,32 @@ aparelho tem" é exatamente o que se defende numa auditoria.
   Também confirmado, do lado bom: **não há IA na nuvem em caminho nenhum.** Whisper e Piper
   rodam locais, os modelos estão em `app/src/main/assets/`, e nenhum áudio, transcrição ou
   frame sai do aparelho no caminho crítico.
+
+- **2026-08-15 — VERIFICADO NO ARTEFATO: o DAT 0.9.0 não expõe microfone, e o MockDeviceKit
+  não simula áudio. As duas regras duras estão certas.**
+  A dúvida veio de material de aula sugerindo captura de microfone pelo DAT. Conferido por
+  `javap` sobre os três AAR do cache do Gradle, e confirmado pela doc oficial via MCP:
+
+  ```
+  Stream            → stop, state, videoStream, errorStream, start, capturePhoto
+  StreamConfiguration → (VideoQuality, frameRate: Int, compressVideo: Boolean)
+  MockGlassesServices → getCamera(), getCaptouch()
+  ```
+
+  Nenhum tipo de áudio na superfície pública, nenhum campo de áudio na configuração de stream,
+  e o mock expõe exatamente dois serviços. Existem classes de áudio no artefato
+  (`camera.internal.codec.AudioDecoder`, `camera.internal.events.AudioEvent`,
+  `MetaWearablesDATAudioEventListener`), **todas em pacotes `internal`** — não são API pública,
+  quebram a cada versão, e a Regra Zero manda parar diante de assinatura não confirmável.
+
+  A doc oficial diz o mesmo por outro caminho: *"HFP (bidirecional, 8 kHz mono) — captura de
+  voz do microfone dos óculos"* e *"sessões do DAT **compartilham** acesso a microfone e
+  alto-falante com a pilha Bluetooth do sistema"*. O microfone dos óculos é alcançável, e é
+  isso que `GlassesAudioManagerImpl` faz — só que por HFP/SCO, não pelo DAT.
+
+  Provável origem da confusão: o sample oficial `CameraAccess` ganhou gravação com som na
+  0.9.0, e o arquivo que faz isso é `AudioInputHandler.kt` — cujo cabeçalho diz **"Phone
+  Microphone Audio Input"**. É o microfone do celular, para trilha de vídeo.
+
+  Consequência prática: o MDK continua sem servir para testar o ciclo de voz. Fone Bluetooth
+  com HFP permanece a única bancada honesta.
