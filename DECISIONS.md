@@ -416,3 +416,45 @@ Ordem cronológica inversa (mais recente no topo).
   Chave `anon` (respeita RLS), não `service_role` — esta fica só nas variáveis de ambiente
   das Edge Functions. Ausentes, o teste de integração se declara pulado: ninguém deve
   precisar de credencial para rodar a suíte.
+
+## Conflitos do PTT — o alto-falante open-ear (2026-08-14)
+
+- **⚠️ Defeito no próprio SQL, pego antes de aplicar: `current_agent_id()` era referenciada
+  6 vezes nas políticas de linha e nunca foi definida.** `CREATE POLICY` teria falhado. As
+  duas RPCs chamadas pelas Edge Functions (`agentes_no_raio`, `posicao_relativa`) também não
+  existiam. Corrigido: a função entra no topo do `0002`, antes das políticas que a usam, e as
+  RPCs viram `0003`. `agents` ganha `auth_user_id` — é o que liga o agente ao usuário
+  autenticado e, portanto, a base de toda política.
+  `current_agent_id()` é `SECURITY DEFINER` por necessidade, não conveniência: ela lê
+  `agents`, e com os privilégios do chamador uma política sobre `agents` que a invocasse
+  entraria em recursão. `search_path` travado porque função DEFINER com caminho aberto é
+  escalada de privilégio.
+
+- **Um mecanismo para quatro conflitos: `SupressorDeSaidaPropria`.**
+  Os alto-falantes são *open-ear*, a centímetros do array de microfones: **todo som que
+  produzimos é um som que vamos capturar**. Isso gera (1) o tom de início entrando na própria
+  transmissão, (2) a cauda de uma transmissão recebida voltando ao grupo, (3) o TTS do
+  copiloto entrando na fala, (4) o detector de ativação acordando com a própria saída.
+  Registrar as janelas de reprodução e descartar da captura o que cai nelas resolve os
+  quatro. **Descartar é o certo, não um mal menor:** enquanto o alto-falante toca, o
+  microfone capta a mistura e não há como separá-la; perder 200 ms de sobreposição é melhor
+  que difundir a própria saída. No caso da cauda de recepção, descartar **é** a disciplina
+  de meio-duplex.
+  Detalhe que só apareceu ao desenhar: o tom de início é alta energia, então o VAD retroativo
+  do pré-roll o marcaria como "início da fala" — o recurso que existe para não cortar a
+  primeira sílaba passaria a cortá-la.
+
+- **Recomendação de feedback: háptico no aperto, sonoro no resto.**
+  O aperto é o único instante em que realimentação e captura coincidem; tudo o mais acontece
+  com a captura desligada ou com a transmissão descartada. Vibração não vaza para o
+  microfone por construção (celular no bolso, microfone nos óculos). O supressor existe de
+  qualquer forma — os conflitos 2 e 3 exigem — então um tom de início continua possível, e a
+  escolha entre os dois fica para medição com fone físico (colete tático pode abafar a
+  vibração).
+
+- **`GatilhoPtt`: debounce de 250 ms e duração mínima de 150 ms.**
+  Botão mecânico gera múltiplos eventos por acionamento, e com luva gera mais — sem debounce
+  um aperto vira duas transmissões, e a segunda corta a primeira no controle de piso. Toque
+  abaixo de 150 ms é encosto acidental: difundir 80 ms de ruído para a guarnição é pior que
+  não transmitir. `cancelar()` arma o debounce para o agente não reabrir por reflexo em cima
+  do próprio cancelamento.

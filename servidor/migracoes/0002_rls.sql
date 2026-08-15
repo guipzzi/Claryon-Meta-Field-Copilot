@@ -5,6 +5,25 @@
 -- para quem enviar. Isso é requisito de privacidade antes de ser de arquitetura:
 -- o aplicativo de um agente nunca recebe a lista de onde os outros estão.
 
+-- ─────────────────────────────────────────────────────────────────────────────
+-- `current_agent_id()` — a base de TODA política abaixo.
+--
+-- `SECURITY DEFINER` é obrigatório e não é conveniência: a função lê `agents`, e
+-- se ela rodasse com os privilégios do chamador, uma política sobre `agents` que
+-- a invocasse entraria em recursão infinita. `search_path` travado impede que um
+-- schema plantado no caminho sequestre a resolução de nomes — uma função
+-- DEFINER com search_path aberto é escalada de privilégio.
+-- ─────────────────────────────────────────────────────────────────────────────
+create or replace function current_agent_id()
+returns uuid
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select id from agents where auth_user_id = auth.uid()
+$$;
+
 alter table transmissions enable row level security;
 alter table deliveries    enable row level security;
 alter table agent_positions enable row level security;

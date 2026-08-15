@@ -22,12 +22,15 @@ create table units (
 );
 
 create table agents (
-  id         uuid primary key default gen_random_uuid(),
-  matricula  text not null unique,
-  indicativo text not null,                    -- "Alfa Dois" — nunca nome ou matrícula no mapa
-  unit_id    uuid not null references units(id),
-  device_id  text,                             -- device binding
-  fcm_token  text
+  id           uuid primary key default gen_random_uuid(),
+  -- Liga o agente ao usuário autenticado. É o que `current_agent_id()` resolve,
+  -- e portanto a base de toda política de linha.
+  auth_user_id uuid unique,
+  matricula    text not null unique,
+  indicativo   text not null,                  -- "Alfa Dois" — nunca nome ou matrícula no mapa
+  unit_id      uuid not null references units(id),
+  device_id    text,                           -- device binding
+  fcm_token    text
 );
 
 create table talk_groups (
