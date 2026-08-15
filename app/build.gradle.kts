@@ -1,3 +1,6 @@
+import java.io.FileInputStream
+import java.util.Properties
+
 // app — camada de orquestração e UI Compose.
 // A tela NÃO é canal de resposta ao usuário final (a saída rica é áudio); existe
 // para onboarding, diagnóstico e o painel de demo à banca. `app` depende de
@@ -24,11 +27,35 @@ android {
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
         }
+
+        // Endereço do projeto e chave anônima, de `local.properties` (fora do
+        // versionamento). A chave anônima é pública por desenho — é ela que o RLS
+        // pressupõe, e sozinha não dá acesso a nada — mas o ENDEREÇO do projeto do
+        // piloto não precisa estar num repositório aberto, e manter as duas juntas
+        // evita que alguém acrescente uma credencial de verdade "no mesmo lugar
+        // das outras".
+        //
+        // Ausentes, o app compila e as capacidades de rede se anunciam como
+        // indisponíveis — nunca falham em silêncio.
+        val propriedadesLocais = Properties()
+        rootProject.file("local.properties").takeIf { it.exists() }?.let { arquivo ->
+            FileInputStream(arquivo).use { propriedadesLocais.load(it) }
+        }
+        buildConfigField(
+            "String",
+            "SUPABASE_URL",
+            "\"${propriedadesLocais.getProperty("supabase_url", "")}\"",
+        )
+        buildConfigField(
+            "String",
+            "SUPABASE_ANON_KEY",
+            "\"${propriedadesLocais.getProperty("supabase_anon_key", "")}\"",
+        )
     }
 
     buildFeatures {
         compose = true
-        buildConfig = true // usamos BuildConfig.DEBUG para gatear o MockDeviceKit
+        buildConfig = true // BuildConfig.DEBUG gateia o MockDeviceKit; e traz a config do Supabase
     }
 
     androidResources {
@@ -74,6 +101,10 @@ dependencies {
     implementation(project(":core-voice"))
     implementation(project(":core-sound"))
     implementation(project(":core-evidence"))
+    // O cofre de evidência já usa esta biblioteca, mas por `implementation` — a
+    // dependência não é transitiva. O `app` a usa por conta própria, para guardar
+    // a sessão do agente com a mesma proteção que a evidência recebe.
+    implementation(libs.androidx.security.crypto)
     implementation(project(":core-sync"))
     implementation(project(":core-net"))
 

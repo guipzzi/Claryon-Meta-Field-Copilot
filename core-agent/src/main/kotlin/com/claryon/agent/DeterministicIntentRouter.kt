@@ -17,6 +17,10 @@ class DeterministicIntentRouter : IntentRouter {
 
     override fun route(transcricao: String): Intent {
         val texto = normalizar(transcricao)
+
+        // Classificado uma vez só: a varredura de gatilhos é a parte mais cara do
+        // roteador e ele está no caminho crítico de 2 s entre fala e resposta.
+        val ocorrencia = LexicoDeOcorrencias.classificar(transcricao)
         if (texto.isBlank()) return Intent.NaoReconhecida(transcricao)
 
         return when {
@@ -55,8 +59,7 @@ class DeterministicIntentRouter : IntentRouter {
             // operacional — o alerta carrega tipo, prioridade e local, e o
             // fan-out por raio depende deles. Só entra aqui se o léxico
             // determinístico reconhecer o tipo; senão, segue o fluxo antigo.
-            LexicoDeOcorrencias.classificar(transcricao) != null ->
-                Intent.AlertarOcorrencia(LexicoDeOcorrencias.classificar(transcricao)!!)
+            ocorrencia != null -> Intent.AlertarOcorrencia(ocorrencia)
 
             matches(texto, PEDIR_APOIO) ->
                 Intent.PedirApoio(prioridade = prioridadeDe(texto), resumo = null)
@@ -87,14 +90,26 @@ class DeterministicIntentRouter : IntentRouter {
      * Indicativo militar após o gatilho: "onde está **Alfa Dois**".
      *
      * Até três palavras, porque indicativos reais chegam a isso ("Alfa Dois
-     * Zero"). Pontuação já saiu na normalização.
+     * Zero").
+     *
+     * **Pontuação e artigo saem aqui, não antes.** O comentário anterior dizia
+     * que a pontuação "já saiu na normalização" — e não saía: `normalizar` só
+     * tira acento e colapsa espaço. O Whisper devolve pontuação por padrão, então
+     * "onde está Alfa Dois?" produzia o indicativo `"Alfa Dois?"`. A RPC casa por
+     * igualdade exata, então a interrogação fazia o agente ouvir **"Alfa Dois?
+     * não localizado"** — uma afirmação falsa sobre o companheiro, causada por um
+     * caractere.
      */
     private fun extrairIndicativo(texto: String): String? {
         for (g in CONSULTAR_POSICAO) {
             val i = texto.indexOf(g)
             if (i < 0) continue
-            val palavras = texto.substring(i + g.length).trim()
-                .split(" ").filter { it.isNotBlank() }.take(3)
+            val palavras = LexicoDeOcorrencias.normalizarTexto(texto.substring(i + g.length))
+                .split(" ")
+                .filter { it.isNotBlank() }
+                // "onde está o Alfa Dois" não pede pelo par chamado "O Alfa Dois".
+                .dropWhile { it in ARTIGOS }
+                .take(3)
             if (palavras.isNotEmpty()) {
                 return palavras.joinToString(" ") { p -> p.replaceFirstChar { it.uppercase() } }
             }
@@ -111,7 +126,11 @@ class DeterministicIntentRouter : IntentRouter {
         // de propósito: o léxico os classifica com tipo, prioridade E logradouro,
         // que é estritamente mais informativo para quem recebe o alerta — mesma
         // urgência, mais contexto.
-        val EMERGENCIA = listOf("emergencia", "codigo vermelho", "socorro")
+        // "socorro" saiu daqui e ficou só como modificador de escalada no léxico.
+        // Aqui, "tiroteio na Rui Barbosa, socorro" virava `Emergencia` genérica e
+        // o despacho saía com "Emergência acionada" e sem endereço — perdendo
+        // exatamente o que o léxico tinha acabado de extrair.
+        val EMERGENCIA = listOf("emergencia", "codigo vermelho")
         val PEDIR_APOIO = listOf("apoio", "reforco", "reforcar", "solicitar apoio", "preciso de apoio")
         val INICIAR_GRAVACAO = listOf("gravar", "iniciar gravacao", "comecar gravacao", "registrar video")
         val ENCERRAR_GRAVACAO = listOf("encerrar gravacao", "parar gravacao", "parar de gravar", "finalizar gravacao")
@@ -121,15 +140,18 @@ class DeterministicIntentRouter : IntentRouter {
         // Termo solto: só vale se nada mais específico casou antes.
         val CONSULTAR_PLACA_SOLTO = listOf("placa")
         val NARRAR = listOf("narrar", "ditar", "registrar ocorrencia", "anotar ocorrencia", "boletim")
-        val DETALHAR = listOf("detalhar", "repetir", "repita", "de novo")
+        // "de novo" saiu daqui. É locução comum em rádio, não comando: "tiroteio
+        // de novo na Rui Barbosa" virava `Detalhar` e o app repetia a última
+        // resposta — ou dizia "Nada a repetir." — enquanto nenhum alerta saía.
+        val DETALHAR = listOf("detalhar", "repetir", "repita")
         val MODO_STANDBY = listOf("modo standby", "modo espera", "modo descanso")
         val MODO_OCORRENCIA = listOf("modo ocorrencia", "modo abordagem")
         val MODO_ATIVO = listOf("modo ativo", "modo patrulha")
 
         val CONSULTAR_POSICAO = listOf("onde esta", "onde ta", "posicao de", "localizar", "cade a", "cade o")
 
-        val PRIORIDADE_MAXIMA = listOf("armado", "arma", "refem", "perigo de vida")
-        val PRIORIDADE_ALTA = listOf("urgente", "rapido", "agora")
+        val ARTIGOS = setOf("o", "a", "os", "as", "do", "da", "de")
+
     }
 }
 

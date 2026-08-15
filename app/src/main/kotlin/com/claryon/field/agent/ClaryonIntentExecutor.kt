@@ -169,15 +169,22 @@ class ClaryonIntentExecutor(
     // ── C2: posição de um par ─────────────────────────────────────────────────
 
     private suspend fun consultarPosicao(indicativo: String): ActionOutcome {
-        // Ordem deliberada: permissão antes de posição. As duas falham, mas só
-        // uma tem conserto pelo agente, e dizer "sem sinal" a quem negou a
-        // permissão o faria esperar por um GPS que nunca vai ser consultado.
+        // Permissão é a única pré-condição local que faz sentido aqui.
         if (!permissaoDeLocal()) {
             return ActionOutcome.Falhou(FalhaOperacional.SEM_PERMISSAO_DE_LOCAL)
         }
-        if (minhaPosicao() == null) {
-            return ActionOutcome.Falhou(FalhaOperacional.SEM_POSICAO_PROPRIA)
-        }
+        // NÃO se barra mais pela correção de GPS local. O servidor calcula a
+        // distância a partir da última posição **publicada** do solicitante, não
+        // da que o celular tem agora, e as duas divergem nos dois sentidos:
+        //
+        //  - falso negativo: dentro de um prédio o GPS local não tem correção
+        //    recente e a consulta era recusada, embora o servidor pudesse
+        //    respondê-la a partir da posição publicada minutos antes;
+        //  - falso positivo, pior: correção local fresca com publicação atrasada
+        //    (sem rede há 40 min) deixava a consulta passar, e a resposta saía
+        //    afirmada como atual a partir de onde o agente **estava**.
+        //
+        // A idade que importa vem do servidor, e é o `BuscaDePar` que a carrega.
         return when (val b = localizarPar(indicativo)) {
             is BuscaDePar.Encontrado -> ActionOutcome.PosicaoEncontrada(b.posicao)
             // Par ausente NÃO é falha: o sistema funcionou, o par é que não está
@@ -187,6 +194,10 @@ class ClaryonIntentExecutor(
             // localizado" quando a consulta está fora do ar faz o agente concluir
             // que o companheiro sumiu — e agir a partir disso.
             BuscaDePar.Indisponivel -> ActionOutcome.Falhou(FalhaOperacional.CONSULTA_INDISPONIVEL)
+            // A distância existe, mas foi medida de onde eu estava. Falar o
+            // número seria pior que não responder.
+            BuscaDePar.PosicaoPropriaVelha ->
+                ActionOutcome.Falhou(FalhaOperacional.SEM_POSICAO_PROPRIA)
         }
     }
 

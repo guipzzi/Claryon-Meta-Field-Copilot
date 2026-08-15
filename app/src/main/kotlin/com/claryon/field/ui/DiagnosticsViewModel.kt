@@ -17,6 +17,14 @@ import com.claryon.evidence.EncryptedEvidenceVault
 import com.claryon.field.BuildConfig
 import com.claryon.field.agent.ClaryonIntentExecutor
 import com.claryon.agent.BuscaDePar
+import com.claryon.agent.FalaDePosicao
+import com.claryon.agent.PosicaoRelativa
+import com.claryon.agent.Rumo
+import com.claryon.field.auth.CofreDeSessaoCifrado
+import com.claryon.net.AutenticacaoSupabase
+import com.claryon.net.ConfigRealtime
+import com.claryon.net.ConsultaDePosicao
+import com.claryon.net.PublicadorDePosicaoSupabase
 import com.claryon.field.agent.Identidade
 import com.claryon.field.local.ProvedorDeLocal
 import com.claryon.glasses.DatGlassesFacade
@@ -173,6 +181,78 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
 
     private val local = ProvedorDeLocal(app)
 
+    // ── Sessão e rede (C2) ────────────────────────────────────────────────────
+
+    /** `false` quando `local.properties` não trouxe o projeto: sem servidor, sem C2. */
+    val redeConfigurada: Boolean =
+        BuildConfig.SUPABASE_URL.isNotBlank() && BuildConfig.SUPABASE_ANON_KEY.isNotBlank()
+
+    private val configRede = ConfigRealtime(
+        projetoUrl = BuildConfig.SUPABASE_URL.trimEnd('/'),
+        apiKey = BuildConfig.SUPABASE_ANON_KEY,
+    )
+
+    val autenticacao = AutenticacaoSupabase(
+        config = configRede,
+        cofre = CofreDeSessaoCifrado(app),
+    )
+
+    private val consulta = ConsultaDePosicao(
+        config = configRede,
+        // `runBlocking` NÃO: a renovação de token não pode travar o ciclo de voz.
+        // O token corrente é lido de forma síncrona a partir do cofre, e a
+        // renovação acontece antes, no `publicarPosicao` periódico.
+        tokenDeSessao = { tokenCorrente },
+    )
+
+    @Volatile
+    private var tokenCorrente: String? = null
+
+    private val publicador = PublicadorDePosicaoSupabase(
+        config = configRede,
+        tokenDeSessao = { autenticacao.tokenValido()?.also { tokenCorrente = it } },
+    )
+
+    /**
+     * Sobe a posição própria. É ela que dá ao servidor o ponto de onde medir a
+     * distância na consulta por voz — sem publicar, C2 responde "não sei de onde
+     * medir", que é honesto mas inútil.
+     */
+    suspend fun publicarPosicao() {
+        if (!redeConfigurada) return
+        val c = local.ultimaPosicao() ?: return
+        publicador.publicar(c.latitude, c.longitude, c.precisaoM, null)
+    }
+
+    /**
+     * Traduz a resposta do servidor em [BuscaDePar].
+     *
+     * O ramo de [BuscaDePar.PosicaoPropriaVelha] é o que impede o modo de falha
+     * mais traiçoeiro: a distância vem medida da **minha última posição
+     * publicada**, e se ela é de meia hora atrás o número está errado por
+     * quilômetros sem nada no payload denunciando.
+     */
+    private suspend fun localizar(indicativo: String): BuscaDePar {
+        if (!redeConfigurada || autenticacao.tokenValido()?.also { tokenCorrente = it } == null) {
+            return BuscaDePar.Indisponivel
+        }
+        val r = consulta.onde(indicativo).getOrElse { return BuscaDePar.Indisponivel }
+            ?: return BuscaDePar.NaoLocalizado
+
+        if (r.idadeDoSolicitanteS > FalaDePosicao.IDADE_MAXIMA_S) {
+            return BuscaDePar.PosicaoPropriaVelha
+        }
+        return BuscaDePar.Encontrado(
+            PosicaoRelativa(
+                indicativo = r.indicativo,
+                distanciaM = r.distanciaM,
+                rumo = r.azimuteGraus?.let(Rumo::deGraus),
+                emMovimento = (r.velocidadeMs ?: 0f) > 1.0f,
+                idadeS = r.idadeS,
+            ),
+        )
+    }
+
     /**
      * Sem `core-net`, o despacho **sempre** cai na fila durável e o agente ouve
      * "Sem rede. Na fila." — que é a verdade. Quando o transporte existir, troca-se
@@ -208,12 +288,11 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
         minhaPosicao = { local.ultimaPosicao() },
         permissaoDeLocal = { local.temPermissao() },
 
-        // C2 sai por `ConsultaDePosicao`, que precisa do token de sessão do
-        // agente — e o fluxo de autenticação ainda não existe. Enquanto isso,
-        // `Indisponivel`: o agente ouve "Consulta indisponível." em vez de
-        // "Alfa Dois não localizado", que seria afirmar que o companheiro sumiu
-        // quando o que falta é o login. Trocar aqui, e nada mais muda.
-        localizarPar = { BuscaDePar.Indisponivel },
+        // C2 fechado: sai por `ConsultaDePosicao` com o token da sessão. Sem
+        // login, sem rede ou sem servidor configurado, devolve `Indisponivel` — o
+        // agente ouve "Consulta indisponível." em vez de "Alfa Dois não
+        // localizado", que afirmaria que o companheiro sumiu.
+        localizarPar = { indicativo -> localizar(indicativo) },
     )
 
 

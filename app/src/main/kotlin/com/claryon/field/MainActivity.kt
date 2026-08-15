@@ -10,8 +10,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.claryon.field.permissoes.PermissoesEssenciais
 import com.claryon.field.ui.DiagnosticsScreen
+import com.claryon.field.ui.DiagnosticsViewModel
+import com.claryon.field.ui.TelaDeLogin
 import com.claryon.field.ui.TelaDePermissoes
 
 /**
@@ -21,43 +24,59 @@ import com.claryon.field.ui.TelaDePermissoes
  * saída rica ao usuário final é sempre áudio. O DAT já foi inicializado na
  * [ClaryonApp].
  *
- * **Mudança relevante:** a versão anterior disparava o pedido de permissões no
- * `onCreate`, com `RECORD_AUDIO` e `BLUETOOTH_CONNECT`, e **ignorava o
- * resultado** (o comentário dizia "status refletido no painel"). Três problemas
- * de uma vez: o diálogo aparecia antes de qualquer contexto — que é a receita
- * para ser negado; a lista estava incompleta, sem localização nem câmera; e
- * negar não mudava nada, então o app seguia para o painel e simplesmente não
- * funcionava, sem dizer por quê.
+ * A abertura é uma sequência de portões, e nenhum deles é intransponível exceto
+ * o primeiro: **permissões → sessão → painel**. Cada portão pode ser pulado, e
+ * pular custa capacidades que o app diz em voz alta quando forem pedidas —
+ * jamais um comando que simplesmente não faz nada.
  */
 class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            // Reavaliado a cada composição inicial: o agente pode ter concedido
-            // pelos ajustes do sistema entre uma abertura e outra.
-            var mostrarPermissoes by remember { mutableStateOf(!podeSeguir()) }
+            val vm: DiagnosticsViewModel = viewModel()
+
+            // `tudoConcedido`, não `podeOperar`.
+            //
+            // A versão anterior usava `podeOperar` — que só olha a bloqueante — e
+            // criava um beco sem saída: o agente concedia o microfone, negava a
+            // localização, tocava "seguir assim mesmo", e **da segunda abertura em
+            // diante o app ia direto ao painel**. Localização, câmera e Bluetooth
+            // nunca mais eram pedidos, e C2, C3 e o mapa ficavam mortos em
+            // silêncio para sempre.
+            //
+            // Agora a tela reaparece a cada abertura enquanto faltar alguma, e
+            // "seguir assim mesmo" vale só para esta sessão. Um toque a mais por
+            // turno é barato; uma capacidade morta em definitivo não é.
+            var mostrarPermissoes by remember { mutableStateOf(!tudoConcedido()) }
+            var mostrarLogin by remember { mutableStateOf(true) }
 
             MaterialTheme {
                 Surface {
-                    if (mostrarPermissoes) {
-                        TelaDePermissoes(aoConcluir = { mostrarPermissoes = false })
-                    } else {
-                        DiagnosticsScreen()
+                    when {
+                        mostrarPermissoes ->
+                            TelaDePermissoes(aoConcluir = { mostrarPermissoes = false })
+
+                        // Já autenticado num turno anterior: a sessão está no cofre
+                        // cifrado e o login não reaparece.
+                        mostrarLogin && !vm.autenticacao.autenticado() -> TelaDeLogin(
+                            auth = vm.autenticacao,
+                            configurado = vm.redeConfigurada,
+                            aoEntrar = { mostrarLogin = false },
+                            aoSeguirSemRede = { mostrarLogin = false },
+                        )
+
+                        else -> DiagnosticsScreen()
                     }
                 }
             }
         }
     }
 
-    /**
-     * Só a bloqueante impede a entrada. Barrar por câmera negada seria o app se
-     * recusando a fazer o que ainda sabe fazer — e o agente já está no pátio.
-     */
-    private fun podeSeguir(): Boolean = PermissoesEssenciais.avaliar(
+    private fun tudoConcedido(): Boolean = PermissoesEssenciais.avaliar(
         PermissoesEssenciais.catalogo()
             .map { it.permissao }
             .filter { checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
             .toSet(),
-    ).podeOperar
+    ).tudoConcedido
 }

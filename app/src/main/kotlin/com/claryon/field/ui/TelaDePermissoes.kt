@@ -20,12 +20,17 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.neverEqualPolicy
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -53,7 +58,32 @@ import com.claryon.field.permissoes.Recuperacao
 @Composable
 fun TelaDePermissoes(aoConcluir: () -> Unit) {
     val context = LocalContext.current
-    var estado by remember { mutableStateOf(avaliarAgora(context)) }
+
+    // `neverEqualPolicy`: o Compose compara `EstadoDePermissoes` por igualdade
+    // estrutural, e negar uma permissão produz um estado **idêntico** ao anterior
+    // — mesmas listas, mesmos valores. Sem isto não havia recomposição, e o
+    // caminho de recuperação nunca era reavaliado: o agente negava duas vezes
+    // (definitivo, no Android 11+), o botão continuava "Permitir", e tocá-lo
+    // disparava um pedido que o sistema recusa na hora. O sintoma era literalmente
+    // "apertei e não aconteceu nada" — o que esta tela existe para evitar.
+    var estado by remember {
+        mutableStateOf(avaliarAgora(context), policy = neverEqualPolicy())
+    }
+
+    // Conceder pelos ajustes do Android **não reinicia o processo** (só revogar
+    // reinicia). Sem observar o retorno, a tela continuaria mostrando tudo negado
+    // depois de o agente ter liberado tudo.
+    val dono = LocalLifecycleOwner.current
+    DisposableEffect(dono) {
+        val observador = LifecycleEventObserver { _, evento ->
+            if (evento == Lifecycle.Event.ON_RESUME) {
+                estado = avaliarAgora(context)
+                if (estado.tudoConcedido) aoConcluir()
+            }
+        }
+        dono.lifecycle.addObserver(observador)
+        onDispose { dono.lifecycle.removeObserver(observador) }
+    }
 
     val pedido = rememberLauncherForActivityResult(RequestMultiplePermissions()) {
         // Reavalia pelo PackageManager, não pelo mapa que o launcher devolve: o
@@ -62,6 +92,10 @@ fun TelaDePermissoes(aoConcluir: () -> Unit) {
         estado = avaliarAgora(context)
         if (estado.tudoConcedido) aoConcluir()
     }
+
+    // Lido uma vez por composição, não a cada recomposição: `SharedPreferences`
+    // na main thread dentro do corpo do composable rodava a cada quadro.
+    val podePedir = remember(estado) { podePedirDeNovo(context) }
 
     Column(
         modifier = Modifier
@@ -115,7 +149,7 @@ fun TelaDePermissoes(aoConcluir: () -> Unit) {
 
         Spacer(Modifier.height(16.dp))
 
-        when (val r = PermissoesEssenciais.recuperacao(estado, podePedirDeNovo(context))) {
+        when (val r = PermissoesEssenciais.recuperacao(estado, podePedir)) {
             is Recuperacao.Pedir -> Button(
                 onClick = {
                     // Registrar ANTES de lançar. É este registro que faz

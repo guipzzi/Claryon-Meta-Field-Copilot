@@ -19,9 +19,19 @@ import java.util.concurrent.TimeUnit
 data class RespostaDePosicao(
     val indicativo: String,
     val distanciaM: Int,
-    val azimuteGraus: Double,
+    /**
+     * `null` quando não há rumo definido. O PostGIS devolve nulo em `ST_Azimuth`
+     * para pontos coincidentes — dupla na mesma viatura, que é a configuração
+     * mais comum do policiamento, não uma borda.
+     */
+    val azimuteGraus: Double?,
     val velocidadeMs: Float?,
     val idadeS: Int,
+    /**
+     * Idade da posição **do solicitante** — aquela de onde a distância acima foi
+     * medida. Ver [ConsultaDePosicao.onde].
+     */
+    val idadeDoSolicitanteS: Int,
 )
 
 /**
@@ -60,6 +70,13 @@ class ConsultaDePosicao(
      *   propósito**: distinguir "existe mas você não pode ver" de "não existe"
      *   entregaria, pela mensagem de erro, a informação que a política de
      *   privacidade nega pelo dado.
+     *
+     * Repare em [RespostaDePosicao.idadeDoSolicitanteS]: a distância e o rumo são
+     * medidos a partir da **última posição publicada de quem pergunta**, não da
+     * correção que o celular tem agora. As duas divergem exatamente na situação
+     * em que a consulta mais importa — agente que ficou sem rede, saiu de um
+     * prédio e perguntou onde está o par. Quem chama tem de olhar esse campo
+     * antes de falar a distância como verdade.
      */
     suspend fun onde(indicativo: String): Result<RespostaDePosicao?> = withContext(Dispatchers.IO) {
         val token = tokenDeSessao()
@@ -92,11 +109,15 @@ class ConsultaDePosicao(
     private fun interpretar(o: JSONObject): RespostaDePosicao = RespostaDePosicao(
         indicativo = o.getString("indicativo_alvo"),
         distanciaM = o.getDouble("distancia_m").toInt(),
-        azimuteGraus = o.getDouble("azimute"),
-        // `optDouble` devolve NaN quando o campo é nulo, e NaN aqui viraria
-        // "deslocando a NaN m/s". Velocidade ausente é ausente, não zero.
+        // `optDouble`, não `getDouble`: `getDouble` LANÇA quando o campo é nulo, e
+        // o azimute é nulo sempre que os dois pontos coincidem. A dupla na mesma
+        // viatura fazia a consulta inteira virar "Consulta indisponível."
+        azimuteGraus = o.optDouble("azimute").takeIf { !it.isNaN() },
+        // Mesma razão: NaN aqui viraria "deslocando a NaN m/s". Velocidade
+        // ausente é ausente, não zero.
         velocidadeMs = o.optDouble("speed_mps").takeIf { !it.isNaN() }?.toFloat(),
         idadeS = o.getInt("idade_s"),
+        idadeDoSolicitanteS = o.optInt("idade_solicitante_s", Int.MAX_VALUE),
     )
 
     private companion object {

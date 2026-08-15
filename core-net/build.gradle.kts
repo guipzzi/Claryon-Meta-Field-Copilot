@@ -60,6 +60,9 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+    // Sem isto, `JSONObject.put` lança "not mocked" no unit test e o caminho de
+    // renovação de sessão fica inteiro atrás de uma exceção de infraestrutura.
+    testImplementation(libs.json.jvm)
 
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.test.ext.junit)

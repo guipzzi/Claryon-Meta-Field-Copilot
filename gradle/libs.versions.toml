@@ -35,6 +35,12 @@ mwdat-mockdevice = { group = "com.meta.wearable", name = "mwdat-mockdevice", ver
 
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
 
+# `org.json` real para os testes de JVM. O Android empacota essa mesma API, mas o
+# unit test recebe um stub que lança "not mocked" em qualquer método — o que
+# esconderia o caminho de renovação de sessão inteiro atrás de uma exceção de
+# infraestrutura. Test-only, domínio público, mesma API já usada em produção.
+json-jvm = { module = "org.json:json", version = "20240303" }
+
 # Repouso cifrado: EncryptedFile + chave no Android Keystore (M6 — core-evidence).
 androidx-security-crypto = { module = "androidx.security:security-crypto", version.ref = "securityCrypto" }
 # OCR de placa on-device (modelo Latin embarcado, roda offline) — M6.

@@ -182,12 +182,20 @@ object LexicoDeOcorrencias {
      * Modificadores que **elevam** a prioridade. Nunca rebaixam: na dúvida entre
      * dois níveis, o produto erra para o lado de mandar mais gente.
      */
-    private val ESCALA_PARA_EMERGENCIA = listOf(
-        "arma", "armado", "armados", "refem", "vitima", "vitimas", "ferido", "ferida", "feridos",
-        "sangrando", "baleado", "baleada", "crianca", "perigo de vida", "socorro", "urgente agora",
-        "policial", "guarnicao em risco",
+    private val ESCALA_PARA_EMERGENCIA = comFlexoes(
+        listOf(
+            "arma", "armado", "refem", "vitima", "ferido", "sangrando", "baleado",
+            "crianca", "perigo de vida", "socorro", "urgente agora",
+            // "policial" sozinho NÃO entra: "chama outro policial" viraria
+            // emergência. O que escala é o que aconteceu com ele — "baleado",
+            // "ferido" — e a guarnição em risco, que é frase de rádio própria.
+            "guarnicao em risco",
+        ),
     )
-    private val ESCALA_PARA_ALTA = listOf("urgente", "rapido", "agora", "correndo", "muita gente")
+
+    private val ESCALA_PARA_ALTA = comFlexoes(
+        listOf("urgente", "rapido", "agora", "correndo", "muita gente"),
+    )
 
     /** Prefixos que anunciam logradouro na fala natural. */
     private val PREFIXOS_DE_VIA = listOf(
@@ -200,12 +208,17 @@ object LexicoDeOcorrencias {
      * cidade — e porque um nome de rua conhecido é o que distingue "Rui Barbosa"
      * (logradouro) de "Rui Barbosa" (nome de pessoa envolvida).
      */
+    /**
+     * Mapa `normalizado → grafia canônica`. O valor é o que vai para o
+     * despachante: "Rui Barbosa", com maiúscula e acento, não "rui barbosa" nem
+     * um pedaço da fala recortado por índice.
+     */
     @Volatile
-    var gazetteer: Set<String> = emptySet()
+    var gazetteer: Map<String, String> = emptyMap()
         private set
 
     fun configurarGazetteer(logradouros: Collection<String>) {
-        gazetteer = logradouros.map { normalizarTexto(it) }.toSet()
+        gazetteer = logradouros.associateBy({ normalizarTexto(it) }, { it.trim() })
     }
 
     /**
@@ -217,8 +230,14 @@ object LexicoDeOcorrencias {
         val normalizado = normalizarTexto(texto)
         if (normalizado.isBlank()) return null
 
+        // `palavraInteira`, NUNCA `contains`. Com `contains` cru, qualquer palavra
+        // que *contenha* um gatilho disparava alerta para a guarnição inteira:
+        // "obrigado" e "brigada militar" viravam BRIGA/ALTA, "pegar" virava
+        // RACHA, "fogos" virava INCÊNDIO/EMERGÊNCIA, "cobrança" virava ANIMAL
+        // PERIGOSO. Em RS/SC, onde a corporação se chama Brigada Militar, o falso
+        // positivo seria diário — e um alerta não tem confirmação nem desfazer.
         val tipo = GATILHOS.firstOrNull { (_, gatilhos) ->
-            gatilhos.any { normalizado.contains(it) }
+            gatilhos.any { palavraInteira(normalizado, it) }
         }?.first ?: return null
 
         return Ocorrencia(
@@ -259,6 +278,21 @@ object LexicoDeOcorrencias {
      */
     private val NEGACOES = listOf("sem", "nenhum", "nenhuma", "nao ha", "nao tem", "nao houve")
 
+    /**
+     * O casamento é por palavra inteira, então **flexão precisa estar na lista**.
+     * "policial baleado" escalava; "dois policiais baleados" não. "suspeito
+     * armado" escalava; "gente armada" não. A régua tem de valer para como a
+     * pessoa fala, não para a forma de dicionário.
+     */
+    private fun comFlexoes(palavras: List<String>): List<String> = palavras.flatMap { p ->
+        when {
+            p.endsWith("ado") -> listOf(p, p + "s", p.dropLast(1) + "a", p.dropLast(1) + "as")
+            p.endsWith("ido") -> listOf(p, p + "s", p.dropLast(1) + "a", p.dropLast(1) + "as")
+            p.endsWith("a") || p.endsWith("o") || p.endsWith("e") -> listOf(p, p + "s")
+            else -> listOf(p, p + "s", p + "es")
+        }
+    }.distinct()
+
     /** `true` se a palavra aparece **e** não está negada logo antes. */
     private fun presenteENaoNegado(texto: String, palavra: String): Boolean {
         val re = Regex("(^|\\W)${Regex.escape(palavra)}(\\W|$)")
@@ -267,8 +301,19 @@ object LexicoDeOcorrencias {
             val inicio = busca.range.first
             // Janela de até 20 caracteres antes da ocorrência: cobre "sem",
             // "não há" e "nenhuma" sem atravessar a oração inteira.
-            val antes = texto.substring(maxOf(0, inicio - 20), inicio)
-            if (NEGACOES.none { antes.trimEnd().endsWith(it) || antes.contains("$it ") }) return true
+            // Só as DUAS palavras imediatamente anteriores contam como negação.
+            //
+            // A versão anterior varria 20 caracteres com `contains`, e qualquer
+            // "sem" na janela negava o que viesse depois — mesmo de outra oração.
+            // "roubo, o assaltante estava sem capacete, vítima ferida" deixava de
+            // escalar para emergência porque o "sem capacete" negou a vítima.
+            val antes = texto.substring(0, inicio).trimEnd().split(" ")
+            val duasUltimas = antes.takeLast(2)
+            val bigrama = duasUltimas.joinToString(" ")
+            val negado = NEGACOES.any { n ->
+                if (" " in n) bigrama == n else duasUltimas.lastOrNull() == n
+            }
+            if (!negado) return true
             busca = busca.next()
         }
         return false
@@ -287,10 +332,15 @@ object LexicoDeOcorrencias {
      * despachante lê, não "rui barbosa".
      */
     private fun extrairLogradouro(original: String, normalizado: String): String? {
-        gazetteer.firstOrNull { normalizado.contains(it) }?.let { achado ->
-            val i = normalizado.indexOf(achado)
-            return original.substring(i.coerceIn(0, original.length), (i + achado.length).coerceAtMost(original.length)).trim()
-        }
+        // Devolve a grafia CANÔNICA do gazetteer, não uma fatia do texto original.
+        //
+        // A versão anterior fazia `original.substring(normalizado.indexOf(...))`.
+        // Como `normalizarTexto` remove pontuação e colapsa espaços, os índices
+        // divergem sempre que a fala tiver vírgula ou espaço duplo — e "Tiroteio,
+        // na Rui Barbosa" produzia o logradouro **"Rui Barbos"**. Esse campo é o
+        // endereço que o despachante lê para mandar a guarnição.
+        gazetteer.entries.firstOrNull { palavraInteira(normalizado, it.key) }
+            ?.let { return it.value }
 
         val palavras = normalizado.split(" ")
         for ((i, p) in palavras.withIndex()) {

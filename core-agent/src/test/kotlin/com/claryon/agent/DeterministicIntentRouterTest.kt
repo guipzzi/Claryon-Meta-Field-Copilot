@@ -13,6 +13,40 @@ class DeterministicIntentRouterTest {
 
     private val router = DeterministicIntentRouter()
 
+    // ── Regressões da revisão adversarial ─────────────────────────────────────
+
+    @Test
+    fun locucaoDeRadioNaoViraComando() {
+        // "de novo" estava em DETALHAR e era avaliado antes do léxico: o agente
+        // gritava um tiroteio recorrente e o app repetia a última resposta — ou
+        // dizia "Nada a repetir." — enquanto nenhum alerta saía.
+        val i = router.route("tiroteio de novo na Rui Barbosa")
+        assertTrue("veio ${i::class.simpleName}", i is Intent.AlertarOcorrencia)
+        assertEquals(Intent.Detalhar, router.route("Claryon, repetir"))
+    }
+
+    @Test
+    fun socorroNaoApagaOTipoNemOEndereco() {
+        // "socorro" na lista de emergência do roteador fazia o despacho sair com
+        // "Emergência acionada" e sem endereço — perdendo o que o léxico tinha
+        // acabado de extrair. Continua escalando prioridade, agora pelo léxico.
+        val i = router.route("tiroteio na Rui Barbosa, socorro")
+        assertTrue("veio ${i::class.simpleName}", i is Intent.AlertarOcorrencia)
+        assertEquals(Prioridade.EMERGENCIA, (i as Intent.AlertarOcorrencia).ocorrencia.prioridade)
+        // Pânico explícito sem conteúdo continua sendo emergência genérica.
+        assertEquals(Intent.Emergencia, router.route("emergência"))
+    }
+
+    @Test
+    fun oIndicativoSaiLimpoDePontuacaoEArtigo() {
+        // A RPC casa por igualdade exata. Um "?" fazia o agente ouvir "Alfa Dois?
+        // não localizado" — afirmação falsa sobre o companheiro, por um caractere.
+        // E o Whisper devolve pontuação por padrão, então é o caso normal.
+        assertEquals("Alfa Dois", (router.route("onde está Alfa Dois?") as Intent.ConsultarPosicao).indicativo)
+        assertEquals("Alfa Dois", (router.route("onde está o Alfa Dois") as Intent.ConsultarPosicao).indicativo)
+        assertEquals("Alfa Dois", (router.route("cadê a Alfa Dois!") as Intent.ConsultarPosicao).indicativo)
+    }
+
     @Test
     fun vinteFrasesOperacionais() {
         // Pedir apoio (com prioridade derivada)

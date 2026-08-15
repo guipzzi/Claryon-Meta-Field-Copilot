@@ -1,5 +1,7 @@
 package com.claryon.agent
 
+import com.claryon.common.LaconicityPolicy
+
 /**
  * Posição de um par, **como grandezas** — nunca coordenadas.
  *
@@ -14,7 +16,8 @@ package com.claryon.agent
 data class PosicaoRelativa(
     val indicativo: String,
     val distanciaM: Int,
-    val rumo: Rumo,
+    /** `null` quando não há rumo definido — os dois pontos coincidem. */
+    val rumo: Rumo?,
     val emMovimento: Boolean,
     val idadeS: Int,
 )
@@ -25,8 +28,18 @@ enum class Rumo(val falado: String) {
     SUL("sul"), SUDOESTE("sudoeste"), OESTE("oeste"), NOROESTE("noroeste");
 
     companion object {
-        /** Converte azimute em graus para o cardinal mais próximo. */
-        fun deGraus(graus: Double): Rumo {
+        /**
+         * Converte azimute em graus para o cardinal mais próximo. `null` se o
+         * azimute não existe.
+         *
+         * `NaN` devolvia **norte** — `Math.round(NaN)` é 0 — e o agente ouvia um
+         * rumo afirmado com total confiança a partir de um número inválido. E
+         * `NaN` é justamente o que o PostGIS produz quando os dois pontos
+         * coincidem: dupla na mesma viatura, a configuração mais comum do
+         * policiamento.
+         */
+        fun deGraus(graus: Double): Rumo? {
+            if (graus.isNaN() || graus.isInfinite()) return null
             val normalizado = ((graus % 360) + 360) % 360
             return entries[(Math.round(normalizado / 45.0).toInt()) % 8]
         }
@@ -64,12 +77,29 @@ object FalaDePosicao {
         if (p.idadeS > IDADE_MAXIMA_S) {
             return "${p.indicativo}, posição de ${minutos(p.idadeS)}."
         }
-        val distancia = distanciaFalada(p.distanciaM)
-        return if (p.emMovimento) {
-            "${p.indicativo}, $distancia, ${p.rumo.falado}, deslocando."
-        } else {
-            "${p.indicativo}, $distancia, ${p.rumo.falado}."
+
+        // Par praticamente no mesmo ponto — dupla na mesma viatura. Falar
+        // "a 0 metros, norte" seria ruído; e o rumo nem existe (o PostGIS devolve
+        // nulo para pontos coincidentes).
+        if (p.rumo == null || p.distanciaM < JUNTO_M) {
+            return "${p.indicativo}, com você."
         }
+
+        // Degradação por corte, do detalhe menos essencial para o mais.
+        //
+        // A frase completa cabe em 7 palavras com "Alfa Dois" e estoura com
+        // "Alfa Dois Zero" — indicativo de três palavras que existe de verdade, e
+        // que o roteador produz. Testar só com o indicativo curto fazia a regra
+        // dura passar verde e quebrar em campo.
+        val distancia = distanciaFalada(p.distanciaM)
+        val candidatas = listOfNotNull(
+            if (p.emMovimento) "${p.indicativo}, $distancia, ${p.rumo.falado}, deslocando." else null,
+            "${p.indicativo}, $distancia, ${p.rumo.falado}.",
+            // O último recurso guarda o rumo e larga a distância: saber para onde
+            // correr orienta mais que saber quantos metros são.
+            "${p.indicativo}, ${p.rumo.falado}.",
+        )
+        return candidatas.firstOrNull { LaconicityPolicy.isWithinLimit(it) } ?: candidatas.last()
     }
 
     /** Quando o par não foi encontrado: honestidade, nunca posição plausível. */
@@ -108,6 +138,12 @@ object FalaDePosicao {
      * regra é uma só, dita de duas formas.
      */
     const val IDADE_MAXIMA_S = 120
+
+    /**
+     * Abaixo disso, "distância e rumo" não é informação — é ruído. É o erro
+     * típico de um GPS de celular, e a dupla está na mesma viatura.
+     */
+    const val JUNTO_M = 25
 }
 
 /**
@@ -133,4 +169,16 @@ sealed interface BuscaDePar {
 
     /** A consulta não pôde ser feita — sem sessão, sem rede, servidor fora. */
     data object Indisponivel : BuscaDePar
+
+    /**
+     * O par foi encontrado, mas a **minha** posição publicada está velha demais
+     * para a distância significar alguma coisa.
+     *
+     * O servidor mede a partir da última posição que eu publiquei. Sem rede há
+     * meia hora, ela é de onde eu estava — e a resposta sairia afirmada como
+     * atual, com erro de quilômetros e nada no payload denunciando. Este caso
+     * existe para que a resposta seja "não sei de onde medir" em vez de um número
+     * com cara de precisão.
+     */
+    data object PosicaoPropriaVelha : BuscaDePar
 }

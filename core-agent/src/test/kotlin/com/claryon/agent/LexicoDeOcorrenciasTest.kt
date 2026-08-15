@@ -188,6 +188,64 @@ class LexicoDeOcorrenciasTest {
         assertTrue("tipos sem gatilho reconhecível: ${sem.map { it.name }}", sem.isEmpty())
     }
 
+    // ── Regressões da revisão adversarial ─────────────────────────────────────
+
+    @Test
+    fun gatilhoCasaPalavraInteira_naoPedacoDePalavra() {
+        // O defeito mais grave que a revisão encontrou. `contains` cru fazia
+        // qualquer palavra que *contivesse* um gatilho disparar alerta para a
+        // guarnição inteira, com prioridade ALTA, sem confirmação e sem desfazer.
+        // Em RS/SC a corporação se chama Brigada Militar: seria diário.
+        assertNull("obrigado -> BRIGA", classificar("obrigado"))
+        assertNull("brigada -> BRIGA", classificar("chama a brigada militar"))
+        assertNull("pegar -> RACHA", classificar("vou pegar o suspeito"))
+        assertNull("fogos -> INCENDIO", classificar("soltaram fogos na entrada"))
+        assertNull("cobranca -> ANIMAL_PERIGOSO", classificar("cobranca de pensao"))
+    }
+
+    @Test
+    fun oLogradouroSaiComAGrafiaCanonica() {
+        // `original.substring(normalizado.indexOf(...))` divergia sempre que
+        // houvesse pontuação ou espaço duplo — "Tiroteio, na Rui Barbosa"
+        // produzia o logradouro "Rui Barbos". É o endereço que o despachante lê.
+        assertEquals("Rui Barbosa", classificar("Tiroteio, na Rui Barbosa")?.logradouro)
+        assertEquals("Rui Barbosa", classificar("Tiroteio!!  na Rui Barbosa agora")?.logradouro)
+        assertEquals("Rui Barbosa", classificar("  Tiroteio   na Rui Barbosa")?.logradouro)
+        assertEquals("Praça Cívica", classificar("briga na Praça Cívica")?.logradouro)
+    }
+
+    @Test
+    fun aEscaladaEntendePluralEFeminino() {
+        // A régua tem de valer para como a pessoa fala, não para a forma de
+        // dicionário: "policial baleado" escalava, "dois policiais baleados" não.
+        val e = { f: String -> LexicoDeOcorrencias.escalarPrioridade(Prioridade.NORMAL, f) }
+        assertEquals(Prioridade.EMERGENCIA, e("apoio, tem gente armada"))
+        assertEquals(Prioridade.EMERGENCIA, e("apoio urgente, dois baleados na praca"))
+        assertEquals(Prioridade.EMERGENCIA, e("briga com duas feridas"))
+        assertEquals(Prioridade.EMERGENCIA, e("tem criancas no local"))
+    }
+
+    @Test
+    fun aNegacaoOlhaSoAsDuasPalavrasAnteriores() {
+        // A janela de 20 caracteres com `contains` deixava qualquer "sem" negar o
+        // que viesse depois, mesmo de outra oração.
+        assertEquals(
+            Prioridade.EMERGENCIA,
+            classificar("roubo, o assaltante estava sem capacete, vitima ferida")?.prioridade,
+        )
+        // E o caso que a negação existe para proteger continua valendo.
+        assertEquals(Prioridade.NORMAL, classificar("acidente sem vitima")?.prioridade)
+    }
+
+    @Test
+    fun policialSozinhoNaoEscala() {
+        // "chama outro policial" não é emergência. O que escala é o que
+        // aconteceu com ele.
+        val e = { f: String -> LexicoDeOcorrencias.escalarPrioridade(Prioridade.NORMAL, f) }
+        assertEquals(Prioridade.NORMAL, e("manda outro policial"))
+        assertEquals(Prioridade.EMERGENCIA, e("policial baleado"))
+    }
+
     @Test
     fun oLexicoCobreQuarentaTipos() {
         // O aditivo dimensionou ~40 tipos como cobertura da maioria dos casos.
