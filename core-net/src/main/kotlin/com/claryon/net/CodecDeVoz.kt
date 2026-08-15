@@ -36,8 +36,19 @@ data class ConfigOpus(
  */
 interface CodecDeVoz {
 
-    /** Codifica um quadro PCM 16-bit mono. Tamanho do quadro fixado em [ConfigOpus]. */
-    suspend fun codificar(pcm: ShortArray): Result<ByteArray>
+    /**
+     * Codifica um quadro PCM 16-bit mono e devolve **zero ou mais** pacotes.
+     *
+     * A lista não é generalidade gratuita: o codificador é um **pipeline**, não
+     * uma função. Ele consome alguns quadros antes de emitir o primeiro pacote
+     * (aquecimento) e depois pode emitir mais de um numa mesma chamada. Um
+     * contrato de 1-entra-1-sai obrigaria a inventar um pacote vazio no
+     * aquecimento — que a camada de perda interpretaria como quadro perdido.
+     *
+     * Como efeito colateral útil, este formato acomoda o agrupamento de quadros
+     * (3 × 20 ms numa mensagem) sem mudar a assinatura de novo.
+     */
+    suspend fun codificar(pcm: ShortArray): Result<List<ByteArray>>
 
     /**
      * Decodifica um quadro.
@@ -47,6 +58,23 @@ interface CodecDeVoz {
      *   perdido em voz levemente degradada em vez de um corte seco.
      */
     suspend fun decodificar(payload: ByteArray?): Result<ShortArray>
+
+    /**
+     * Taxa em que o decodificador **devolve** PCM, que **não** é a taxa de
+     * entrada.
+     *
+     * Medido no emulador: entram 160 amostras a 8 kHz por quadro de 20 ms e saem
+     * **480** — ou seja, 24 kHz. O Opus trabalha internamente a 48 kHz e o
+     * decodificador do Android reamostra na saída.
+     *
+     * Existe no contrato porque o receptor **não pode adivinhar**: configurar o
+     * `AudioTrack` com a taxa de entrada faria a voz sair três vezes mais grave e
+     * três vezes mais lenta — um defeito que soa como problema de microfone, não
+     * de configuração, e que mandaria a equipe procurar no lugar errado.
+     *
+     * `0` enquanto nada foi decodificado ainda.
+     */
+    val taxaDeSaidaHz: Int
 
     fun liberar()
 }

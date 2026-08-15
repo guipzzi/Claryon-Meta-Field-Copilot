@@ -75,6 +75,7 @@ dependencies {
     implementation(project(":core-sound"))
     implementation(project(":core-evidence"))
     implementation(project(":core-sync"))
+    implementation(project(":core-net"))
 
     // sherpa-onnx (Piper TTS): o app empacota as .so + classes; core-voice usa compileOnly.
     implementation(":sherpa-onnx-1.13.5@aar")

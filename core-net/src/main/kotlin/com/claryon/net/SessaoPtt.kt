@@ -129,8 +129,7 @@ class SessaoPtt(
         try {
             // 1) Pré-roll: a fala que começou antes do dedo chegar ao botão.
             for (quadro in fatiar(preRoll.desdeOInicioDaFala())) {
-                if (!enviar(transmissaoId, sequencia, quadro)) naoEntregues++
-                sequencia++
+                naoEntregues += enviar(transmissaoId, { sequencia++ }, quadro)
             }
             preRoll.limpar()
 
@@ -150,8 +149,7 @@ class SessaoPtt(
                 }
 
                 for (quadro in fatiar(bloco)) {
-                    if (!enviar(transmissaoId, sequencia, quadro)) naoEntregues++
-                    sequencia++
+                    naoEntregues += enviar(transmissaoId, { sequencia++ }, quadro)
                 }
             }
         } catch (e: LimiteDeDuracaoAtingido) {
@@ -195,14 +193,26 @@ class SessaoPtt(
         return saida
     }
 
-    /** `false` se o quadro não foi entregue. **Nunca lança** — a captura segue. */
-    private suspend fun enviar(transmissaoId: String, sequencia: Int, pcm: ShortArray): Boolean {
-        val payload = when (val c = codec.codificar(pcm)) {
+    /**
+     * Codifica e envia. Devolve quantos pacotes **não** foram entregues.
+     *
+     * O codificador é um pipeline: um quadro de entrada pode render zero pacotes
+     * (aquecimento) ou mais de um. Por isso a sequência avança por **pacote
+     * enviado**, não por quadro capturado — numerar por quadro deixaria buracos
+     * na sequência, e o receptor os interpretaria como perda, disparando PLC
+     * sobre áudio que nunca existiu.
+     */
+    private suspend fun enviar(transmissaoId: String, sequencia: () -> Int, pcm: ShortArray): Int {
+        val pacotes = when (val c = codec.codificar(pcm)) {
             is Result.Success -> c.value
-            is Result.Failure -> return false
+            is Result.Failure -> return 0
         }
-        val quadro = QuadroAudio(transmissaoId, sequencia, agoraMs(), payload)
-        return transporte.enviar(quadro) is Result.Success
+        var naoEntregues = 0
+        for (payload in pacotes) {
+            val quadro = QuadroAudio(transmissaoId, sequencia(), agoraMs(), payload)
+            if (transporte.enviar(quadro) !is Result.Success) naoEntregues++
+        }
+        return naoEntregues
     }
 
     /** Último quadro, fim de transmissão e devolução do canal. Nunca lança. */

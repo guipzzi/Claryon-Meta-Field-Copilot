@@ -29,13 +29,14 @@ class SessaoPttTest {
     // ── Dublês ────────────────────────────────────────────────────────────────
 
     private class CodecFake(var falhar: Boolean = false) : CodecDeVoz {
-        override suspend fun codificar(pcm: ShortArray): Result<ByteArray> =
+        override suspend fun codificar(pcm: ShortArray): Result<List<ByteArray>> =
             if (falhar) Result.failure(ClaryonError.Unexpected("codec", "falha simulada"))
-            else Result.success(ByteArray(pcm.size / 8) { 1 })
+            else Result.success(listOf(ByteArray(pcm.size / 8) { 1 }))
 
         override suspend fun decodificar(payload: ByteArray?): Result<ShortArray> =
             Result.success(ShortArray(160))
 
+        override val taxaDeSaidaHz = 24_000
         override fun liberar() = Unit
     }
 

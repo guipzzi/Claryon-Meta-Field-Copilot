@@ -506,3 +506,55 @@ Ordem cronológica inversa (mais recente no topo).
   `supabase_read_only_user` e o Postgres recusa DDL), não é convenção do cliente.
   Armadilha registrada: o Cloudflare à frente da API recusa o User-Agent padrão do `urllib`
   com `error code: 1010` — que parece erro de credencial e não é. Identificar-se resolve.
+
+## Fase 2 fechada — codec, receptor e a ligação com o produto (2026-08-14)
+
+- **⚠️ MEDIDO: o decodificador Opus devolve a 24 kHz, não a 8 kHz.** Entram 160 amostras
+  por quadro de 20 ms e saem **480**. O Opus trabalha internamente a 48 kHz e o decodificador
+  do Android reamostra na saída. Se o receptor tivesse assumido a taxa de entrada, a voz
+  sairia **três vezes mais grave e três vezes mais lenta** — defeito que soa como problema de
+  microfone e manda procurar no lugar errado. `CodecDeVoz.taxaDeSaidaHz` passa a ser contrato,
+  descoberto pela contagem de amostras do primeiro quadro, com teste de regressão.
+
+- **`codificar` devolve zero ou mais pacotes, não um.**
+  O `MediaCodec` é um **pipeline**, não uma função: consome quadros antes de emitir o
+  primeiro pacote (medido: o 1º sai no quadro 1) e pode emitir mais de um por chamada. Um
+  contrato de 1-entra-1-sai obrigaria a inventar um pacote vazio no aquecimento — que a
+  camada de perda interpretaria como quadro perdido, disparando PLC sobre áudio inexistente.
+  Efeito colateral útil: acomoda o agrupamento de 3 quadros sem mudar a assinatura.
+  A sequência avança por **pacote enviado**, não por quadro capturado, senão a numeração
+  ficaria com buracos que o receptor leria como perda.
+
+- **PLC caseiro, com limitação declarada.** `MediaCodec` não expõe o PLC do Opus. Repetimos o
+  último quadro com atenuação de 40%, que desvanece em perdas seguidas (medido: rms 8002 →
+  79 na décima). Pior que o PLC real, muito melhor que silêncio — que soa como corte. Se
+  incomodar em campo, o caminho é libopus via NDK, onde `opus_decode(dec, NULL, ...)` faz o
+  PLC de verdade; a toolchain já existe.
+
+- **Controle de piso como função do Postgres, não Edge Function.**
+  A concessão precisa ser **atômica**: dois agentes que apertam no mesmo instante não podem
+  ambos receber o canal, e "ler, decidir, escrever" numa função serverless abre exatamente
+  essa janela. `for update` + `on conflict` fecham no banco. A identidade **não é parâmetro**
+  — sai de `current_agent_id()`; se viesse por argumento, qualquer cliente pediria o canal em
+  nome de outro e o piso viraria negação de serviço contra a guarnição.
+  Verificado contra o banco real: 13 de 13.
+
+- **O laço de reprodução do receptor encerra sozinho depois de 2 s sem nada a tocar.**
+  Mudança motivada por teste: o laço infinito era impossível de verificar em tempo virtual.
+  Mas o desenho novo é melhor **no produto**, não só no teste — girar 50 acordadas por
+  segundo enquanto ninguém fala é desperdício de bateria num aparelho que precisa durar o
+  turno, e silêncio é o estado normal de um rádio. Também resolve o emissor que some no meio
+  sem enviar o quadro final.
+
+- **`core-net` ligado ao produto por `RadioTatico`.**
+  Até aqui o rádio existia testado e desligado — o mesmo padrão que a Fase 1 corrigiu no
+  executor, uma camada acima. O orquestrador amarra pré-roll, supressor, gatilho, sessão,
+  codec, transporte e receptor, e o que ele de fato resolve é a **coordenação entre entrada e
+  saída de áudio no mesmo aparelho**: toda reprodução abre janela no supressor, o pré-roll só
+  é alimentado fora dessas janelas, e a captura descarta o que cair dentro delas.
+
+- **Armadilhas de harness registradas** (custaram tempo e voltariam a custar):
+  corpo de teste que termina em `Log.i` devolve `Int` e o JUnit recusa com
+  `initializationError`, sem dizer qual método; e corrotinas do `backgroundScope` **não** são
+  acordadas por `advanceUntilIdle()` nesta versão — medido, `subscriptionCount` ficava em
+  zero. O escopo do receptor nos testes é filho do agendador, não do teste.
