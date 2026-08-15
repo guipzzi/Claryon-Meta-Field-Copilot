@@ -91,6 +91,34 @@ class RadioTatico(
     /** `true` enquanto o agente segura o PTT. */
     val transmitindo: Boolean get() = gatilho.transmitindo
 
+    /**
+     * Amplitude do último quadro capturado, de 0 a 1. Alimenta a forma de onda da
+     * barra de PTT.
+     *
+     * É medida do PCM **real**, e não uma animação: o agente lê movimento na tela
+     * como "está me captando". Uma senoide decorativa mentiria exatamente na
+     * situação em que a verdade importa — microfone mudo, rota caída, mão sobre o
+     * aparelho. Aqui, tela parada significa microfone parado.
+     */
+    @Volatile
+    var amplitudeAtual: Float = 0f
+        private set
+
+    private fun medirAmplitude(quadro: ShortArray) {
+        if (quadro.isEmpty()) return
+        // Pico e não RMS: a forma de onda precisa reagir ao ataque da sílaba, e o
+        // RMS de uma janela de 20 ms achata justamente isso.
+        var pico = 0
+        for (amostra in quadro) {
+            val abs = if (amostra < 0) -amostra.toInt() else amostra.toInt()
+            if (abs > pico) pico = abs
+        }
+        val bruta = pico / 32_767f
+        // Suavização assimétrica: sobe rápido, desce devagar. Sem isso a barra
+        // pisca entre sílabas e parece falha de captura.
+        amplitudeAtual = if (bruta > amplitudeAtual) bruta else amplitudeAtual * 0.82f
+    }
+
     // ── Modo Ativo ────────────────────────────────────────────────────────────
 
     /**
@@ -107,6 +135,7 @@ class RadioTatico(
             pcmDoMicrofone(rota)
                 // Descarta o que foi capturado enquanto NÓS emitíamos som.
                 .filter { !supressor.suprimido(agoraMs()) }
+                .onEach { quadro -> medirAmplitude(quadro) }
                 .onEach { supressor.podarAntesDe(agoraMs()) }
                 .collect { bloco -> preRoll.escrever(bloco) }
         }

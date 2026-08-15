@@ -859,3 +859,56 @@ defeito. O resultado justificou a varredura — e incluiu reincidência minha.
 
 - **`emitindoAgora` removido.** Alias puro de `suprimido`, sem chamador. Duas portas para a
   mesma sala fazem quem lê procurar a diferença que não existe.
+
+## App principal e o rádio ligado na tomada (2026-08-15)
+
+### O rádio deixou de ser código morto
+
+`RadioTatico` passou a ser instanciado por `RadioViewModel`, e a captura foi verificada no
+emulador: o indicador de microfone do próprio Android acende ao abrir a guarnição — o
+pré-roll está rodando. Três invariantes sustentadas na ligação:
+
+- **A rota de áudio é pré-condição de tipo.** `entrarEmModoAtivo(rota)` só aceita um
+  `GlassesAudioRoute`, e a única forma de obter um é rotear de fato. Não existe caminho que
+  suba o rádio capturando pelo microfone do celular.
+- **O botão não espera a rede.** `aoPressionar` chama e volta; concessão de canal e socket
+  correm em paralelo.
+- **A amplitude da forma de onda é medida do PCM real**, com pico (não RMS, que achata o
+  ataque da sílaba) e suavização assimétrica. Uma senoide decorativa mentiria exatamente
+  quando a verdade importa: microfone mudo, rota caída, mão sobre o aparelho.
+
+### Design: painel de instrumento, não aplicativo escuro
+
+- **Âmbar `#FF6B35` tem um significado só: no ar.** Não marca botão primário, não pinta
+  ícone selecionado, não destaca nada. No instante em que âmbar significa duas coisas, deixa
+  de significar qualquer uma — e a coisa que ele significa é "sua voz está indo para a
+  guarnição inteira".
+- **A moldura de 2 px na tela toda enquanto transmite**, por cima de qualquer aba. Uma
+  transmissão acidental difunde a fala do agente *e de quem está ao lado*; um ícone de 24 dp
+  não é aviso proporcional a isso.
+- **Monoespaçada para indicativo, horário, canal, distância e rumo.** Não é estilo: é o
+  vernáculo do rádio, e é a mesma razão pela qual o produto fala dígito a dígito.
+- **Fundo `#0A0C0F`, com viés azul-ardósia em vez de preto puro.** O agente olha esta tela no
+  escuro da viatura, com a pupila dilatada; preto absoluto contra texto branco é contraste
+  agressivo. E tema claro não existe — visão noturna queimada custa minutos.
+- **Nenhum ripple.** `clickable` padrão lê `LocalIndication`, e o Material 2 entra por
+  dependência transitiva fornecendo um `PlatformRipple` que o Foundation atual **recusa** — o
+  app morria na primeira composição com botão. `indication = null` conserta o crash e o
+  desenho de uma vez: onda circular é gramática do Material, e este painel é feito de fios.
+- **Navegação por rótulo, sem ícone.** Ícone de "guarnição" é metáfora a aprender; a palavra
+  já está no vocabulário do agente.
+
+### A tela de perfil é relatório de prontidão, não configurações
+
+Quase não há o que configurar, de propósito: cada interruptor é uma forma de o produto se
+comportar de um jeito que o agente não previu. A tela responde uma pergunta — *dá para
+confiar nisto hoje?* — e cada capacidade morta traz a causa junto, no vocabulário dele.
+Verificado na tela: "Registro em UNAVAILABLE" vazava identificador de plataforma e foi
+trocado por "Os óculos não estão pareados. Conecte pelo app Meta AI."
+
+### Transcrever a guarnição não é transcrever terceiros
+
+A proibição do projeto vale para a fala de **terceiros** — o abordado, o transeunte. O
+histórico do grupo é tráfego de rádio entre agentes que apertaram um botão para transmitir a
+colegas, no exercício da função. A distinção é de consentimento e de papel, e está escrita
+onde o dado é definido (`FalaNoGrupo`).

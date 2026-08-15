@@ -4,85 +4,81 @@ import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.claryon.field.permissoes.PermissoesEssenciais
-import com.claryon.field.ui.DiagnosticsScreen
+import com.claryon.field.radio.RadioViewModel
+import com.claryon.field.ui.CascoTatico
+import com.claryon.field.ui.Destino
 import com.claryon.field.ui.DiagnosticsViewModel
-import com.claryon.field.ui.TelaDeLogin
-import com.claryon.field.ui.TelaDePermissoes
-import com.claryon.field.ui.TelaDoMapa
+import com.claryon.field.ui.telas.Capacidade
+import com.claryon.field.ui.telas.TelaDeGuarnicao
+import com.claryon.field.ui.telas.TelaDeLogin
+import com.claryon.field.ui.telas.TelaDePerfil
+import com.claryon.field.ui.telas.TelaDePermissoes
+import com.claryon.field.ui.telas.TelaDoMapa
+import com.claryon.field.ui.tema.TemaClaryon
 
 /**
- * Ponto de entrada do app.
+ * Ponto de entrada.
  *
- * A tela existe apenas para onboarding, diagnóstico e demonstração à banca — a
- * saída rica ao usuário final é sempre áudio. O DAT já foi inicializado na
- * [ClaryonApp].
- *
- * A abertura é uma sequência de portões, e nenhum deles é intransponível exceto
- * o primeiro: **permissões → sessão → painel**. Cada portão pode ser pulado, e
- * pular custa capacidades que o app diz em voz alta quando forem pedidas —
- * jamais um comando que simplesmente não faz nada.
+ * A abertura é uma sequência de portões, e nenhum é intransponível exceto o
+ * primeiro: **permissões → sessão → operação**. Pular custa capacidades, e o app
+ * diz quais, em voz alta, quando forem pedidas — nunca um comando que
+ * simplesmente não faz nada.
  */
 class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Borda a borda: a moldura de "no ar" precisa alcançar as bordas físicas
+        // da tela para ser o aviso que ela promete ser.
+        enableEdgeToEdge()
+
         setContent {
-            val vm: DiagnosticsViewModel = viewModel()
+            TemaClaryon {
+                val diag: DiagnosticsViewModel = viewModel()
+                val radio: RadioViewModel = viewModel()
 
-            // `tudoConcedido`, não `podeOperar`.
-            //
-            // A versão anterior usava `podeOperar` — que só olha a bloqueante — e
-            // criava um beco sem saída: o agente concedia o microfone, negava a
-            // localização, tocava "seguir assim mesmo", e **da segunda abertura em
-            // diante o app ia direto ao painel**. Localização, câmera e Bluetooth
-            // nunca mais eram pedidos, e C2, C3 e o mapa ficavam mortos em
-            // silêncio para sempre.
-            //
-            // Agora a tela reaparece a cada abertura enquanto faltar alguma, e
-            // "seguir assim mesmo" vale só para esta sessão. Um toque a mais por
-            // turno é barato; uma capacidade morta em definitivo não é.
-            var mostrarPermissoes by remember { mutableStateOf(!tudoConcedido()) }
-            var mostrarLogin by remember { mutableStateOf(true) }
-            var mostrarMapa by remember { mutableStateOf(false) }
+                // `tudoConcedido`, não `podeOperar`: com `podeOperar` o agente que
+                // concedesse o microfone e negasse a localização ia direto à
+                // operação da segunda abertura em diante, e mapa, alerta com
+                // coordenada e consulta de posição ficavam mortos em silêncio.
+                var mostrarPermissoes by remember { mutableStateOf(!tudoConcedido()) }
+                var mostrarLogin by remember { mutableStateOf(true) }
+                var destino by remember { mutableStateOf(Destino.GUARNICAO) }
 
-            MaterialTheme {
-                Surface {
-                    when {
-                        mostrarPermissoes ->
-                            TelaDePermissoes(aoConcluir = { mostrarPermissoes = false })
+                when {
+                    mostrarPermissoes ->
+                        TelaDePermissoes(aoConcluir = { mostrarPermissoes = false })
 
-                        // Já autenticado num turno anterior: a sessão está no cofre
-                        // cifrado e o login não reaparece.
-                        mostrarLogin && !vm.autenticacao.autenticado() -> TelaDeLogin(
-                            auth = vm.autenticacao,
-                            configurado = vm.redeConfigurada,
-                            aoEntrar = { mostrarLogin = false },
-                            aoSeguirSemRede = { mostrarLogin = false },
-                        )
+                    mostrarLogin && !diag.autenticacao.autenticado() -> TelaDeLogin(
+                        auth = diag.autenticacao,
+                        configurado = diag.redeConfigurada,
+                        aoEntrar = { mostrarLogin = false },
+                        aoSeguirSemRede = { mostrarLogin = false },
+                    )
 
-                        mostrarMapa -> {
-                            val estado by vm.estadoDoMapa.collectAsState()
-                            TelaDoMapa(
-                                estado = estado,
-                                // Esses dois lambdas são a regra de bateria: a
-                                // assinatura do canal de posições nasce e morre
-                                // com esta tela, nunca com o app.
-                                aoAbrir = vm::abrirMapa,
-                                aoFechar = vm::fecharMapa,
-                            )
-                        }
-
-                        else -> DiagnosticsScreen(aoAbrirMapa = { mostrarMapa = true })
-                    }
+                    else -> Operacao(
+                        diag = diag,
+                        radio = radio,
+                        destino = destino,
+                        aoNavegar = { destino = it },
+                        aoEncerrarTurno = {
+                            radio.fechar()
+                            diag.autenticacao.sair()
+                            mostrarLogin = true
+                        },
+                    )
                 }
             }
         }
@@ -95,3 +91,112 @@ class MainActivity : ComponentActivity() {
             .toSet(),
     ).tudoConcedido
 }
+
+/**
+ * O aplicativo em operação.
+ *
+ * O rádio abre junto com esta composição e fecha quando ela sai — **não** com a
+ * aba da guarnição. Fechar o rádio ao trocar de aba faria o agente perder
+ * transmissões enquanto olha o mapa, que é exatamente quando ele mais precisa
+ * ouvir a guarnição.
+ */
+@Composable
+private fun Operacao(
+    diag: DiagnosticsViewModel,
+    radio: RadioViewModel,
+    destino: Destino,
+    aoNavegar: (Destino) -> Unit,
+    aoEncerrarTurno: () -> Unit,
+) {
+    val estadoPtt by radio.estado.collectAsState()
+    val falas by radio.falas.collectAsState()
+    val pares by radio.pares.collectAsState()
+    val noAr by radio.noAr.collectAsState()
+    val estadoMapa by diag.estadoDoMapa.collectAsState()
+    val registro by diag.registration.collectAsState()
+
+    LaunchedEffect(Unit) { diag.anunciarEstadoDegradado() }
+
+    DisposableEffect(Unit) {
+        radio.abrir(canal = CANAL_DEMO, agenteId = AGENTE_DEMO, indicativo = INDICATIVO_DEMO)
+        onDispose { radio.fechar() }
+    }
+
+    CascoTatico(destino = destino, aoNavegar = aoNavegar, noAr = noAr) { modifier ->
+        when (destino) {
+            Destino.GUARNICAO -> TelaDeGuarnicao(
+                canal = CANAL_DEMO,
+                pares = pares,
+                falas = falas,
+                estadoDoPtt = estadoPtt,
+                aoPressionarPtt = radio::aoPressionar,
+                aoSoltarPtt = radio::aoSoltar,
+                modifier = modifier,
+            )
+
+            Destino.MAPA -> TelaDoMapa(
+                estado = estadoMapa,
+                aoAbrir = diag::abrirMapa,
+                aoFechar = diag::fecharMapa,
+                modifier = modifier,
+            )
+
+            Destino.PERFIL -> TelaDePerfil(
+                indicativo = INDICATIVO_DEMO,
+                matricula = AGENTE_DEMO,
+                unidade = "GTA-3",
+                canal = CANAL_DEMO,
+                capacidades = capacidadesDe(estadoPtt, registro.name, estadoMapa.assinado),
+                aoSair = aoEncerrarTurno,
+                modifier = modifier,
+            )
+        }
+    }
+}
+
+/**
+ * Traduz o estado real dos subsistemas em prontidão legível.
+ *
+ * Cada capacidade morta traz **a causa** junto. Saber que algo não funciona sem
+ * saber por quê é pior que não saber: o agente tenta de novo, no meio da rua, em
+ * vez de trocar de plano.
+ */
+private fun capacidadesDe(
+    ptt: com.claryon.field.ui.componentes.EstadoDoPtt,
+    registro: String,
+    mapaAssinado: Boolean,
+): List<Capacidade> {
+    val pttVivo = ptt !is com.claryon.field.ui.componentes.EstadoDoPtt.Indisponivel
+    return listOf(
+        Capacidade(
+            nome = "Rádio tático",
+            viva = pttVivo,
+            motivo = (ptt as? com.claryon.field.ui.componentes.EstadoDoPtt.Indisponivel)?.motivo,
+        ),
+        Capacidade(
+            nome = "Óculos conectados",
+            viva = registro == "REGISTERED",
+            // Sem identificador de plataforma no texto. "Registro em UNAVAILABLE"
+            // é linguagem do SDK; o agente precisa saber o que fazer, e o que
+            // fazer depende de qual dos estados é.
+            motivo = when (registro) {
+                "UNAVAILABLE" -> "Os óculos não estão pareados. Conecte pelo app Meta AI."
+                "UNKNOWN" -> "Ainda verificando os óculos."
+                else -> "Os óculos não responderam. Verifique se estão ligados."
+            },
+        ),
+        Capacidade(
+            nome = "Mapa da guarnição",
+            viva = mapaAssinado,
+            motivo = "Recepção de posições dos pares ainda não disponível no transporte.",
+        ),
+    )
+}
+
+/**
+ * Identidade de demonstração. No produto vem do cadastro junto da sessão — o
+ * servidor já impõe o vínculo por RLS, e o `agent_id` das RPCs sai do JWT.
+ */
+private const val CANAL_DEMO = "demo"
+private const val AGENTE_DEMO = "007"
+private const val INDICATIVO_DEMO = "Alfa Um"
