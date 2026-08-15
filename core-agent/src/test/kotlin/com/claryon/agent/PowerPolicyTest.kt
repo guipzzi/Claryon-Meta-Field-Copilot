@@ -33,18 +33,38 @@ class PowerPolicyTest {
 
     @Test
     fun tiposDeServico_declaramExatamenteOQueOModoUsa() {
+        // LOCATION está em **todos** os modos, Standby incluso: o que muda com o
+        // modo é a cadência e o provedor, não a existência da coleta. Um agente
+        // que some do mapa em pausa parece em perigo.
         assertEquals(
-            setOf(TipoServico.CONNECTED_DEVICE),
+            setOf(TipoServico.CONNECTED_DEVICE, TipoServico.LOCATION),
             PowerPolicy.tiposDeServico(ModoOperacao.STANDBY),
         )
         assertEquals(
-            setOf(TipoServico.CONNECTED_DEVICE, TipoServico.MICROPHONE),
+            setOf(TipoServico.CONNECTED_DEVICE, TipoServico.LOCATION, TipoServico.MICROPHONE),
             PowerPolicy.tiposDeServico(ModoOperacao.ATIVO),
         )
         assertEquals(
-            setOf(TipoServico.CONNECTED_DEVICE, TipoServico.MICROPHONE, TipoServico.CAMERA),
+            setOf(
+                TipoServico.CONNECTED_DEVICE,
+                TipoServico.LOCATION,
+                TipoServico.MICROPHONE,
+                TipoServico.CAMERA,
+            ),
             PowerPolicy.tiposDeServico(ModoOperacao.OCORRENCIA),
         )
+    }
+
+    @Test
+    fun aColetaDePosicaoNuncaDesliga() {
+        // Regra de segurança antes de ser de energia, e por isso vale para os três
+        // modos: a economia vem da cadência, não de desligar.
+        for (modo in ModoOperacao.entries) {
+            assertTrue(
+                "$modo deixou de declarar LOCATION",
+                TipoServico.LOCATION in PowerPolicy.tiposDeServico(modo),
+            )
+        }
     }
 }
 
