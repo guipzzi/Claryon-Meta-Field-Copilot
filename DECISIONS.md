@@ -791,3 +791,36 @@ assinatura Android: `MockDeviceKitConfig(initiallyRegistered, initialPermissions
   parece fixado no pareamento, e reparear exige `disable()/enable()` — que aborta o processo.
 - **Um método por processo.** Testes que abrem stream passam isolados e devolvem zero frames
   em lote: o singleton do MDK não volta ao estado limpo. `scripts/caos_mdk.sh` roda assim.
+
+### Revisão da própria correção (2026-08-15)
+
+Reler a correção do MDK depois de escrita rendeu quatro defeitos, e o pior nasceu
+**dentro dela**:
+
+- **⚠️ Corrida de ordem introduzida pela correção.** `startSession` fazia
+  `observeSession(created)` e só então `_session.value = STARTING`. Era inofensivo enquanto a
+  função devolvia na hora; virou corrida no instante em que passou a esperar `STARTED`: se o
+  coletor emitisse `STARTED` antes da atribuição, o bom estado era sobrescrito por `STARTING`,
+  o `first { }` esperava os 12 s inteiros, e uma sessão **funcionando** era derrubada por
+  `cleanupSession()`. Uma correção de honestidade que criava uma falha inventada.
+
+- **`cleanupSession` não parava a sessão no SDK.** Só limpava referências. Enquanto era
+  chamado apenas na transição para `STOPPED`, tudo bem — a sessão já tinha caído. Ao passar a
+  ser chamado no estouro de prazo, virou vazamento: sessão viva dentro do SDK, óculos
+  transmitindo por Bluetooth sem indicador, e o `createSession` seguinte encontrando a
+  anterior ativa. Agora chama `stop()` antes de soltar.
+
+- **O vigia de primeiro frame vazava.** `comVigia.cancel()` estava só no caminho feliz; com
+  `block` lançando, a corrotina sobrevivia até o prazo e chamava `camera.stop()` sobre uma
+  câmera já parada. Foi para o `finally`.
+
+- **⚠️ `startRegistration` nunca era chamado por ninguém.** O método existia em
+  `DatGlassesFacade`, documentado, junto de `ensureRegistered` — e nenhum dos dois tinha
+  chamador. O app media `RegistrationStatus.UNAVAILABLE` e não fazia nada. Como foi medido que
+  **parear um aparelho não restaura o registro**, o agente ficaria com um app que não conecta
+  e nenhuma pista do porquê. O painel ganhou "Conectar aos óculos" quando o estado não é
+  `REGISTERED`, e a perda passou a ser anunciada em voz alta.
+
+- **Asserção fraca em `tresAparelhosPareados`.** Verificava só que a sessão saía do limbo — o
+  que passaria igual se o app tivesse aberto três. Agora afirma `Result.Success`, estado
+  `STARTED`, e que a segunda chamada reaproveita em vez de empilhar.

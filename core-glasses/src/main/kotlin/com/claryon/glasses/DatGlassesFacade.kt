@@ -95,19 +95,6 @@ class DatGlassesFacade(private val scope: CoroutineScope) : GlassesFacade {
     /** `capturePhoto()` é uma por vez (regra do DAT). */
     private val capturaEmCurso = java.util.concurrent.atomic.AtomicBoolean(false)
 
-    /**
-     * Teto para a sessão subir. Generoso porque envolve Bluetooth Classic e o
-     * pareamento pode estar frio; curto o bastante para não travar o ciclo de voz
-     * além do que um agente tolera esperando em silêncio.
-     */
-    private val PRAZO_DE_SESSAO_MS = 12_000L
-
-    /**
-     * Teto para o **primeiro** frame. Curto: a leitura de placa acontece com o
-     * agente parado na frente do veículo, e uma consulta que demora mais que isso
-     * já perdeu o momento. Frames seguintes não têm prazo — quem consome decide.
-     */
-    private val PRAZO_PRIMEIRO_FRAME_MS = 6_000L
 
     // ── Registro ────────────────────────────────────────────────────────────
 
@@ -159,8 +146,15 @@ class DatGlassesFacade(private val scope: CoroutineScope) : GlassesFacade {
         Wearables.createSession(deviceSelector)
             .onSuccess { created ->
                 activeSession = created
-                observeSession(created) // assinar ANTES de start(), para não perder transições
+                // STARTING **antes** de observar. A ordem inversa era inofensiva
+                // enquanto `startSession` devolvia na hora; virou corrida no
+                // momento em que passou a esperar `STARTED`: se o coletor
+                // emitisse `STARTED` antes desta linha, a atribuição a
+                // `STARTING` sobrescreveria o estado bom, o `first { }` esperaria
+                // os 12 s inteiros e a sessão **funcionando** seria derrubada por
+                // `cleanupSession()`. Defeito nascido dentro da própria correção.
                 _session.value = SessionStatus.STARTING
+                observeSession(created) // assinar ANTES de start(), para não perder transições
                 created.start() // retorna Unit; o estado real chega por session.state
                 deferred.complete(Result.success(Unit))
             }
@@ -332,13 +326,16 @@ class DatGlassesFacade(private val scope: CoroutineScope) : GlassesFacade {
         // significa sucesso. Num produto cuja única saída é áudio, o sintoma é
         // silêncio, e silêncio é indistinguível de aplicativo morto.
         val primeiroFrame = CompletableDeferred<Unit>()
-        return try {
-            val comVigia = scope.launch {
-                if (withTimeoutOrNull(PRAZO_PRIMEIRO_FRAME_MS) { primeiroFrame.await() } == null) {
-                    Log.w(TAG, "nenhum frame em ${PRAZO_PRIMEIRO_FRAME_MS}ms — abortando o stream")
-                    camera.stop()
-                }
+        val comVigia = scope.launch {
+            if (withTimeoutOrNull(PRAZO_PRIMEIRO_FRAME_MS) { primeiroFrame.await() } == null) {
+                Log.w(TAG, "nenhum frame em ${PRAZO_PRIMEIRO_FRAME_MS}ms — abortando o stream")
+                // Parar a câmera desfaz o fluxo e faz `block` retornar, em vez de
+                // deixar o consumidor suspenso para sempre.
+                camera.stop()
             }
+        }
+
+        return try {
             // `conflate`: um frame por vez, descartando os do meio enquanto a
             // inferência do consumidor roda. Sem isso, todos os frames entram
             // numa fila que só cresce e a latência da inferência vira atraso
@@ -349,7 +346,6 @@ class DatGlassesFacade(private val scope: CoroutineScope) : GlassesFacade {
                     .map { it.toFrame() }
                     .conflate(),
             )
-            comVigia.cancel()
             if (primeiroFrame.isCompleted) {
                 Result.success(Unit)
             } else {
@@ -358,6 +354,10 @@ class DatGlassesFacade(private val scope: CoroutineScope) : GlassesFacade {
                 )
             }
         } finally {
+            // Cancelar o vigia AQUI, não no caminho feliz: se `block` lançar, a
+            // corrotina sobreviveria até o prazo e chamaria `camera.stop()` sobre
+            // uma câmera já parada. Uma corrotina órfã por chamada que falha.
+            comVigia.cancel()
             camera.stop()
             // Soltar as referências aqui também: esperar só pelo CLOSED deixaria
             // activeStream apontando para um stream morto se o evento não vier.
@@ -404,14 +404,42 @@ class DatGlassesFacade(private val scope: CoroutineScope) : GlassesFacade {
         _stream.value = StreamStatus.STOPPED
     }
 
+    /**
+     * Solta as referências **e para a sessão no SDK**.
+     *
+     * Antes só limpava as referências locais. Quando isto passou a ser chamado no
+     * estouro de prazo de [startSession], virou vazamento de verdade: a sessão
+     * continuava viva dentro do SDK, os óculos seguiam transmitindo por Bluetooth
+     * sem nenhum indicador, e o `createSession` seguinte encontrava a anterior
+     * ativa — exatamente o que o comentário de [stopSession] adverte.
+     *
+     * `stop()` é idempotente o bastante para ser chamado sobre uma sessão que já
+     * caiu; a alternativa (só limpar) deixa lixo que ninguém mais alcança.
+     */
     private fun cleanupSession() {
         clearStreamRefs()
+        runCatching { activeSession?.stop() }
         activeSession = null
         _session.value = SessionStatus.STOPPED
     }
 
     private companion object {
         const val TAG = "ClaryonField"
+
+        /**
+         * Teto para a sessão subir. Generoso porque envolve Bluetooth Classic e o
+         * pareamento pode estar frio; curto o bastante para não travar o ciclo de
+         * voz além do que um agente tolera esperando em silêncio.
+         */
+        const val PRAZO_DE_SESSAO_MS = 12_000L
+
+        /**
+         * Teto para o **primeiro** frame. Curto: a leitura de placa acontece com o
+         * agente parado na frente do veículo, e uma consulta que demora mais que
+         * isso já perdeu o momento. Frames seguintes não têm prazo — quem consome
+         * decide.
+         */
+        const val PRAZO_PRIMEIRO_FRAME_MS = 6_000L
     }
 }
 

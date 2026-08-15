@@ -24,6 +24,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Ignore
@@ -173,8 +174,14 @@ class CaosDoDatTest {
             f.registration.first { it == RegistrationStatus.REGISTERED }
         }
         Log.i(TAG, "registro após pareamento tardio: $depois")
-        // Não asserto REGISTERED: o MDK pode não emitir a transição. O que se
-        // verifica é que o app segue vivo e responde — nada travou.
+
+        // **Medido: parear NÃO restaura o registro.** Fica `UNAVAILABLE`
+        // indefinidamente. O registro exige o fluxo do Meta AI
+        // (`DatGlassesFacade.startRegistration`), e essa era a lacuna: o método
+        // existia, estava documentado e não era chamado por ninguém. O painel
+        // agora mostra o botão "Conectar aos óculos" quando o estado não é
+        // REGISTERED, e o app anuncia a perda em voz alta.
+        assertNull("parear passou a restaurar o registro — reavaliar o botão", depois)
         assertTrue("segunda tentativa não pode lançar", f.startSession() is Result<*>)
     }
 
@@ -278,13 +285,22 @@ class CaosDoDatTest {
         assertEquals("MDK aceita até três", 3, m.pareados())
 
         val f = facade()
-        assertTrue("sessão com três pareados não pode lançar", f.startSession() is Result<*>)
+        val r = f.startSession()
+        Log.i(TAG, "startSession com 3 aparelhos: $r")
 
-        val estado = withTimeoutOrNull(10_000) {
-            f.session.first { it == SessionStatus.STARTED || it == SessionStatus.STOPPED }
-        }
-        Log.i(TAG, "sessão com 3 aparelhos: $estado")
-        assertNotNull("sessão ficou em limbo com três aparelhos", estado)
+        // Agora `startSession` só devolve sucesso com a sessão de fato `STARTED`,
+        // então a asserção pode ser direta em vez de "não ficou em limbo".
+        assertTrue("com três aparelhos a sessão não subiu: $r", r is Result.Success)
+        assertEquals(SessionStatus.STARTED, f.session.value)
+
+        // **Uma só.** A versão anterior deste teste verificava apenas que o
+        // estado saía do limbo — o que passaria igual se o app tivesse aberto
+        // três sessões. Chamar de novo tem de reaproveitar a existente, não
+        // empilhar outra: duas sessões de câmera não são suportadas, e três
+        // multiplicariam bateria e tráfego por três.
+        val segunda = f.startSession()
+        assertTrue("segunda chamada deveria reaproveitar", segunda is Result.Success)
+        assertEquals("o estado mudou — provável sessão nova", SessionStatus.STARTED, f.session.value)
     }
 
     @Test

@@ -1,5 +1,6 @@
 package com.claryon.field.ui
 
+import android.app.Activity
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -69,6 +70,18 @@ fun DiagnosticsScreen(
         Text("Diagnóstico do DAT · M2 (Mock Device Kit)", fontSize = 13.sp)
 
         StatusCard("Registro", registration.name)
+
+        if (registration != RegistrationStatus.REGISTERED) {
+            // O caminho de volta do registro perdido. Sem este botão o agente vê
+            // "UNAVAILABLE" e não tem o que fazer — e foi medido que parear um
+            // aparelho não restaura o registro sozinho.
+            val activity = LocalContext.current as? Activity
+            Button(
+                onClick = { activity?.let(vm::registrar) },
+                enabled = activity != null,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Conectar aos óculos") }
+        }
         StatusCard("Dispositivos visíveis", devices.toString())
         StatusCard("Sessão", session.name)
         StatusCard("Stream de câmera", stream.name)

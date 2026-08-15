@@ -1,5 +1,6 @@
 package com.claryon.field.ui
 
+import android.app.Activity
 import android.app.Application
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
@@ -35,6 +36,7 @@ import com.claryon.net.PublicadorDePosicaoSupabase
 import com.claryon.field.agent.Identidade
 import com.claryon.field.local.ProvedorDeLocal
 import com.claryon.glasses.DatGlassesFacade
+import com.claryon.glasses.RegistrationStatus
 import com.claryon.glasses.MockDeviceController
 import com.claryon.field.voice.Modelos
 import com.claryon.field.voice.VoiceCycle
@@ -77,6 +79,41 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
     private var mockEnabled = false
 
     val registration = facade.registration
+
+    /**
+     * Dispara o fluxo de registro do DAT — o deeplink para o app Meta AI.
+     *
+     * Isto não existia. `DatGlassesFacade.startRegistration` estava escrito,
+     * documentado e **nunca chamado por ninguém**; `ensureRegistered` idem. O
+     * app detectava `UNAVAILABLE` e não fazia nada a respeito.
+     *
+     * Em Dev Mode só um app de terceiros fica registrado por vez, então perder o
+     * registro é rotina — basta o desenvolvedor abrir outro app do DAT. E foi
+     * medido no MockDeviceKit que **parear um aparelho não restaura o registro**
+     * (fica `UNAVAILABLE` indefinidamente). Sem este caminho, o agente ficaria
+     * com um app que não conecta e nenhuma pista do porquê.
+     */
+    fun registrar(activity: Activity) {
+        facade.startRegistration(activity)
+    }
+
+    /**
+     * Diz em voz alta que os óculos não estão conectados.
+     *
+     * Mesma regra do aviso de permissão: uma vez por abertura, nível
+     * informativo. A tela mostra `UNAVAILABLE`; o ouvido recebe a manchete —
+     * porque o agente que está de óculos não está olhando para a tela.
+     */
+    fun anunciarRegistroPerdido() {
+        if (jaAnunciouRegistro) return
+        if (facade.registration.value == RegistrationStatus.REGISTERED) return
+        jaAnunciouRegistro = true
+        saida.emitir(
+            Utterance.SinalizarEFalar(Earcon.FALHA, "Óculos não conectados.", Priority.INFORMATIVO),
+        )
+    }
+
+    private var jaAnunciouRegistro = false
     val session = facade.session
     val streamState = facade.streamState
     val frameInfo = facade.frameInfo
