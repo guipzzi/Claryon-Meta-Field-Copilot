@@ -24,7 +24,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -92,6 +95,20 @@ class DatGlassesFacade(private val scope: CoroutineScope) : GlassesFacade {
     /** `capturePhoto()` é uma por vez (regra do DAT). */
     private val capturaEmCurso = java.util.concurrent.atomic.AtomicBoolean(false)
 
+    /**
+     * Teto para a sessão subir. Generoso porque envolve Bluetooth Classic e o
+     * pareamento pode estar frio; curto o bastante para não travar o ciclo de voz
+     * além do que um agente tolera esperando em silêncio.
+     */
+    private val PRAZO_DE_SESSAO_MS = 12_000L
+
+    /**
+     * Teto para o **primeiro** frame. Curto: a leitura de placa acontece com o
+     * agente parado na frente do veículo, e uma consulta que demora mais que isso
+     * já perdeu o momento. Frames seguintes não têm prazo — quem consome decide.
+     */
+    private val PRAZO_PRIMEIRO_FRAME_MS = 6_000L
+
     // ── Registro ────────────────────────────────────────────────────────────
 
     override suspend fun ensureRegistered(): Result<Unit> =
@@ -113,8 +130,30 @@ class DatGlassesFacade(private val scope: CoroutineScope) : GlassesFacade {
 
     // ── Sessão ──────────────────────────────────────────────────────────────
 
+    /**
+     * Abre a sessão e **espera ela ficar utilizável**.
+     *
+     * A versão anterior completava `Result.success` logo depois de chamar
+     * `created.start()`, deixando o resultado real para quem observasse
+     * `session.state`. Isso produzia a pior coisa que este projeto tem como
+     * regra evitar: **um `Result.Success` que não significa sucesso**.
+     *
+     * O sintoma foi medido no MockDeviceKit, e é enganoso — `startSession()`
+     * devolvia `Success`, `withCamera` logo em seguida devolvia `Success`, e
+     * **zero frames chegavam**. Nenhum caminho de erro disparava; nenhum earcon
+     * tocava. Num sistema sem display isso é indistinguível de aplicativo morto,
+     * que é justamente o cenário que a regra "falha nunca é silêncio" proíbe.
+     *
+     * Agora o sucesso só volta quando o estado chega a `STARTED`. `STOPPED` e o
+     * estouro do prazo viram falha tipada.
+     */
     override suspend fun startSession(): Result<Unit> {
-        if (activeSession != null) return Result.success(Unit)
+        // Sessão já viva E utilizável. `activeSession != null` sozinho não bastava:
+        // uma sessão criada que nunca subiu ficava aqui para sempre, e toda
+        // tentativa seguinte devolvia sucesso sem nada por trás.
+        if (activeSession != null && _session.value == SessionStatus.STARTED) {
+            return Result.success(Unit)
+        }
 
         val deferred = CompletableDeferred<Result<Unit>>()
         Wearables.createSession(deviceSelector)
@@ -122,7 +161,7 @@ class DatGlassesFacade(private val scope: CoroutineScope) : GlassesFacade {
                 activeSession = created
                 observeSession(created) // assinar ANTES de start(), para não perder transições
                 _session.value = SessionStatus.STARTING
-                created.start() // retorna Unit; o resultado é observado em session.state/errors
+                created.start() // retorna Unit; o estado real chega por session.state
                 deferred.complete(Result.success(Unit))
             }
             .onFailure { error, _ ->
@@ -132,7 +171,34 @@ class DatGlassesFacade(private val scope: CoroutineScope) : GlassesFacade {
                     Result.failure(ClaryonError.Glasses("glasses.session_failed", error.description)),
                 )
             }
-        return deferred.await()
+
+        val criada = deferred.await()
+        if (criada is Result.Failure) return criada
+
+        // Espera o estado terminal. O prazo existe porque o SDK pode nunca
+        // emitir transição — sem permissão, sem aparelho vestido, sem registro —
+        // e um `await` sem teto travaria o ciclo de voz inteiro.
+        val estado = withTimeoutOrNull(PRAZO_DE_SESSAO_MS) {
+            _session.first { it == SessionStatus.STARTED || it == SessionStatus.STOPPED }
+        }
+        return when (estado) {
+            SessionStatus.STARTED -> Result.success(Unit)
+            SessionStatus.STOPPED -> {
+                cleanupSession()
+                Result.failure(
+                    ClaryonError.Glasses("glasses.session_stopped", "A sessão encerrou ao iniciar."),
+                )
+            }
+            // Nem subiu nem caiu: o SDK ficou mudo. Limpar a referência é
+            // essencial — mantida, a próxima chamada devolveria sucesso imediato
+            // apontando para uma sessão que nunca funcionou.
+            else -> {
+                cleanupSession()
+                Result.failure(
+                    ClaryonError.Glasses("glasses.session_timeout", "A sessão não subiu a tempo."),
+                )
+            }
+        }
     }
 
     /**
@@ -253,13 +319,44 @@ class DatGlassesFacade(private val scope: CoroutineScope) : GlassesFacade {
         activeStream = stream
         observeStream(stream)
         stream.start()
+
+        // **Vigia do primeiro frame.**
+        //
+        // Medido no MockDeviceKit com a permissão de câmera do DAT negada:
+        // `addCamera` devolve sucesso, `stream.start()` não reclama, e **nenhum
+        // frame chega, para sempre**. Sem este vigia, `withCamera` devolvia
+        // `Success` e o consumidor ficava suspenso indefinidamente esperando uma
+        // imagem que nunca vem — sem exceção, sem log, sem earcon.
+        //
+        // É o mesmo defeito de classe que `startSession` tinha: sucesso que não
+        // significa sucesso. Num produto cuja única saída é áudio, o sintoma é
+        // silêncio, e silêncio é indistinguível de aplicativo morto.
+        val primeiroFrame = CompletableDeferred<Unit>()
         return try {
+            val comVigia = scope.launch {
+                if (withTimeoutOrNull(PRAZO_PRIMEIRO_FRAME_MS) { primeiroFrame.await() } == null) {
+                    Log.w(TAG, "nenhum frame em ${PRAZO_PRIMEIRO_FRAME_MS}ms — abortando o stream")
+                    camera.stop()
+                }
+            }
             // `conflate`: um frame por vez, descartando os do meio enquanto a
             // inferência do consumidor roda. Sem isso, todos os frames entram
             // numa fila que só cresce e a latência da inferência vira atraso
             // acumulado — a armadilha "todos os frames em fila".
-            block(stream.videoStream.map { it.toFrame() }.conflate())
-            Result.success(Unit)
+            block(
+                stream.videoStream
+                    .onEach { if (!primeiroFrame.isCompleted) primeiroFrame.complete(Unit) }
+                    .map { it.toFrame() }
+                    .conflate(),
+            )
+            comVigia.cancel()
+            if (primeiroFrame.isCompleted) {
+                Result.success(Unit)
+            } else {
+                Result.failure(
+                    ClaryonError.Glasses("glasses.no_frames", "A câmera abriu e não entregou imagem."),
+                )
+            }
         } finally {
             camera.stop()
             // Soltar as referências aqui também: esperar só pelo CLOSED deixaria

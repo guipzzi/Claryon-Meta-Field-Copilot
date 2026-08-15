@@ -735,3 +735,59 @@ Ordem cronológica inversa (mais recente no topo).
 - **Mapa vazio e mapa indisponível são estados diferentes.** São indistinguíveis para quem
   olha, e a leitura errada é a perigosa: "ninguém por perto" quando a verdade é "não estou
   recebendo". A causa aparece escrita na tela.
+
+## Campanha de caos com o MockDeviceKit (2026-08-15)
+
+Doze cenários novos, escritos depois de confirmar por inspeção do artefato
+`mwdat-mockdevice-0.9.0` três capacidades que a doc descreve mas não publica em
+assinatura Android: `MockDeviceKitConfig(initiallyRegistered, initialPermissionsGranted)`,
+`MockPermissions.set/setRequestResult`, e `pairGlasses` até três vezes + `unpairDevice`.
+
+- **⚠️ `startSession` devolvia `Result.Success` sem a sessão estar utilizável.** Completava
+  logo depois de `created.start()`, deixando o estado real para quem observasse
+  `session.state`. Medido: `startSession()` → `Success`, `withCamera()` → `Success`, **zero
+  frames**. Nenhum caminho de erro, nenhum earcon. É a violação da regra central do projeto —
+  sucesso que não significa sucesso — dentro da própria fachada que deveria protegê-la.
+  Agora espera `STARTED` com teto de 12 s; `STOPPED` e estouro viram falha tipada, e a
+  referência é limpa (mantida, a chamada seguinte devolveria sucesso imediato apontando para
+  uma sessão que nunca funcionou).
+
+- **⚠️ `withCamera` também devolvia sucesso mudo.** Com a permissão de câmera do DAT negada,
+  `addCamera` devolve sucesso e `stream.start()` não reclama — simplesmente nenhum frame
+  chega, para sempre. O consumidor ficava suspenso esperando uma imagem que não vem.
+  Vigia de primeiro frame com teto de 6 s → `glasses.no_frames`, que vira earcon.
+
+- **Duas capturas concorrentes: `[Success, Failure]`.** A guarda de uma-por-vez faz a segunda
+  falhar limpo e a primeira concluir — que é o comportamento certo. O agente que diz
+  "consultar placa" duas vezes sob estresse recebe uma resposta, não nenhuma.
+
+- **Desemparelhar durante a operação → sessão `STOPPED`.** Sem sessão fantasma. `tapAndHold`
+  → `STOPPED`, e criar sessão nova funciona (*cascading stop* confirmado). Oscilação rápida
+  de don/doff/fold/unfold 12 vezes não deixa estado inconsistente.
+
+- **Três aparelhos pareados → uma sessão, `STARTED`.** O `AutoDeviceSelector` escolhe um.
+
+- **Sem registro → `RegistrationStatus.UNAVAILABLE`,** e parear depois **não** leva a
+  `REGISTERED` (medido: fica `null` após 10 s). O registro exige o fluxo do Meta AI; o
+  pareamento sozinho não basta.
+
+### Erros meus, registrados porque custaram tempo
+
+- **`{ frames++ }` não conta frames.** O bloco de `withCamera` recebe o *Flow* e é invocado
+  uma vez; incrementar ali mede invocações. Duas medições foram publicadas erradas antes de
+  eu perceber — a correção é consumir o fluxo (`fluxo.first()`).
+- **O runner não concede permissão de runtime.** Sem `CAMERA` concedida por
+  `uiAutomation.grantRuntimePermission`, o feed do MDK não entrega frame nenhum, e o sintoma
+  imita perfeitamente "a permissão do DAT foi respeitada". A própria doc do MDK faz isso no
+  `@Before`; eu não seguia.
+- **`capturePhoto` exige stream ativo.** A primeira versão do teste de concorrência não abria
+  stream, as duas capturas falhavam com `no_stream`, e aquilo parecia defeito grave do produto.
+
+### Limitações do simulador, mapeadas
+
+- **Áudio não existe.** `MockGlassesServices` expõe `camera` e `captouch`, e nada mais.
+  HFP, beamforming, wake word e latência fala→resposta só em hardware.
+- **Conceder permissão depois de negada não restaura o vídeo**, nem com sessão nova. O estado
+  parece fixado no pareamento, e reparear exige `disable()/enable()` — que aborta o processo.
+- **Um método por processo.** Testes que abrem stream passam isolados e devolvem zero frames
+  em lote: o singleton do MDK não volta ao estado limpo. `scripts/caos_mdk.sh` roda assim.
