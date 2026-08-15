@@ -72,9 +72,6 @@ class SupressorDeSaidaPropria(private val margemMs: Long = MARGEM_MS) {
         return janelas.any { instanteMs >= it.inicio && instanteMs <= it.fim + margemMs }
     }
 
-    /** `true` enquanto houver reprodução em curso — o gate do detector de ativação. */
-    fun emitindoAgora(instanteMs: Long): Boolean = suprimido(instanteMs)
-
     /**
      * Descarta janelas que já não podem afetar nada antes de [instanteMs].
      *

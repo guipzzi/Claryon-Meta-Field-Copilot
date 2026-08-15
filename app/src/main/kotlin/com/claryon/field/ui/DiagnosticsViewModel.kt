@@ -279,6 +279,20 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
      * E a reciprocidade é pré-condição, não convenção: [CanalDePosicoes.assinar]
      * recusa se a publicação própria não estiver ativa. Quem vê é visto.
      */
+    /**
+     * Anuncia, uma vez por abertura, tudo que está degradado.
+     *
+     * Existe porque os dois anúncios abaixo foram escritos e **não tinham
+     * chamador** — repetindo, dentro da mesma sessão de trabalho, o defeito que
+     * eu tinha acabado de encontrar em `startRegistration`. Um método de aviso
+     * que ninguém chama é pior que aviso nenhum: dá a impressão, para quem lê o
+     * código, de que o produto avisa.
+     */
+    fun anunciarEstadoDegradado() {
+        anunciarCapacidadesPerdidas()
+        anunciarRegistroPerdido()
+    }
+
     fun abrirMapa() {
         if (bombaDoMapa != null) return
         bombaDoMapa = viewModelScope.launch {
@@ -293,8 +307,23 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
             publicarPosicao()
 
             if (!canalDePosicoes.assinar(TALK_GROUP_DEMO)) {
+                // Duas causas diferentes, duas mensagens diferentes.
+                //
+                // A versão anterior dizia sempre "Sem publicar sua posição, não é
+                // possível ver a dos outros" — que **culpa o agente por algo que
+                // o app não implementa**. A recepção de posições dos pares ainda
+                // não existe no transporte (`assinarPares` devolve `false` por
+                // construção), então essa era a causa real em 100% dos casos, e a
+                // mensagem apontava para a errada.
+                //
+                // Culpar o usuário por uma capacidade ausente é a mesma classe de
+                // desonestidade que "Alfa Dois não localizado" quando falta login.
                 _estadoDoMapa.value = EstadoDoMapa.indisponivel(
-                    "Sem publicar sua posição, não é possível ver a dos outros.",
+                    if (!publicador.publicando()) {
+                        "Sua posição não está subindo. Sem isso, o mapa não abre."
+                    } else {
+                        "Recepção de posições da guarnição ainda não disponível."
+                    },
                 )
                 return@launch
             }

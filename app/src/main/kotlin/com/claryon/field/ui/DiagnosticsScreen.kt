@@ -15,6 +15,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -50,6 +51,11 @@ fun DiagnosticsScreen(
     vm: DiagnosticsViewModel = viewModel(),
 ) {
     val registration by vm.registration.collectAsState()
+
+    // Anuncia em voz alta o que está degradado — permissão faltando, óculos não
+    // conectados. Uma vez por abertura do painel, no nível informativo (o Modo
+    // Tático suprime durante ocorrência, que é quando mais atrapalharia).
+    LaunchedEffect(Unit) { vm.anunciarEstadoDegradado() }
     val session by vm.session.collectAsState()
     val stream by vm.streamState.collectAsState()
     val frame by vm.frameInfo.collectAsState()

@@ -824,3 +824,38 @@ Reler a correção do MDK depois de escrita rendeu quatro defeitos, e o pior nas
 - **Asserção fraca em `tresAparelhosPareados`.** Verificava só que a sessão saía do limbo — o
   que passaria igual se o app tivesse aberto três. Agora afirma `Result.Success`, estado
   `STARTED`, e que a segunda chamada reaproveita em vez de empilhar.
+
+### Varredura de código sem chamador (2026-08-15)
+
+Depois de encontrar `startRegistration` órfão, varri o projeto atrás da mesma classe de
+defeito. O resultado justificou a varredura — e incluiu reincidência minha.
+
+- **⚠️ `RadioTatico` nunca é construído.** O orquestrador do rádio tático — PTT, pré-roll,
+  supressor de eco, gatilho, controle de piso, Opus, transporte — existe como classe, tem
+  testes, e **nenhum código do app o instancia**. O supressor e o gatilho *são* usados, mas só
+  dentro dele. Na prática, C1 não é alcançável por quem abre o aplicativo: a capacidade está
+  construída e desligada da tomada. É o mesmo defeito de `startRegistration`, uma ordem de
+  grandeza acima.
+
+- **Reincidência, na mesma sessão.** Criei `anunciarCapacidadesPerdidas` e
+  `anunciarRegistroPerdido` e não chamei nenhum dos dois — logo depois de escrever, em
+  `DECISIONS.md`, que método de aviso sem chamador é pior que aviso nenhum. Agora ambos saem
+  de `anunciarEstadoDegradado`, chamado por `LaunchedEffect` na abertura do painel.
+
+- **⚠️ `videoStream` era coletado duas vezes.** `Stream.videoStream` é `Flow`, não
+  `SharedFlow` (confirmado em `mwdat-camera-0.9.0`), então `observeStream` e `withCamera`
+  abriam **duas assinaturas independentes** do mesmo vídeo: cada quadro entregue e convertido
+  em dobro, no caminho crítico, e a segunda coleta existindo só para alimentar um contador que
+  ninguém lê fora do painel. Num produto com meta de 12%/h em modo Ativo, decodificar vídeo em
+  dobro para atualizar um rótulo é caro do jeito errado. `FrameInfo` passou a sair da coleta
+  única de `withCamera`.
+
+- **A mensagem do mapa culpava o agente.** Quando a assinatura falhava, dizia sempre "Sem
+  publicar sua posição, não é possível ver a dos outros" — mas a causa real, em 100% dos
+  casos, era outra: `PublicadorDePosicaoSupabase.assinarPares` devolve `false` por construção,
+  porque **a recepção de posições dos pares não existe no transporte**. Culpar o usuário por
+  uma capacidade ausente é a mesma desonestidade de "Alfa Dois não localizado" quando falta
+  login. As duas causas agora têm mensagens distintas.
+
+- **`emitindoAgora` removido.** Alias puro de `suprimido`, sem chamador. Duas portas para a
+  mesma sala fazem quem lê procurar a diferença que não existe.

@@ -269,14 +269,18 @@ class DatGlassesFacade(private val scope: CoroutineScope) : GlassesFacade {
                     if (_stream.value == StreamStatus.CLOSED) clearStreamRefs()
                 }
             }
-            launch {
-                var count = 0L
-                stream.videoStream.collect { frame ->
-                    // Frames só chegam em STREAMING. No M2 mostramos metadados
-                    // (dimensões + contagem) como prova de que o pipeline vive.
-                    _frameInfo.value = FrameInfo(frame.width, frame.height, ++count)
-                }
-            }
+            // **Não se coleta `videoStream` aqui.**
+            //
+            // `Stream.videoStream` é `Flow`, não `SharedFlow` — confirmado por
+            // inspeção de `mwdat-camera-0.9.0`. Coletar aqui e de novo em
+            // `withCamera` criava **duas assinaturas independentes** do mesmo
+            // vídeo: o quadro era entregue e convertido duas vezes, no caminho
+            // crítico, e a segunda coleta existia só para alimentar um contador
+            // que ninguém lê fora do painel de diagnóstico.
+            //
+            // Num produto cuja meta de bateria é 12%/h em modo Ativo, decodificar
+            // vídeo em dobro para atualizar um rótulo é caro do jeito errado. O
+            // `FrameInfo` agora sai da coleta única de `withCamera`.
         }
     }
 
@@ -340,9 +344,15 @@ class DatGlassesFacade(private val scope: CoroutineScope) : GlassesFacade {
             // inferência do consumidor roda. Sem isso, todos os frames entram
             // numa fila que só cresce e a latência da inferência vira atraso
             // acumulado — a armadilha "todos os frames em fila".
+            var contagem = 0L
             block(
                 stream.videoStream
-                    .onEach { if (!primeiroFrame.isCompleted) primeiroFrame.complete(Unit) }
+                    .onEach { frame ->
+                        if (!primeiroFrame.isCompleted) primeiroFrame.complete(Unit)
+                        // Diagnóstico de carona na coleta que já existe, em vez de
+                        // uma segunda assinatura do mesmo vídeo.
+                        _frameInfo.value = FrameInfo(frame.width, frame.height, ++contagem)
+                    }
                     .map { it.toFrame() }
                     .conflate(),
             )
