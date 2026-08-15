@@ -75,39 +75,41 @@ class HistoricoDoCanal(
             }
         }
 
+    /**
+     * Presença dos pares, derivada de `posicoes_do_grupo`.
+     *
+     * A versão anterior lia `agent_positions.updated_at` por embed do PostgREST.
+     * Isso parou de funcionar — e **é bom que tenha parado**: a migração 0010
+     * fechou a leitura direta da tabela, porque ela entregava `geom` de toda a
+     * guarnição a qualquer agente autenticado. A presença agora sai da mesma
+     * função que já devolve grandezas, e não existe caminho no cliente que peça
+     * coordenada de par.
+     *
+     * Quem nunca publicou posição simplesmente não aparece — o que é honesto:
+     * presença aqui significa "está publicando", não "instalou o app".
+     */
     suspend fun membros(talkGroupId: String): Result<List<MembroDoCanal>> =
-        buscar(
-            caminho = "memberships" +
-                "?talk_group_id=eq.$talkGroupId" +
-                "&select=agent_id,agents!inner(indicativo,agent_positions(updated_at))",
-        ) { arr ->
-            (0 until arr.length()).map { i ->
-                val o = arr.getJSONObject(i)
-                val agente = o.optJSONObject("agents")
+        posicoesDoGrupo(talkGroupId).map { lista ->
+            lista.map { p ->
                 MembroDoCanal(
-                    agentId = o.optString("agent_id"),
-                    indicativo = agente?.optString("indicativo").orEmpty(),
-                    // O PostgREST devolve **objeto** num embed um-para-um e
-                    // **array** num um-para-muitos. `agent_positions` tem o
-                    // `agent_id` como chave primária, então vem objeto — e ler só
-                    // o array fazia a idade virar `null`, o par virar "offline" e
-                    // a contagem mostrar 0/2 com todo mundo publicando.
-                    idadeDaPosicaoS = agente?.let(::extrairAtualizadoEm)?.let(::idadeEmSegundos),
+                    agentId = "",
+                    indicativo = p.indicativo,
+                    idadeDaPosicaoS = p.idadeS.takeIf { it != Int.MAX_VALUE },
                 )
             }
         }
 
     /**
-     * Posições relativas de **todos** os pares do talk group, para o mapa.
+     * Posições relativas de **todos** os pares do talk group.
      *
      * Sonda, e não assina. Postgres Changes seria o caminho óbvio e foi
-     * descartado: ele empurra a linha inteira, incluindo `geom`, e cada aparelho
-     * da guarnição passaria a receber a coordenada bruta de todos os outros. A
-     * garantia de que "o aparelho de um agente jamais recebe a posição de outro"
-     * viraria promessa, com o cliente descartando o que já recebeu.
+     * descartado: ele empurra a linha inteira, incluindo `geom`. Com o mapa aberto
+     * 5% do turno, sondar a cada poucos segundos custa menos que manter uma
+     * assinatura viva o tempo todo — e não entrega coordenada a ninguém.
      *
-     * Com o mapa aberto 5% do turno, sondar a cada poucos segundos custa menos
-     * que manter uma assinatura viva o tempo todo — e mantém a garantia.
+     * Desde a migração 0010 esta função é o **único** caminho pelo qual o app
+     * sabe algo sobre a posição de um par: a leitura direta de `agent_positions`
+     * passou a ser restrita à própria linha.
      */
     suspend fun posicoesDoGrupo(talkGroupId: String): Result<List<RespostaDePosicao>> =
         chamarRpc("posicoes_do_grupo", org.json.JSONObject().put("talk_group", talkGroupId)) { arr ->
@@ -151,6 +153,14 @@ class HistoricoDoCanal(
         }
     }
 
+    /**
+     * GET no PostgREST. Continua servindo o histórico de falas — que é tabela e
+     * não função, e cuja RLS já filtra por entrega.
+     *
+     * `extrairAtualizadoEm` foi removido junto com o embed de `agent_positions`:
+     * era o único consumidor dele, e a migração 0010 fechou esse caminho. Posição
+     * de par agora só por `chamarRpc`.
+     */
     private suspend fun <T> buscar(
         caminho: String,
         mapear: (JSONArray) -> T,
@@ -172,14 +182,6 @@ class HistoricoDoCanal(
             }
         }
     }
-
-    /** Aceita as duas formas de embed do PostgREST — objeto e array. */
-    private fun extrairAtualizadoEm(agente: org.json.JSONObject): String? =
-        agente.optJSONObject("agent_positions")?.optString("updated_at")
-            ?: agente.optJSONArray("agent_positions")
-                ?.takeIf { it.length() > 0 }
-                ?.optJSONObject(0)
-                ?.optString("updated_at")
 
     private fun idadeEmSegundos(iso: String): Int? = runCatching {
         val instante = java.time.OffsetDateTime.parse(iso).toInstant()

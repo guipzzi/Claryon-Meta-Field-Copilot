@@ -66,7 +66,20 @@ class WhisperCppStt(private val fonte: ModelSource) : SttEngine {
             // Whisper espera PCM float normalizado em [-1, 1], mono, 16 kHz.
             val floats = FloatArray(pcm16k.size) { pcm16k[it] / 32768.0f }
             val texto = ctx.transcribeData(floats, printTimestamp = false).trim()
-            Result.success(Transcript(texto, confidence = null))
+            if (texto.isEmpty()) {
+                // Texto vazio NÃO é sucesso.
+                //
+                // `Result.success(Transcript(""))` é indistinguível de uma
+                // transcrição legítima que resultou em nada, e o chamador não tem
+                // como decidir entre "o agente não falou" e "o motor falhou". Num
+                // produto cuja regra é que falha nunca é silêncio, devolver
+                // sucesso vazio é a definição de silêncio.
+                Result.failure(
+                    ClaryonError.Voice("stt.sem_texto", "O reconhecimento não produziu texto."),
+                )
+            } else {
+                Result.success(Transcript(texto, confidence = null))
+            }
             }
         } catch (e: Exception) {
             Result.failure(ClaryonError.Voice("stt.whisper_error", e.message ?: "erro no whisper.cpp"))

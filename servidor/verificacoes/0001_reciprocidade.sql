@@ -58,11 +58,24 @@ insert into agent_positions (agent_id, geom, heading, speed_mps, accuracy_m) val
 set local role authenticated;
 set local request.jwt.claims = '{"sub":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}';
 
+-- **Esta verificação foi reescrita, e o motivo importa.**
+--
+-- Ela afirmava que Alfa LÊ a linha de `agent_positions` de Bravo — e passava.
+-- Passava porque `positions_read` era `agent_id IN (pares_do_talk_group())`, o
+-- que entregava `geom` bruto de toda a guarnição a qualquer agente autenticado.
+-- A verificação estava, sem perceber, **certificando o buraco**: o produto
+-- afirmava que a coordenada do par nunca chega ao aparelho, e o teste de
+-- reciprocidade provava o contrário.
+--
+-- Reciprocidade não exige ler a coordenada. Exige que a informação relativa flua
+-- nos dois sentidos e que ninguém observe sem ser observado. É isso que se
+-- verifica agora — e a leitura direta passou a ser proibida, o que é conferido em
+-- `0005_posicao_inacessivel.sql`.
 insert into resultado
-select 'Alfa enxerga Bravo (mesmo talk group)', 'true',
+select 'Alfa NAO le a coordenada de Bravo', 'false',
        exists(select 1 from agent_positions
                where agent_id = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb')::text,
-       exists(select 1 from agent_positions
+       not exists(select 1 from agent_positions
                where agent_id = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb');
 
 insert into resultado
@@ -74,11 +87,14 @@ select 'Alfa NAO enxerga Charlie (outro talk group)', 'false',
 
 set local request.jwt.claims = '{"sub":"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"}';
 
+-- Simetria, pelo caminho que de fato existe: cada um obtém do outro distância e
+-- rumo, e nenhum obtém coordenada. É a reciprocidade real — quem vê é visto, e
+-- ambos veem a mesma classe de dado.
 insert into resultado
-select 'Bravo enxerga Alfa (simetria)', 'true',
+select 'Bravo NAO le a coordenada de Alfa (simetria)', 'false',
        exists(select 1 from agent_positions
                where agent_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa')::text,
-       exists(select 1 from agent_positions
+       not exists(select 1 from agent_positions
                where agent_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
 
 -- Charlie, isolado, não pode ver ninguém além de si.

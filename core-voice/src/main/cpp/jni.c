@@ -176,7 +176,18 @@ Java_com_whispercpp_whisper_WhisperLib_00024Companion_fullTranscribe(
     params.print_timestamps = true;
     params.print_special = false;
     params.translate = false;
-    params.language = "en";
+    // Português do Brasil, não inglês.
+    //
+    // Estava `"en"` sobre um modelo multilíngue recebendo áudio em português — o
+    // Whisper transcrevia tentando casar fonemas de pt-BR com o vocabulário do
+    // inglês, e o resultado é salada com aparência de transcrição. Num registro
+    // operacional isso é pior que não transcrever: o texto existe, parece dado, e
+    // não corresponde ao que foi dito.
+    //
+    // Fixo em vez de autodetecção: a detecção consome o primeiro segundo de áudio
+    // decidindo o idioma, e a fala de rádio é curta demais para pagar isso — além
+    // de a corporação ser brasileira, o que torna a dúvida desnecessária.
+    params.language = "pt";
     params.n_threads = num_threads;
     params.offset_ms = 0;
     params.no_context = true;

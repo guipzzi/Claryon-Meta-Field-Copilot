@@ -1000,3 +1000,58 @@ precisar alcançar a faixa do A30, é preciso um caminho de compatibilidade com
 | Permissão de local revogada durante a coleta | Sem crash |
 | GPS desligado no meio | Degrada para provedor de rede, sem crash |
 | Processo morto, recriado pelo sistema | Encerra sem reabrir o microfone, como projetado |
+
+## A garantia de posição era falsa, e a verificação certificava o buraco (2026-08-15)
+
+Uma pesquisa adversarial em quatro frentes derrubou a afirmação central de privacidade do
+projeto — e derrubou junto o teste que a sustentava.
+
+### ⚠️ `positions_read` entregava a coordenada de toda a guarnição
+
+A política era `agent_id IN (private.pares_do_talk_group())`. Qualquer agente autenticado
+podia, pelo PostgREST:
+
+    GET /rest/v1/agent_positions?select=agent_id,geom
+
+e receber `geom` bruto de todos os pares. Não por derivação trigonométrica — por **consulta
+direta**. Toda a arquitetura de `consultar_posicao` e `posicoes_do_grupo` — devolver
+grandezas, calcular no servidor, esconder `private.posicao_relativa` — protegia a porta da
+frente com a lateral aberta.
+
+Corrigido na 0010: leitura direta só da própria linha. Posição de par sai exclusivamente
+pelas funções `SECURITY DEFINER`, que continuam funcionando porque são definer.
+
+### ⚠️ E a verificação de reciprocidade **afirmava o buraco**
+
+`0001_reciprocidade.sql` tinha "Alfa enxerga Bravo (mesmo talk group) → true", testando
+justamente a leitura direta de `agent_positions`. Ela passava verde há semanas, certificando
+como correto o comportamento que o produto declarava impossível.
+
+É o pior tipo de teste: um que documenta o defeito como requisito. Reescrito para verificar
+reciprocidade **sem exigir coordenada** — quem vê é visto, e ambos veem a mesma classe de
+dado, que é distância e rumo.
+
+### A derivação continua possível, e isso é honesto declarar
+
+Com a própria coordenada + distância + rumo, a posição do par sai por trigonometria (fórmula
+de destino). Medido: 30 m do valor real, e o erro é de arredondamento do teste.
+
+O que a arquitetura **de fato** garante, agora verificado em `0005_posicao_inacessivel.sql`:
+
+- a coordenada de par **nunca trafega e nunca repousa** no aparelho — não está em socket, em
+  heap, em *heap dump*, em relatório de erro, nem numa apreensão do aparelho;
+- a trilateração por origem forjada está bloqueada, porque o solicitante vem do JWT;
+- a reciprocidade é estrutural: sem publicar, não se recebe.
+
+O que ela **não** garante: que um cliente legítimo não possa calcular. É defesa em
+profundidade, não impossibilidade — e a diferença entre "o aparelho poderia calcular" e "o
+aparelho tem" é exatamente o que se defende numa auditoria.
+
+### Dois defeitos no Whisper, achados na mesma varredura
+
+- **`params.language = "en"`** sobre modelo multilíngue recebendo áudio em português. O motor
+  tentava casar fonemas de pt-BR com vocabulário do inglês: salada com aparência de
+  transcrição, que num registro operacional é pior que não transcrever.
+- **`Result.success(Transcript(""))`** — texto vazio devolvido como sucesso, indistinguível
+  de transcrição legítima que resultou em nada. Num produto cuja regra é que falha nunca é
+  silêncio, sucesso vazio é a definição de silêncio. Virou falha tipada.
