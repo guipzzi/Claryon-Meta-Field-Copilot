@@ -458,3 +458,40 @@ Ordem cronológica inversa (mais recente no topo).
   abaixo de 150 ms é encosto acidental: difundir 80 ms de ruído para a guarnição é pior que
   não transmitir. `cancelar()` arma o debounce para o agente não reabrir por reflexo em cima
   do próprio cancelamento.
+
+## Esquema aplicado e políticas verificadas (2026-08-14)
+
+- **✅ Migrações 0001–0004 aplicadas no projeto real; 17 de 17 verificações passam.**
+  `servidor/verificacoes/0001_reciprocidade.sql` roda em transação com `ROLLBACK` — não
+  deixa rastro e pode ser reexecutada em produção. Prova, com dados reais e trocando de
+  papel: reciprocidade simétrica dentro do talk group, isolamento entre talk groups,
+  `transmissions` recusando `UPDATE`/`DELETE`, `posicao_relativa` devolvendo 1195 m e rumo 0°
+  sem expor coordenada, e as funções de `private` inalcançáveis por `anon`/`authenticated`.
+
+- **⚠️ Achado da verificação: o `0002` protegeu o tráfego e esqueceu o cadastro.**
+  RLS ficou habilitado em `transmissions`, `deliveries` e `agent_positions`, mas `units`,
+  `agents`, `talk_groups` e `memberships` ficaram sem política. Dois efeitos opostos e ambos
+  ruins: a política de posições, que fazia *join* em `memberships`, passou a negar tudo —
+  inclusive o agente ver a si próprio; e, no sentido inverso, qualquer autenticado leria o
+  **cadastro inteiro** (matrícula e indicativo de toda a corporação). Proteger a porta e
+  esquecer a janela. Corrigido no `0004`.
+
+- **Recursão de RLS resolvida por funções `SECURITY DEFINER` em `private`.**
+  Uma política sobre `memberships` que consulte `memberships` recursa infinitamente.
+  `meus_talk_groups()` e `pares_do_talk_group()` resolvem a associação ignorando RLS (o que
+  DEFINER faz por definição) e cortam o laço. `pares_do_talk_group()` faz `union` com o
+  próprio id: sem isso um agente recém-cadastrado, ainda sem guarnição, não enxergaria a
+  própria posição — o app quebraria no primeiro uso.
+
+- **`positions_read` reescrita como pertinência a conjunto, não *join*.**
+  Com RLS agora ativo em `memberships`, o *join* original acrescentaria avaliação de política
+  aninhada por linha. **A reciprocidade continua garantida por construção**: o conjunto
+  `pares_do_talk_group` é simétrico — se A está no de B, B está no de A.
+
+- **Erros que só apareceram contra um Postgres real, e o que ensinam.**
+  (a) `search_path = ''` é a recomendação certa de segurança, mas obriga a qualificar
+  **tudo** — inclusive o tipo `geography`, não só as funções `ST_*`. (b) Para desambiguar um
+  parâmetro de uma coluna homônima usa-se `funcao.parametro`, **sem** o schema; com
+  `private.` na frente vira erro de sintaxe. Pior: sem prefixo nenhum, a condição viraria
+  tautologia e "onde está Alfa Dois?" devolveria um agente qualquer. (c) PostGIS ficou em
+  `public` neste projeto; se migrar para `extensions`, os prefixos do `0003` mudam junto.

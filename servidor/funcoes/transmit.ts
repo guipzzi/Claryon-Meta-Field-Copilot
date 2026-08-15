@@ -47,7 +47,7 @@ Deno.serve(async (req) => {
     destinatarios = (data ?? []).map((m) => m.agent_id).filter((a) => a !== author_agent_id)
   } else {
     const raio = RAIO_POR_PRIORIDADE[prioridade] ?? 0
-    const { data } = await supabase.rpc('agentes_no_raio', {
+    const { data } = await supabase.schema('private').rpc('agentes_no_raio', {
       lon: origem.lon, lat: origem.lat, raio_m: raio, excluir: author_agent_id,
     })
     destinatarios = (data ?? []).map((a: { agent_id: string }) => a.agent_id)

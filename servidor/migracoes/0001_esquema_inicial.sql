@@ -85,3 +85,23 @@ create table deliveries (
   ack_at          timestamptz,
   primary key (transmission_id, agent_id)
 );
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Índices de chave estrangeira.
+--
+-- O Postgres **não** indexa FK automaticamente. Sem estes, cada JOIN e cada
+-- CASCADE vira varredura completa — e pior: `deliveries.agent_id` e
+-- `transmissions.author_agent_id` são exatamente as colunas que as políticas de
+-- linha consultam, então a falta de índice multiplicaria o custo de TODA leitura
+-- com RLS ativo.
+--
+-- Nas tabelas de chave composta, a PK só cobre a PRIMEIRA coluna: `deliveries`
+-- tem PK (transmission_id, agent_id) e portanto `agent_id` fica descoberto — que
+-- é justamente por onde a política de entrega filtra.
+-- ─────────────────────────────────────────────────────────────────────────────
+create index agents_unit_id_idx           on agents (unit_id);
+create index talk_groups_unit_id_idx      on talk_groups (unit_id);
+create index memberships_talk_group_idx   on memberships (talk_group_id);
+create index transmissions_author_idx     on transmissions (author_agent_id);
+create index transmissions_talk_group_idx on transmissions (talk_group_id);
+create index deliveries_agent_idx         on deliveries (agent_id);

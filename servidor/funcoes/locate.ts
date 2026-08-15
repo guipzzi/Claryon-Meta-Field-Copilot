@@ -20,7 +20,7 @@ Deno.serve(async (req) => {
   )
   const { solicitante_id, indicativo } = await req.json()
 
-  const { data } = await supabase.rpc('posicao_relativa', { solicitante_id, indicativo })
+  const { data } = await supabase.schema('private').rpc('posicao_relativa', { solicitante_id, indicativo })
   if (!data || data.length === 0) {
     // Honestidade: não sabemos onde está. Nunca uma posição plausível inventada.
     return Response.json({ encontrado: false })
