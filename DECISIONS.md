@@ -495,3 +495,14 @@ Ordem cronológica inversa (mais recente no topo).
   `private.` na frente vira erro de sintaxe. Pior: sem prefixo nenhum, a condição viraria
   tautologia e "onde está Alfa Dois?" devolveria um agente qualquer. (c) PostGIS ficou em
   `public` neste projeto; se migrar para `extensions`, os prefixos do `0003` mudam junto.
+
+- **SQL no Supabase pela Management API, não por `psql`.**
+  A senha do banco nunca autenticou (três tentativas, pooler e conexão direta, mesmo erro),
+  e insistir nela travava o trabalho. `servidor/executar_sql.py` usa
+  `POST /v1/projects/{ref}/database/query` com um personal access token — caminho que
+  independe da senha do Postgres. Só biblioteca padrão: o build precisa funcionar offline, e
+  ~120 linhas de HTTP não justificam uma dependência nova.
+  `--somente-leitura` é imposto pelo **servidor** (a sessão roda como
+  `supabase_read_only_user` e o Postgres recusa DDL), não é convenção do cliente.
+  Armadilha registrada: o Cloudflare à frente da API recusa o User-Agent padrão do `urllib`
+  com `error code: 1010` — que parece erro de credencial e não é. Identificar-se resolve.

@@ -32,6 +32,27 @@ transcrevemos **o agente, não o interlocutor**. Intencional, não um defeito.
 
 ---
 
+## Executar SQL no Supabase
+
+Migrações e verificações rodam pela Management API, que **não depende da senha do
+banco** — só de um personal access token:
+
+```bash
+python3 servidor/executar_sql.py servidor/migracoes/0001_esquema_inicial.sql
+python3 servidor/executar_sql.py --somente-leitura -c "select count(*) from agents"
+```
+
+Gere o token em **Supabase → Account → Access Tokens**, com permissão
+`database_write`, e guarde em `local.properties` (não versionado):
+
+```
+supabase_access_token=sbp_...
+```
+
+`--somente-leitura` é imposto pelo servidor, não pelo cliente: a sessão roda como
+`supabase_read_only_user` e o Postgres recusa qualquer escrita. Use ao inspecionar
+produção.
+
 ## ⛔ Pré-requisito absoluto antes de qualquer código do DAT (Regra Zero)
 
 O DAT está em *developer preview* e mudou depois do corte de treinamento de
