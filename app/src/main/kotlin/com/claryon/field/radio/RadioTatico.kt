@@ -132,12 +132,42 @@ class RadioTatico(
 
         alimentacao?.cancel()
         alimentacao = escopo.launch {
+            semDerrubarOProcesso("alimentação do pré-roll") {
             pcmDoMicrofone(rota)
                 // Descarta o que foi capturado enquanto NÓS emitíamos som.
                 .filter { !supressor.suprimido(agoraMs()) }
                 .onEach { quadro -> medirAmplitude(quadro) }
                 .onEach { supressor.podarAntesDe(agoraMs()) }
                 .collect { bloco -> preRoll.escrever(bloco) }
+            }
+        }
+    }
+
+    /**
+     * Executa captura sem deixar uma falha derrubar o processo.
+     *
+     * Os dois `escopo.launch` que consomem o microfone rodavam **crus**, e o
+     * escopo é o `viewModelScope`: `AudioRecord` lançando — óculos desconectando,
+     * `RECORD_AUDIO` revogada, `ERROR_DEAD_OBJECT` — matava o app no instante do
+     * toque no PTT. Num rádio para segurança pública, isso é o pior modo de falha
+     * possível: o agente aperta para pedir apoio e a tela some.
+     *
+     * `CancellationException` **continua propagando**. Engoli-la faria
+     * `alimentacao?.cancel()` e `sairDeModoAtivo()` pararem de parar de verdade,
+     * e o corpo seguiria rodando depois do escopo morto — trocaria um crash
+     * visível por um vazamento invisível, que é pior.
+     *
+     * A falha vira earcon porque `emitir` agora tem destino. Enquanto ele foi uma
+     * lambda vazia, este `catch` seria decoração.
+     */
+    private inline fun semDerrubarOProcesso(oQue: String, bloco: () -> Unit) {
+        try {
+            bloco()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            Log.w(TAG, "$oQue falhou: ${e.message}")
+            emitirComSupressao(Utterance.Sinalizar(Earcon.FALHA, Priority.EMERGENCIA))
         }
     }
 
@@ -182,6 +212,7 @@ class RadioTatico(
         )
 
         transmissao = escopo.launch {
+            semDerrubarOProcesso("transmissão") {
             sessao.transmitir(
                 transmissaoId = transmissaoId,
                 prioridade = prioridade,
@@ -190,6 +221,7 @@ class RadioTatico(
                 // tocar no meio da fala, aqueles quadros não vão para a rede.
                 pcmAoVivo = pcmDoMicrofone(rota).filter { !supressor.suprimido(agoraMs()) },
             ) { evento -> tratarPtt(evento) }
+            }
         }
     }
 

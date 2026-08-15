@@ -11,7 +11,7 @@ import com.claryon.agent.FalhaOperacional
 import com.claryon.agent.ModoOperacao
 import com.claryon.agent.Utterance
 import com.claryon.agent.utteranceFor
-import com.claryon.audio.GlassesAudioManagerImpl
+import com.claryon.field.audio.AudioDoAgente
 import com.claryon.audio.RotaDeAudioPerdidaException
 import com.claryon.common.Result
 import com.claryon.evidence.EncryptedEvidenceVault
@@ -147,7 +147,9 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
 
     // Em DEBUG permite fallback para o dispositivo padrão (o emulador/MDK não têm
     // SCO). Em produto, só rota HFP dos óculos.
-    private val audio = GlassesAudioManagerImpl(app, allowFallbackToDefault = BuildConfig.DEBUG)
+    // Dono único do processo. Ver `AudioDoAgente` — a instância separada daqui
+    // derrubava a rota SCO por baixo da captura do rádio.
+    private val audio = AudioDoAgente.de(app)
 
     private val _audioStatus = MutableStateFlow("—")
     val audioStatus: StateFlow<String> = _audioStatus.asStateFlow()

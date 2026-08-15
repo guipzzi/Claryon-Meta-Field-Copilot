@@ -1,4 +1,4 @@
-# Onde estamos — 2026-08-15 · `2d3e8ff`
+# Onde estamos — 2026-08-15 · `9b0f03b`+
 
 Fonte única de "estado da conversa". **Reescrito ao fim de cada sessão, nunca acrescentado.**
 Teto duro: **60 linhas**. O que não couber é história e vai para `DECISIONS.md`. Aqui só
@@ -27,10 +27,19 @@ entra o que muda a próxima decisão: o que funciona, o que está quebrado, o qu
    `runCommand`/`falarComando`/`cicloDeVoz`, e o nome só aparece uma vez no projeto: na
    própria definição (`ui/DiagnosticsScreen.kt:48`). C2, C3 e C4 estão mortos por voz; o app
    entregue é 100% toque, que é o oposto da premissa do produto.
-2. **Duas instâncias de `GlassesAudioManagerImpl`** sobre o mesmo estado global de áudio do
-   aparelho (`radio/RadioViewModel.kt:64` e `ui/DiagnosticsViewModel.kt:150`).
-3. **Todos os earcons do rádio são engolidos:** `radio/RadioViewModel.kt:154` passa
-   `emitir = { }`. Num produto sem display, isso é falha virando silêncio.
+2. ~~Duas instâncias de `GlassesAudioManagerImpl`~~ **RESOLVIDO** — dono único em
+   `field/audio/AudioDoAgente.kt`. Era violação de compliance alcançável: o `liberar()` de
+   uma derrubava a rota SCO sob o `AudioRecord` da outra, e como `microfonePcm` confere a
+   rota só na abertura, o pré-roll passava a captar pelo microfone do celular e ia ao ar
+   no PTT seguinte — captando terceiros por trás do `GlassesAudioRoute`.
+3. ~~Earcons do rádio engolidos~~ **RESOLVIDO** — `RadioViewModel` tem `saidaDoRadio`.
+   **Pendência que sobra:** são duas filas de prioridade (rádio e ciclo de voz) que não se
+   enxergam, então um P1 do rádio não interrompe fala do copiloto. Só se resolve movendo o
+   TTS para o dono único.
+3b. ~~Captura sem tratamento de exceção~~ **RESOLVIDO** — os dois `escopo.launch` de
+   `RadioTatico` (`:135` e `:215`) passam por `semDerrubarOProcesso`, que converte falha em
+   earcon e **repropaga** `CancellationException`. Antes, óculos desconectando no toque do
+   PTT matava o processo.
 4. **Taxa de amostragem divergente:** o microfone entrega 16 kHz e `RadioTatico`/codec assumem
    8 kHz. Na recepção, um `AudioTrack` novo é criado e liberado **por quadro de 20 ms**.
 5. `WakeWordDetector` é interface sem implementação, e `PowerPolicy` declara

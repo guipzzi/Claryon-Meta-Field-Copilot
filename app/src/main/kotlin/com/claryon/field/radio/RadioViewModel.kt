@@ -3,12 +3,13 @@ package com.claryon.field.radio
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.claryon.audio.GlassesAudioManagerImpl
+import com.claryon.field.audio.AudioDoAgente
 import com.claryon.audio.GlassesAudioRoute
 import com.claryon.common.Earcon
 import com.claryon.common.Result
 import com.claryon.field.BuildConfig
 import com.claryon.field.ui.componentes.EstadoDoPtt
+import com.claryon.field.voice.VoiceOutput
 import com.claryon.field.ui.telas.FalaNoGrupo
 import com.claryon.field.ui.telas.ParPresente
 import com.claryon.net.ClienteDePisoLocal
@@ -61,7 +62,43 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
      */
     var tokenDeSessao: suspend () -> String? = { null }
 
-    private val audio = GlassesAudioManagerImpl(app, allowFallbackToDefault = BuildConfig.DEBUG)
+    /**
+     * Saída de som do rádio.
+     *
+     * Até aqui, `RadioTatico` recebia `emitir = { }` — uma lambda vazia que
+     * engolia **todos** os sinais do rádio: canal ocupado, canal perdido em
+     * emergência, limite de duração, alerta prioritário recebido e sem rede. Num
+     * produto sem display, isso é a regra dura "falha nunca é silêncio" sendo
+     * falsa enquanto a suíte fica verde. Pior que mudo: `emitirComSupressao`
+     * **registra** a janela de supressão antes de emitir, então o rádio desligava
+     * o microfone por 320 ms para se proteger do eco de um tom que nunca tocava.
+     *
+     * A justificativa antiga — "o ciclo de voz já toca" — era falsa em dois
+     * níveis: o ciclo de voz não tem porta de entrada no app entregue, e mesmo
+     * que tivesse, ele não sabe do rádio.
+     *
+     * **Limitação conhecida, e ela é deliberada.** Esta é uma segunda fila de
+     * prioridade, separada da do ciclo de voz. Um alerta P1 do rádio **não**
+     * interrompe uma resposta falada do copiloto, porque as duas filas não se
+     * enxergam. O que tornou isso aceitável agora foi o dono único da rota
+     * (`AudioDoAgente`): as duas filas disputam ordem, não mais o estado global de
+     * áudio do aparelho — que era o defeito que difundia terceiros. Arbitragem de
+     * prioridade entre subsistemas fica registrada em `ESTADO.md` como pendência,
+     * e não se resolve aqui sem mover o TTS para o dono, que é mudança maior.
+     */
+    private val saidaDoRadio = VoiceOutput(
+        scope = viewModelScope,
+        // O rádio não fala frases próprias: dos cinco sinais, quatro são tons e o
+        // quinto reusa `utteranceFor(SEM_REDE)`. Devolver `null` faz a fila tratar
+        // como não-sintetizável e cair no earcon, em vez de carregar o Piper de
+        // 60 MB para um caminho que só emite bipe.
+        sintetizar = { null },
+        reproduzir = { pcm, sr -> audio.reproduzir(pcm, sr) },
+    )
+
+    // Dono único do processo. Duas instâncias sobre o mesmo estado global do
+    // aparelho produziam captação pelo microfone do celular — ver `AudioDoAgente`.
+    private val audio = AudioDoAgente.de(app)
 
     private val _estado = MutableStateFlow<EstadoDoPtt>(
         EstadoDoPtt.Indisponivel("Rádio fechado."),
@@ -135,23 +172,8 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
                 piso = ClienteDePisoLocal(),
                 pcmDoMicrofone = { rotaValida -> audio.microfonePcm(rotaValida) },
                 reproduzir = { pcm, taxa -> audio.reproduzir(pcm, taxa) },
-                // TODO(voz): sem dono. Ver `DECISIONS.md`, achado de 2026-08-15.
-                //
-                // Esta lambda vazia engole TODOS os earcons do rádio: canal
-                // ocupado, canal perdido em emergência, limite de duração, alerta
-                // P1 recebido e sem rede. A justificativa original — "o ciclo de
-                // voz já toca" — era falsa em dois níveis: o ciclo de voz não tem
-                // porta de entrada no app entregue, e mesmo que tivesse, ele não
-                // sabe do rádio.
-                //
-                // Viola a regra dura "falha nunca é silêncio". Não está consertado
-                // aqui de propósito: a correção certa é dar **um dono único** à
-                // saída de áudio, porque hoje este ViewModel e o
-                // `DiagnosticsViewModel` já instanciam dois
-                // `GlassesAudioManagerImpl` sobre o mesmo estado global do
-                // aparelho. Acrescentar uma segunda fila de som agravaria o
-                // problema em vez de resolvê-lo.
-                emitir = { },
+                // Os earcons do rádio saem do mudo. Ver `saidaDoRadio`.
+                emitir = { u -> saidaDoRadio.emitir(u) },
                 duracaoDoEarconMs = { e -> duracaoDoEarcon(e) },
             )
             novo.entrarEmModoAtivo(r)
