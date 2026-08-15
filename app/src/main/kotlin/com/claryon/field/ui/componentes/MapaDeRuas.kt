@@ -155,9 +155,23 @@ fun MapaDeRuas(
                         // inicializado em `true` no construtor. Deixo a chamada
                         // explícita mesmo assim, porque um default que ninguém
                         // declara é um default que alguém desliga sem perceber.
-                        mapa.uiSettings.isRotateGesturesEnabled = false
+                        // Rotação por gesto LIGADA, e a bússola junto: se o mapa
+                        // pode girar, o agente precisa de um jeito de achar o
+                        // norte de volta. Bússola sem rotação seria enfeite;
+                        // rotação sem bússola seria armadilha.
+                        mapa.uiSettings.isRotateGesturesEnabled = true
+                        mapa.uiSettings.isCompassEnabled = true
+                        // Empurrada para baixo do cabeçalho flutuante da tela.
+                        // Sem isto ela nasce colada no topo direito, exatamente
+                        // sob a contagem da guarnição — dois elementos no mesmo
+                        // pixel, e o de baixo invisível. Só aparece com o mapa
+                        // girado, que é quando ela serve.
+                        mapa.uiSettings.setCompassMargins(0, 240, 36, 0)
+                        // Some sozinha quando o norte volta para cima: bússola
+                        // apontando para o norte num mapa orientado ao norte é
+                        // ruído que ocuparia canto de tela o turno inteiro.
+                        mapa.uiSettings.setCompassFadeFacingNorth(true)
                         mapa.uiSettings.isTiltGesturesEnabled = false
-                        mapa.uiSettings.isCompassEnabled = false
                         mapa.uiSettings.isZoomGesturesEnabled = true
                         mapa.uiSettings.setAttributionMargins(24, 0, 0, 24)
 
@@ -179,7 +193,7 @@ fun MapaDeRuas(
                             }
                         }
 
-                        desenhar(mapa, icones, minhaLatitude, minhaLongitude, meuRumoGraus, pares)
+                        desenhar(mapa, icones, minhaLatitude, minhaLongitude, meuRumoGraus, pares, 0.0)
                         ultimaAssinatura[0] = assinaturaDosDados
                         mapa.moveCamera(
                             CameraUpdateFactory.newLatLngZoom(
@@ -201,7 +215,11 @@ fun MapaDeRuas(
 
                 if (ultimaAssinatura[0] != assinaturaDosDados) {
                     ultimaAssinatura[0] = assinaturaDosDados
-                    desenhar(mapa, icones, minhaLatitude, minhaLongitude, meuRumoGraus, pares)
+                    // O giro que a câmera VAI ter, não o que ela tem agora:
+                    // `desenhar` roda antes de `seguir`, e usar o giro corrente
+                    // deixaria a seta torta pelo delta da rotação até o próximo
+                    // redesenho. É um erro que só aparece com o agente andando.
+                    desenhar(mapa, icones, minhaLatitude, minhaLongitude, meuRumoGraus, pares, giroAlvo(mapa, seguindo, focoNoIndicativo, meuRumoGraus))
                 }
                 if (ultimoFoco[0] != focoNoIndicativo) {
                     ultimoFoco[0] = focoNoIndicativo
@@ -211,7 +229,7 @@ fun MapaDeRuas(
                     // o agente andou alguns metros, e 260 ms de transição fazem o
                     // mapa deslizar por baixo da seta em vez de saltar. Saltar é
                     // o que faz um mapa em movimento parecer quebrado.
-                    seguir(mapa, minhaLatitude, minhaLongitude)
+                    seguir(mapa, minhaLatitude, minhaLongitude, meuRumoGraus)
                 }
             }
         },
@@ -271,10 +289,53 @@ private fun animarPara(
  * do receptor faz o mapa vibrar com o agente imóvel. Oito metros é maior que o
  * tremor típico e menor que um passo largo de viatura.
  */
-private fun seguir(mapa: MapLibreMap, lat: Double, lon: Double) {
+private fun seguir(mapa: MapLibreMap, lat: Double, lon: Double, rumo: Float?) {
     val atual = mapa.cameraPosition.target ?: return
-    if (Geo.distanciaM(atual.latitude, atual.longitude, lat, lon) < 8.0) return
-    mapa.animateCamera(CameraUpdateFactory.newLatLng(LatLng(lat, lon)), 260)
+    val andou = Geo.distanciaM(atual.latitude, atual.longitude, lat, lon)
+    val girou = rumo != null &&
+        anguloEntre(mapa.cameraPosition.bearing, rumo.toDouble()) > 12.0
+    if (andou < 8.0 && !girou) return
+
+    // **A tela gira com o deslocamento, e a seta para de girar.**
+    //
+    // É a inversão que todo navegador faz e que a primeira versão deste mapa não
+    // fazia. Com norte travado, ler "estou indo para lá" exige traduzir um ângulo
+    // na cabeça a cada esquina; com a rua do agente sempre apontando para cima,
+    // o que está à direita na tela está à direita no para-brisa. Some a tradução.
+    //
+    // O custo é real e é o motivo de eu ter escolhido o contrário antes: a malha
+    // de ruas passa a chegar torta e os rótulos giram. Vale mesmo assim, porque a
+    // decisão que este mapa serve é "para que lado eu sigo", não "onde fica o
+    // norte" — e a bússola, agora visível, devolve o norte a um toque.
+    val camera = CameraPosition.Builder()
+        .target(LatLng(lat, lon))
+        .apply { if (rumo != null && rumo.isFinite()) bearing(rumo.toDouble()) }
+        .build()
+    mapa.animateCamera(CameraUpdateFactory.newCameraPosition(camera), 320)
+}
+
+/**
+ * Para onde a câmera vai apontar ao fim desta passada.
+ *
+ * Seguindo e sem foco num par, ela vai girar até o rumo do agente; em qualquer
+ * outro caso ela fica onde está. Isolado numa função porque `desenhar` precisa
+ * saber disso **antes** de `seguir` acontecer.
+ */
+private fun giroAlvo(
+    mapa: MapLibreMap,
+    seguindo: Boolean,
+    foco: String?,
+    rumo: Float?,
+): Double = if (seguindo && foco == null && rumo != null && rumo.isFinite()) {
+    rumo.toDouble()
+} else {
+    mapa.cameraPosition.bearing
+}
+
+/** Menor ângulo entre dois rumos, atravessando o zero corretamente. */
+private fun anguloEntre(a: Double, b: Double): Double {
+    val d = kotlin.math.abs((a - b + 540.0) % 360.0 - 180.0)
+    return d
 }
 
 /**
@@ -290,6 +351,8 @@ private fun desenhar(
     minhaLon: Double,
     meuRumoGraus: Float?,
     pares: List<ParNoMapa>,
+    /** Giro que a câmera terá quando esta passada terminar. Ver o chamador. */
+    giroDaTela: Double,
 ) {
     mapa.clear()
 
@@ -326,7 +389,7 @@ private fun desenhar(
     mapa.addMarker(
         MarkerOptions()
             .position(LatLng(minhaLat, minhaLon))
-            .icon(icones.fromBitmap(setaDoPortador(meuRumoGraus))),
+            .icon(icones.fromBitmap(setaDoPortador(meuRumoGraus, giroDaTela))),
     )
 }
 
@@ -346,7 +409,7 @@ private fun desenhar(
  * apontar para o norte porque o GPS não sabe seria inventar direção — o mesmo
  * erro que `Rumo.deGraus(NaN)` devolvendo NORTE já custou a este projeto.
  */
-private fun setaDoPortador(rumoGraus: Float?): Bitmap {
+private fun setaDoPortador(rumoGraus: Float?, giroDaTela: Double): Bitmap {
     val lado = 56
     val bmp = Bitmap.createBitmap(lado, lado, Bitmap.Config.ARGB_8888)
     val c = Canvas(bmp)
@@ -368,9 +431,15 @@ private fun setaDoPortador(rumoGraus: Float?): Bitmap {
     if (rumoGraus != null && rumoGraus.isFinite()) {
         val tinta = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Cores.NoAr.toArgb() }
         c.save()
-        // O rumo do `Location` é graus a partir do norte, sentido horário — a
-        // mesma convenção da tela, com o norte travado em cima.
-        c.rotate(rumoGraus, centro, centro)
+        // **Zero, não `rumoGraus`.** Quem gira agora é a câmera: com a tela já
+        // orientada pelo deslocamento, a seta desenhada no rumo giraria duas
+        // vezes e apontaria para o lugar errado — erro que só aparece andando, e
+        // por isso escapa de qualquer teste de tela parada.
+        // Rumo do agente MENOS o giro já aplicado à câmera. Seguindo, os dois se
+        // cancelam e a seta aponta para cima. Com o mapa parado no norte — porque
+        // o agente arrastou —, o giro da câmera é zero e a seta volta a apontar
+        // para o rumo verdadeiro. Uma expressão cobre os dois casos.
+        c.rotate((rumoGraus - giroDaTela).toFloat(), centro, centro)
         val seta = Path().apply {
             moveTo(centro, centro - 8f)
             lineTo(centro + 5.5f, centro + 6f)
