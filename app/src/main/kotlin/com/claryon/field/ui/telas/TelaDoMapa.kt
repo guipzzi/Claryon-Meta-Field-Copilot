@@ -31,6 +31,7 @@ import com.claryon.field.ui.componentes.CabecalhoTatico
 import com.claryon.field.ui.componentes.Etiqueta
 import com.claryon.field.ui.componentes.Fio
 import com.claryon.field.ui.componentes.PontoDeEstado
+import com.claryon.field.ui.componentes.RadarDaGuarnicao
 import com.claryon.field.ui.componentes.TextoCorpoMenor
 import com.claryon.field.ui.componentes.TextoDado
 import com.claryon.field.ui.componentes.TextoIndicativo
@@ -125,6 +126,17 @@ fun TelaDoMapa(
         }
 
         LazyColumn(Modifier.fillMaxSize()) {
+            item {
+                // O radar primeiro: a pergunta "para que lado" tem resposta
+                // espacial, e a lista embaixo dá o número exato para quem quer.
+                RadarDaGuarnicao(
+                    pares = estado.pares,
+                    distanciasM = estado.pares.map { it.distanciaM },
+                    rumosGraus = estado.pares.map { it.rumoGraus },
+                    modifier = Modifier.padding(Espaco.Padrao),
+                )
+                Fio()
+            }
             items(estado.pares, key = { it.indicativo }) { par ->
                 LinhaDePar(par)
                 Fio()
@@ -170,11 +182,13 @@ private fun LinhaDePar(par: ParNoMapa) {
             TextoIndicativo(par.indicativo)
             Box(Modifier.height(Espaco.Micro))
             TextoDado(
-                when (par.frescor) {
+                when {
                     // Acima de dez minutos o marcador para de afirmar posição.
                     // Dizer "a 400 metros, nordeste" a partir de um dado de meia
                     // hora é afirmação sobre o presente com informação do passado.
-                    Frescor.ANTIGO -> par.idadeFalada.orEmpty()
+                    par.frescor == Frescor.ANTIGO -> par.idadeFalada.orEmpty()
+                    // "0 metros · oeste" é ruído com cara de dado.
+                    par.juntoDeMim -> "com você"
                     else -> listOfNotNull(
                         par.distanciaFalada.removePrefix("a "),
                         par.rumoFalado.takeIf { it.isNotBlank() },

@@ -44,7 +44,21 @@ data class ParNoMapa(
      */
     val atualizadoHa: String,
     val emMovimento: Boolean,
-)
+    /** Grandezas cruas, para o radar plotar. A lista mostra as versões faladas. */
+    val distanciaM: Int,
+    val rumoGraus: Double?,
+) {
+    /**
+     * Par praticamente no mesmo ponto — dupla na mesma viatura, que é a
+     * configuração mais comum do policiamento.
+     *
+     * Abaixo deste limiar, distância e rumo deixam de ser informação: "0 metros,
+     * oeste" é ruído com cara de dado, e o rumo nem existe (o PostGIS devolve nulo
+     * para pontos coincidentes). A mesma regra que a fala já aplica.
+     */
+    val juntoDeMim: Boolean
+        get() = rumoGraus == null || distanciaM < com.claryon.agent.FalaDePosicao.JUNTO_M
+}
 
 /** O que a tela mostra num instante. */
 data class EstadoDoMapa(
@@ -106,6 +120,8 @@ object MapaDePares {
                 idadeFalada = if (frescor == Frescor.ANTIGO) idade(p.idadeS) else null,
                 atualizadoHa = carimbo(p.idadeS),
                 emMovimento = (p.velocidadeMs ?: 0f) > 1f && frescor == Frescor.ATUAL,
+                distanciaM = p.distanciaM,
+                rumoGraus = p.azimuteGraus,
             )
         },
         assinado = assinado,
@@ -147,6 +163,8 @@ object MapaDePares {
             // esmaecimento já comunica "não confie tanto".
             idadeFalada = if (frescor == Frescor.ANTIGO) idade(m.idadeS) else null,
             atualizadoHa = carimbo(m.idadeS),
+            distanciaM = m.distanciaM,
+            rumoGraus = m.rumoGraus,
             // Movimento afirmado só enquanto a posição é atual. "Deslocando" a
             // partir de um dado de dez minutos é uma afirmação sobre o presente
             // feita com informação do passado.
