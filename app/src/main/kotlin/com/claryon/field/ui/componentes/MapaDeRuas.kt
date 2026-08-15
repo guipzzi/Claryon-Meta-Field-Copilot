@@ -16,14 +16,14 @@ import com.claryon.common.Geo
 import com.claryon.field.mapa.Frescor
 import com.claryon.field.mapa.ParNoMapa
 import com.claryon.field.ui.tema.Cores
-import org.maplibre.android.MapLibre
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.geometry.LatLng
-import org.maplibre.android.geometry.LatLngBounds
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
 import org.maplibre.android.annotations.IconFactory
 import org.maplibre.android.annotations.MarkerOptions
+import kotlin.math.cos
+import kotlin.math.ln
 
 /**
  * **Mapa de ruas escuro com a guarnição.**
@@ -48,6 +48,10 @@ import org.maplibre.android.annotations.MarkerOptions
  * **Tiles do OpenFreeMap**: livre, sem chave de API, sem registro. MapLibre e não
  * Google Maps porque o aparelho da corporação pode não ter Play Services — e um
  * mapa que não abre no aparelho institucional não é um mapa.
+ *
+ * `MapLibre.getInstance` roda em [com.claryon.field.ClaryonApp], não aqui: a
+ * `MapView` lança no construtor se a inicialização não tiver acontecido, e o
+ * `remember` que a constrói roda durante a composição, antes de qualquer efeito.
  */
 @Composable
 fun MapaDeRuas(
@@ -67,7 +71,6 @@ fun MapaDeRuas(
     // bateria manda fechar.
     val vista = remember(contexto) { MapView(contexto).also { it.onCreate(null) } }
     DisposableEffect(dono, vista) {
-        MapLibre.getInstance(contexto)
         val observador = LifecycleEventObserver { _, evento ->
             when (evento) {
                 Lifecycle.Event.ON_START -> vista.onStart()
@@ -143,6 +146,14 @@ private fun desenhar(
 
     val pontos = mutableListOf(eu)
     pares.forEach { par ->
+        // **`ANTIGO` não entra no mapa.** Acima de dez minutos a lista já para de
+        // afirmar posição e passa a dizer idade — e no mapa a afirmação é mais
+        // forte, não mais fraca: um ponto sobre uma rua diz *endereço*. Plotar
+        // uma correção de quarenta minutos como um pino desenharia a guarnição
+        // num quarteirão onde ninguém está, que é o erro que a regra dos dois
+        // minutos existe para impedir. A linha do par continua na lista abaixo,
+        // dizendo a idade — some do mapa, não do painel.
+        if (par.frescor == Frescor.ANTIGO) return@forEach
         val rumo = par.rumoGraus ?: return@forEach
         // A reconstrução. Ver o KDoc de `MapaDeRuas` sobre o que ela custa.
         val (lat, lon) = Geo.destino(minhaLat, minhaLon, par.distanciaM.toDouble(), rumo)
@@ -150,11 +161,11 @@ private fun desenhar(
         pontos += p
 
         // Opacidade por frescor, como na lista: marcador cheio afirma "está ali",
-        // esmaecido diz "estava". A regra é uma só, em três saídas.
+        // esmaecido diz "estava".
         val alfa = when (par.frescor) {
             Frescor.ATUAL -> 255
             Frescor.ESMAECIDO -> 110
-            Frescor.ANTIGO -> 60
+            Frescor.ANTIGO -> 0 // inalcançável: filtrado acima.
         }
         val cor = if (par.emMovimento) Cores.Vivo.toArgb() else Cores.Tinta.toArgb()
         mapa.addMarker(
@@ -166,15 +177,47 @@ private fun desenhar(
         )
     }
 
-    val camera = if (pontos.size > 1) {
-        val limites = LatLngBounds.Builder().includes(pontos).build()
-        org.maplibre.android.camera.CameraUpdateFactory.newLatLngBounds(limites, 140)
-    } else {
+    // **O portador fica sempre no centro, e o zoom nunca sai da escala de rua.**
+    //
+    // Enquadrar todo mundo (`newLatLngBounds`) parece a escolha óbvia e é errada:
+    // basta um par a 40 km — guarnição de área rural, ou uma posição publicada de
+    // outro município — para a câmera abrir no estado inteiro. Foi o que aconteceu
+    // no primeiro teste: o mapa mostrou de Curitiba a Brasília, sem uma rua
+    // legível em lugar nenhum, para caber um ponto cinza.
+    //
+    // Rua legível é o motivo de este mapa existir. Então o zoom sai da distância
+    // do par mais longe, preso entre bairro (13) e quarteirão (16,5); quem estiver
+    // além disso simplesmente não cabe na tela — e a linha dele na lista continua
+    // dando distância e rumo exatos, que é a informação precisa mesmo.
+    val maisLonge = pares
+        .filter { it.frescor != Frescor.ANTIGO && it.rumoGraus != null }
+        .maxOfOrNull { it.distanciaM } ?: 0
+    mapa.animateCamera(
         org.maplibre.android.camera.CameraUpdateFactory.newCameraPosition(
-            CameraPosition.Builder().target(eu).zoom(15.5).build(),
-        )
-    }
-    mapa.animateCamera(camera, 600)
+            CameraPosition.Builder().target(eu).zoom(zoomPara(maisLonge, minhaLat)).build(),
+        ),
+        600,
+    )
+}
+
+/**
+ * Zoom que põe o par mais distante perto da borda, sem sair da escala de rua.
+ *
+ * Web Mercator: a resolução em metros por pixel é `156543 · cos(latitude) / 2^z`.
+ * Invertendo para o raio desejado ocupar ~40% da altura útil (≈ 300 px num
+ * aparelho de 720 px de largura), sai o `z` abaixo.
+ *
+ * Os limites não são arbitrários. **16,5** é o quarteirão — dá para ler o nome da
+ * travessa, e é onde a câmera fica quando não há ninguém por perto, porque a
+ * pergunta que sobra é "em que rua **eu** estou". **13** é o bairro: abaixo disso
+ * o OpenFreeMap para de rotular via local, e um mapa sem nome de rua é o radar de
+ * novo, só que mais pesado.
+ */
+private fun zoomPara(maiorDistanciaM: Int, latitude: Double): Double {
+    if (maiorDistanciaM <= 0) return 16.5
+    val metrosPorPixel = maiorDistanciaM / 300.0
+    val z = ln(156_543.03 * cos(Math.toRadians(latitude)) / metrosPorPixel) / ln(2.0)
+    return z.coerceIn(13.0, 16.5)
 }
 
 /**
