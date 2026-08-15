@@ -28,8 +28,9 @@ import com.claryon.agent.Rumo
 import com.claryon.field.auth.CofreDeSessaoCifrado
 import com.claryon.net.AutenticacaoSupabase
 import com.claryon.net.ConfigRealtime
-import com.claryon.net.CanalDePosicoes
 import com.claryon.net.ConsultaDePosicao
+import com.claryon.net.HistoricoDoCanal
+import com.claryon.net.RespostaDePosicao
 import com.claryon.field.mapa.EstadoDoMapa
 import com.claryon.field.mapa.MapaDePares
 import com.claryon.net.PublicadorDePosicaoSupabase
@@ -56,6 +57,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -259,7 +261,6 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
 
     // ── Mapa da guarnição (C5) ────────────────────────────────────────────────
 
-    private val canalDePosicoes = CanalDePosicoes(publicador) { System.currentTimeMillis() }
 
     private val _estadoDoMapa = MutableStateFlow(
         EstadoDoMapa.indisponivel("Abra o mapa para ver a guarnição."),
@@ -301,63 +302,58 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
                     EstadoDoMapa.indisponivel("Sem sessão. Entre para ver a guarnição.")
                 return@launch
             }
-            // Publicar ANTES de assinar. A ordem é a reciprocidade: sem a própria
-            // posição no ar, `assinar` recusa — e recusa é o comportamento certo,
-            // não um obstáculo a contornar.
+
+            val historico = HistoricoDoCanal(
+                config = configRede,
+                tokenDeSessao = { autenticacao.tokenValido()?.also { tokenCorrente = it } },
+            )
+
+            // Publicar a própria posição ao abrir. Reciprocidade: o servidor só
+            // devolve distâncias se souber de onde medir, e quem vê é visto.
             publicarPosicao()
 
-            if (!canalDePosicoes.assinar(TALK_GROUP_DEMO)) {
-                // Duas causas diferentes, duas mensagens diferentes.
-                //
-                // A versão anterior dizia sempre "Sem publicar sua posição, não é
-                // possível ver a dos outros" — que **culpa o agente por algo que
-                // o app não implementa**. A recepção de posições dos pares ainda
-                // não existe no transporte (`assinarPares` devolve `false` por
-                // construção), então essa era a causa real em 100% dos casos, e a
-                // mensagem apontava para a errada.
-                //
-                // Culpar o usuário por uma capacidade ausente é a mesma classe de
-                // desonestidade que "Alfa Dois não localizado" quando falta login.
-                _estadoDoMapa.value = EstadoDoMapa.indisponivel(
-                    if (!publicador.publicando()) {
-                        "Sua posição não está subindo. Sem isso, o mapa não abre."
-                    } else {
-                        "Recepção de posições da guarnição ainda não disponível."
+            while (true) {
+                val r = historico.posicoesDoGrupo(TALK_GROUP_DEMO)
+                _estadoDoMapa.value = r.fold(
+                    onSuccess = { lista -> montarMapa(lista) },
+                    onFailure = {
+                        EstadoDoMapa.indisponivel("Não foi possível ler as posições da guarnição.")
                     },
                 )
-                return@launch
-            }
-
-            while (true) {
-                val minha = local.ultimaPosicao()
-                _estadoDoMapa.value = if (minha == null) {
-                    // Sem posição própria não há de onde medir distância nem rumo.
-                    // Mostrar os pares sem isso seria uma lista de nomes.
-                    EstadoDoMapa.indisponivel("Sem sinal de GPS. Posições indisponíveis.")
-                } else {
-                    MapaDePares.montar(
-                        canalDePosicoes.marcadores(minha.latitude, minha.longitude),
-                        assinado = canalDePosicoes.assinando(),
-                    )
-                }
-                // Redesenhar por tempo, e não só por pacote recebido: o
-                // esmaecimento depende do relógio, não da chegada de dado novo. Um
-                // par que parou de publicar tem de esmaecer sozinho — é
-                // exatamente esse o caso que a regra existe para cobrir.
-                kotlinx.coroutines.delay(INTERVALO_DE_REDESENHO_MS)
+                // Redesenhar por tempo, e não só quando chega dado: o esmaecimento
+                // depende do relógio. Um par que **parou** de publicar precisa
+                // esmaecer sozinho — é esse o caso que a regra existe para cobrir.
+                delay(INTERVALO_DE_REDESENHO_MS)
                 publicarPosicao()
             }
         }
     }
 
+    /**
+     * Monta o estado do mapa a partir das grandezas que o servidor devolveu.
+     *
+     * A idade da **própria** posição é verificada primeiro: as distâncias foram
+     * todas medidas a partir dela, então uma posição própria velha torna a tela
+     * inteira falsa — não só uma linha.
+     */
+    private fun montarMapa(lista: List<RespostaDePosicao>): EstadoDoMapa {
+        val minhaIdade = lista.minOfOrNull { it.idadeDoSolicitanteS } ?: Int.MAX_VALUE
+        if (lista.isNotEmpty() && minhaIdade > FalaDePosicao.IDADE_MAXIMA_S) {
+            return EstadoDoMapa.indisponivel(
+                "Sua posição está desatualizada. As distâncias seriam medidas do lugar errado.",
+            )
+        }
+        return MapaDePares.montarDeGrandezas(lista, assinado = true)
+    }
+
+    /** Chamado pelo `ON_STOP` da tela. Fecha a assinatura e descarta o espelho. */
     /** Chamado pelo `ON_STOP` da tela. Fecha a assinatura e descarta o espelho. */
     fun fecharMapa() {
+        // Sondagem, não assinatura: cancelar o laço já para o tráfego por
+        // completo. Não há nada aberto do outro lado para avisar — que é
+        // justamente a vantagem de perguntar em vez de assinar.
         bombaDoMapa?.cancel()
         bombaDoMapa = null
-        // `viewModelScope`, não o escopo cancelado: `desassinar` precisa rodar até
-        // o fim para avisar o servidor. Lançar no job que acabou de ser cancelado
-        // deixaria a assinatura aberta do outro lado.
-        viewModelScope.launch { canalDePosicoes.desassinar() }
         _estadoDoMapa.value = EstadoDoMapa.indisponivel("Abra o mapa para ver a guarnição.")
     }
 
@@ -744,7 +740,7 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
          * identidade — um agente pertence a um ou mais grupos, e o servidor já
          * impõe isso por RLS.
          */
-        const val TALK_GROUP_DEMO = "demo"
+        const val TALK_GROUP_DEMO = "22222222-0000-0000-0000-000000000001"
 
         /**
          * 5 s. Curto o bastante para o esmaecimento acompanhar o relógio, longo o

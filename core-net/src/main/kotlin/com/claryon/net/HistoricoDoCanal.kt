@@ -2,8 +2,10 @@ package com.claryon.net
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 
 /** Uma fala já transmitida, como o servidor a guarda. */
@@ -94,6 +96,60 @@ class HistoricoDoCanal(
                 )
             }
         }
+
+    /**
+     * Posições relativas de **todos** os pares do talk group, para o mapa.
+     *
+     * Sonda, e não assina. Postgres Changes seria o caminho óbvio e foi
+     * descartado: ele empurra a linha inteira, incluindo `geom`, e cada aparelho
+     * da guarnição passaria a receber a coordenada bruta de todos os outros. A
+     * garantia de que "o aparelho de um agente jamais recebe a posição de outro"
+     * viraria promessa, com o cliente descartando o que já recebeu.
+     *
+     * Com o mapa aberto 5% do turno, sondar a cada poucos segundos custa menos
+     * que manter uma assinatura viva o tempo todo — e mantém a garantia.
+     */
+    suspend fun posicoesDoGrupo(talkGroupId: String): Result<List<RespostaDePosicao>> =
+        chamarRpc("posicoes_do_grupo", org.json.JSONObject().put("talk_group", talkGroupId)) { arr ->
+            (0 until arr.length()).map { i ->
+                val o = arr.getJSONObject(i)
+                RespostaDePosicao(
+                    indicativo = o.optString("indicativo"),
+                    distanciaM = o.optDouble("distancia_m", 0.0).toInt(),
+                    azimuteGraus = o.optDouble("azimute").takeIf { !it.isNaN() },
+                    velocidadeMs = o.optDouble("speed_mps").takeIf { !it.isNaN() }?.toFloat(),
+                    idadeS = o.optInt("idade_s", Int.MAX_VALUE),
+                    idadeDoSolicitanteS = o.optInt("idade_solicitante_s", Int.MAX_VALUE),
+                )
+            }
+        }
+
+    private suspend fun <T> chamarRpc(
+        nome: String,
+        corpo: org.json.JSONObject,
+        mapear: (JSONArray) -> T,
+    ): Result<T> = withContext(Dispatchers.IO) {
+        val token = tokenDeSessao()
+            ?: return@withContext Result.failure(IllegalStateException("sem sessão"))
+
+        val req = Request.Builder()
+            .url("${config.projetoUrl}/rest/v1/rpc/$nome")
+            .addHeader("apikey", config.apiKey)
+            .addHeader("Authorization", "Bearer $token")
+            .post(
+                corpo.toString().toRequestBody(
+                    "application/json".toMediaType(),
+                ),
+            )
+            .build()
+
+        runCatching {
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) error("HTTP ${resp.code}: ${resp.body?.string()?.take(200)}")
+                mapear(JSONArray(resp.body?.string().orEmpty()))
+            }
+        }
+    }
 
     private suspend fun <T> buscar(
         caminho: String,

@@ -184,8 +184,22 @@ private fun LinhaDePar(par: ParNoMapa) {
             )
         }
 
-        if (par.emMovimento) {
-            Etiqueta("deslocando", cor = Cores.Vivo)
+        Column(horizontalAlignment = Alignment.End) {
+            // O carimbo aparece em TODAS as linhas, não só nas velhas. O
+            // esmaecimento diz "confie menos"; o carimbo diz *quanto* menos — e é
+            // a diferença entre decidir por sensação e decidir por número.
+            Etiqueta(
+                par.atualizadoHa,
+                cor = when (par.frescor) {
+                    Frescor.ATUAL -> Cores.Vivo
+                    Frescor.ESMAECIDO -> Cores.P2
+                    Frescor.ANTIGO -> Cores.Falha
+                },
+            )
+            if (par.emMovimento) {
+                Box(Modifier.height(Espaco.Micro))
+                Etiqueta("deslocando", cor = Cores.TintaMedia)
+            }
         }
     }
 }

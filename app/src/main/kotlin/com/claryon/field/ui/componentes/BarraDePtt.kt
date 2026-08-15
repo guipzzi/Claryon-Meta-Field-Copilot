@@ -185,19 +185,22 @@ private fun ConteudoNoAr(estado: EstadoDoPtt.NoAr) {
 }
 
 /**
- * Repouso: o gesto tem de estar no desenho.
+ * Repouso: retângulo pleno, sem ornamento.
  *
- * A versão anterior era texto centralizado num retângulo com colchetes — e
- * retângulo com texto no meio é a forma universal de **toque**, não de
- * pressão-e-segura. O agente lia "aperte", soltava, e nada acontecia.
+ * Voltou a ser retângulo depois do experimento com alvo circular — e a lição do
+ * caminho de ida e volta é que **a forma não era o problema; a borda era**. Os
+ * colchetes de mira eram decoração fingindo de afordância: enquadravam sem
+ * explicar, e num painel feito de fios retos soavam como um adorno estranho.
  *
- * A forma agora carrega o gesto: um alvo circular grosso, com um anel que existe
- * para ser preenchido enquanto o dedo está lá. Círculo grande é o vocabulário do
- * botão de rádio — o do talkie, o do interfone, o do PTT de headset —, e o polegar
- * o encontra sem a tela ser olhada, que é o requisito de verdade.
+ * A gramática aqui é a do Gotham: a ênfase vem do **contraste de superfície**,
+ * não de contorno. O botão é um bloco cheio, o rótulo é monoespaçado caixa-alta,
+ * e o único fio é o de 1 px que separa da lista — o mesmo fio que estrutura o
+ * resto do aplicativo. Nada de cantos arredondados, nada de sombra, nada de
+ * moldura própria.
  *
- * Ocupa 96 dp de diâmetro: acima do alvo mínimo de acessibilidade por larga
- * margem, porque o dedo que o procura está em movimento, com luva, e no escuro.
+ * O que o retângulo não conseguia dizer sozinho — que é **segurar**, não tocar —
+ * passou para duas coisas que não são forma: o rótulo diz o verbo, e o anel de
+ * progresso preenche a borda inferior enquanto o dedo desce.
  */
 @Composable
 private fun ConteudoPronto(canal: String, pressao: Float) {
@@ -216,124 +219,29 @@ private fun ConteudoPronto(canal: String, pressao: Float) {
 
     Box(Modifier.height(Espaco.Medio))
 
-    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-        AlvoDePtt(pressao)
-    }
-}
-
-/**
- * O alvo circular.
- *
- * Três anéis concêntricos, e cada um diz uma coisa:
- *
- *  - o **externo** é o limite do alvo de toque, fino e discreto;
- *  - o **de progresso** preenche em âmbar enquanto o dedo desce — é o retorno de
- *    que a pressão foi registrada, no intervalo entre o toque e o primeiro quadro
- *    de áudio sair;
- *  - o **miolo** é a superfície, que escurece sob o dedo.
- *
- * O ícone é um traço de microfone desenhado, não uma fonte de ícones: uma
- * dependência de 300 KB para um glifo, num app que fala por áudio, não se paga.
- */
-@Composable
-private fun AlvoDePtt(pressao: Float) {
-    val escala by animateFloatAsState(
-        targetValue = if (pressao > 0f) 0.94f else 1f,
-        animationSpec = tween(durationMillis = 90),
-        label = "escala-alvo",
-    )
-
     Box(
         Modifier
-            .size(96.dp)
-            .scale(escala)
+            .fillMaxWidth()
+            .height(56.dp)
+            .background(if (pressao > 0f) Cores.Pressionado else Cores.Elevado)
             .drawBehind {
-                val raio = size.minDimension / 2f
-                val centro = Offset(size.width / 2f, size.height / 2f)
-
-                drawCircle(color = Cores.Elevado, radius = raio, center = centro)
-                drawCircle(
-                    color = Cores.TracoForte,
-                    radius = raio - 1f,
-                    center = centro,
-                    style = Stroke(width = 1.5f),
-                )
+                // Barra de progresso na base, crescendo da esquerda. É o retorno
+                // no intervalo entre o dedo descer e o primeiro quadro sair — e
+                // vive na borda, não no meio, para não competir com o rótulo.
                 if (pressao > 0f) {
-                    drawArc(
+                    drawRect(
                         color = Cores.NoAr,
-                        startAngle = -90f,
-                        sweepAngle = 360f * pressao.coerceIn(0f, 1f),
-                        useCenter = false,
-                        style = Stroke(width = 4f, cap = StrokeCap.Round),
+                        topLeft = Offset(0f, size.height - 3f),
+                        size = androidx.compose.ui.geometry.Size(
+                            size.width * pressao.coerceIn(0f, 1f),
+                            3f,
+                        ),
                     )
                 }
-                desenharMicrofone(this, centro, raio * 0.42f, Cores.Tinta)
             },
-    )
-}
-
-/**
- * Microfone em traços. Cápsula arredondada, arco de suporte e haste.
- *
- * Desenhado em vez de importado: é o único ícone do aplicativo inteiro, e trazer
- * uma biblioteca de ícones para ele acrescentaria peso ao APK que já carrega dois
- * modelos de IA.
- */
-private fun desenharMicrofone(
-    escopo: androidx.compose.ui.graphics.drawscope.DrawScope,
-    centro: Offset,
-    tamanho: Float,
-    cor: Color,
-) = with(escopo) {
-    val larguraCapsula = tamanho * 0.62f
-    val alturaCapsula = tamanho * 1.15f
-    val topo = centro.y - alturaCapsula / 2f - tamanho * 0.15f
-
-    drawRoundRect(
-        color = cor,
-        topLeft = Offset(centro.x - larguraCapsula / 2f, topo),
-        size = androidx.compose.ui.geometry.Size(larguraCapsula, alturaCapsula),
-        cornerRadius = androidx.compose.ui.geometry.CornerRadius(larguraCapsula / 2f),
-    )
-    val raioArco = tamanho * 0.72f
-    drawArc(
-        color = cor,
-        startAngle = 0f,
-        sweepAngle = 180f,
-        useCenter = false,
-        topLeft = Offset(centro.x - raioArco, topo + alturaCapsula * 0.42f),
-        size = androidx.compose.ui.geometry.Size(raioArco * 2f, raioArco * 2f),
-        style = Stroke(width = tamanho * 0.16f, cap = StrokeCap.Round),
-    )
-    val baseArco = topo + alturaCapsula * 0.42f + raioArco
-    drawLine(
-        color = cor,
-        start = Offset(centro.x, baseArco),
-        end = Offset(centro.x, baseArco + tamanho * 0.3f),
-        strokeWidth = tamanho * 0.16f,
-        cap = StrokeCap.Round,
-    )
-}
-
-/**
- * Colchetes de mira: quatro cantos, 14 dp de braço.
- *
- * Vocabulário de retículo de instrumento, não de botão. Enquadra sem preencher —
- * o alvo de toque é a barra inteira, e um retângulo cheio aqui sugeriria que só
- * o retângulo é tocável.
- */
-private fun colchetes(escopo: androidx.compose.ui.graphics.drawscope.DrawScope) = with(escopo) {
-    val braco = 14.dp.toPx()
-    val cor = Cores.TracoForte
-    val l = 1.5f
-    listOf(
-        Offset(0f, 0f) to listOf(Offset(braco, 0f), Offset(0f, braco)),
-        Offset(size.width, 0f) to listOf(Offset(size.width - braco, 0f), Offset(size.width, braco)),
-        Offset(0f, size.height) to listOf(Offset(braco, size.height), Offset(0f, size.height - braco)),
-        Offset(size.width, size.height) to
-            listOf(Offset(size.width - braco, size.height), Offset(size.width, size.height - braco)),
-    ).forEach { (canto, bracos) ->
-        bracos.forEach { fim -> drawLine(cor, canto, fim, strokeWidth = l) }
+        contentAlignment = Alignment.Center,
+    ) {
+        Text("SEGURE PARA FALAR", style = Tipo.Acao, color = Cores.Tinta)
     }
 }
 
@@ -345,7 +253,7 @@ private fun ConteudoOcupado(porQuem: String) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            PontoDeEstado(Cores.P2)
+            PontoDeEstado(Cores.P2, pulsando = true)
             Box(Modifier.size(Espaco.Curto))
             TextoDado(porQuem, cor = Cores.Tinta)
         }
@@ -356,16 +264,13 @@ private fun ConteudoOcupado(porQuem: String) {
 
 @Composable
 private fun ConteudoIndisponivel(motivo: String) {
-    Row(
-        Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         PontoDeEstado(Cores.Falha)
         Box(Modifier.size(Espaco.Curto))
         TextoCorpoMenor(
             motivo,
             cor = Cores.TintaMedia,
-            maxLinhas = 1,
+            maxLinhas = 2,
             overflow = TextOverflow.Ellipsis,
         )
     }
@@ -389,7 +294,7 @@ private fun FormaDeOnda(amplitude: Float, modifier: Modifier = Modifier) {
             val meio = size.height / 2f
             for (i in 0 until barras) {
                 // Envelope decrescente do centro para as bordas: dá forma de voz
-                // em vez de equalizador, e mantém a leitura mesmo com nível baixo.
+                // em vez de equalizador, e mantém a leitura com nível baixo.
                 val distanciaDoCentro = kotlin.math.abs(i - barras / 2f) / (barras / 2f)
                 val envelope = 1f - distanciaDoCentro * 0.65f
                 val h = (meio * nivel * envelope).coerceAtLeast(1.5f)
