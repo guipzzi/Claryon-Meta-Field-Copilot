@@ -123,6 +123,15 @@ Todo acesso ao DAT passa por `GlassesFacade` em `core-glasses` — quando a 0.9 
 | Modelo só no pacote de teste | No aparelho da organização a IA local não existiria. Empacotar em `assets/models/` |
 | Duas capturas simultâneas | Dois `AudioRecord` na mesma fonte: a segunda falha ou rouba o fluxo da primeira. Fonte única com fan-out |
 | PAT commitado | `local.properties` (já no `.gitignore`) ou `GITHUB_TOKEN` |
+| Mesmo termo em dois classificadores | "Apoio" era ocorrência **e** `Intent.PedirApoio`: o comportamento passou a depender da ordem do `when`. Um termo, um dono |
+| Duas réguas para a mesma decisão | "Policial baleado" era emergência por um caminho e prioridade normal pelo outro. Escalada de prioridade é função única e compartilhada |
+| Permissão pedida sem estar no manifest | Negada em silêncio, para sempre. Sem erro de compilação, sem exceção, sem log. Há teste no aparelho que compara catálogo × manifest |
+| `shouldShowRequestPermissionRationale` como verdade | Devolve `false` para "nunca pedimos" **e** para "negou em definitivo". Registrar localmente o que já foi pedido |
+| Pedir permissão no `onCreate` | Diálogo sem contexto é diálogo negado, e negado duas vezes exige ir aos ajustes do Android. Motivo primeiro |
+| Supor que o runner concede permissões | **Não concede.** O emulador começa com tudo negado — que é o estado real de primeira instalação |
+| `pm revoke` no pacote sob teste | Mata o processo; o teste vira "encerrado inesperadamente". Combinações de negativa ficam na JVM |
+| Idade de posição guardada em campo | Envelhece errado: o campo continua dizendo "5 s" enquanto o relógio anda. Derivar na leitura |
+| Relógio de par adiantado | Idade negativa é lida como recentíssima pela política de obsolescência — o pior erro possível. `coerceAtLeast(0)` |
 
 ---
 
@@ -201,7 +210,17 @@ Capturar exige `GlassesAudioRoute`, e o único jeito de obter uma é rotear de f
 - **Reciprocidade:** dentro do talk group, quem vê é visto. Não existe modo de observar sem
   ser observado. Assimetria de visibilidade entre pares é vigilância; simetria é coordenação
 - A consulta por voz devolve **distância, rumo e estado** — nunca coordenadas brutas. O
-  aparelho de um agente jamais recebe a posição de outro
+  aparelho de um agente jamais recebe a posição de outro. O cálculo roda **no servidor**
+  (`public.consultar_posicao`): filtrar no cliente exigiria entregar a coordenada primeiro,
+  e a garantia viraria promessa
+- **Função exposta nunca aceita a identidade de quem pergunta como parâmetro.** Com
+  `solicitante_id` na assinatura, um agente legítimo varre os pares do talk group e
+  **trilatera a posição absoluta de qualquer um usando só distâncias** — o dado que a API
+  pode devolver. O solicitante vem do JWT. `private.posicao_relativa` aceita o parâmetro, e
+  é exatamente por isso que ela fica em `private`
+- **Espelho do mapa e consulta por voz são coisas separadas.** O espelho local
+  (`CanalDePosicoes`) só existe com o mapa visível e alimenta **apenas o mapa**. Fazer a
+  consulta por voz depender dele a quebraria com a tela apagada, que é o caso normal
 
 ## Design de áudio — regras duras
 

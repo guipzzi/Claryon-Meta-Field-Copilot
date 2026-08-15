@@ -590,3 +590,72 @@ Ordem cronológica inversa (mais recente no topo).
   otimista num documento técnico. Janela deslizante de 200 amostras: percentil recente é
   mais útil que média de tudo, porque a rede de agora importa mais que a de três horas atrás.
   Sem amostras devolve `null`, nunca zero: zero pareceria uma medição excelente.
+
+## Fase 4 — consulta de posição, léxico de ocorrências e permissões (2026-08-15)
+
+- **⚠️ ACHADO: a consulta de posição por voz não pode sair do espelho local.** A primeira
+  versão de C2 lia `CanalDePosicoes`, o espelho que alimenta o mapa. Escrevendo o teste
+  ficou claro que isso não fecha: o espelho **só existe enquanto o mapa está visível** — regra
+  de bateria que vale — e a consulta por voz é justamente para usar com a tela apagada.
+  Um copiloto de mãos livres que exige a tela ligada contradiz a própria premissa.
+  A correção foi levar C2 para o servidor, e ela ficou melhor em três eixos: funciona com a
+  tela apagada; custa uma requisição por pergunta em vez de um canal aberto o turno inteiro;
+  e **a coordenada do par nunca chega ao aparelho**, porque `ST_Distance` e `ST_Azimuth`
+  rodam dentro do Postgres. Filtrar no cliente exigiria entregar a coordenada primeiro — e
+  "o aparelho de um agente jamais recebe a posição de outro" deixaria de ser garantia para
+  virar promessa. O espelho ficou sendo o que sempre deveria ter sido: fonte do mapa, e só.
+
+- **`public.consultar_posicao(indicativo)` não aceita o solicitante como parâmetro.**
+  `private.posicao_relativa` aceita — e é por isso que ela continua em `private`. Se o
+  solicitante fosse argumento da função exposta, qualquer agente autenticado perguntaria
+  "onde está Alfa Dois em relação a Bravo Um" e, variando o segundo argumento entre os pares
+  do talk group, **trilateraria a posição absoluta de qualquer um usando só distâncias** —
+  que é exatamente o dado que a API foi desenhada para poder devolver. A checagem de talk
+  group continuaria passando: o solicitante forjado é membro legítimo. O solicitante vem do
+  JWT. Mesma classe de defeito que tirou `agentes_no_raio` do schema público na Fase 2.
+  Verificado por `servidor/verificacoes/0003_consulta_de_posicao.sql`, 15 checagens.
+
+- **Vocabulário sobreposto entre dois classificadores é defeito de desenho.** "Apoio" estava
+  no léxico de ocorrências *e* era `Intent.PedirApoio`. Resultado: "pedir apoio" virava
+  alerta de ocorrência, porque o ramo do léxico vinha antes no `when`. O comportamento
+  passou a depender da ordem das regras, que é a pior forma de decidir o que o produto faz.
+  "Apoio" saiu do léxico. Na mesma linha, "modo abordagem" virava alerta porque "abordagem" é
+  tipo de ocorrência: comandos explícitos passaram a vir antes da classificação automática —
+  o verbo do agente vence o palpite do sistema, porque ele disse o que queria.
+
+- **Uma régua de escalada, dois consumidores.** Ao tirar "apoio" do léxico, apareceu que
+  `Intent.PedirApoio` tinha escala própria e mais fraca: "policial baleado" era emergência
+  pelo léxico e prioridade normal pelo pedido de apoio. A mesma frase, dois despachos
+  diferentes, conforme o caminho que o roteador tomasse — inconsistência invisível até
+  acontecer em campo. `LexicoDeOcorrencias.escalarPrioridade` virou pública e é a única régua.
+
+- **"tiros" e "homem caído" saíram do gatilho genérico de emergência.** O léxico os classifica
+  com tipo, prioridade **e** logradouro. Mesma urgência, mais contexto para quem recebe.
+
+- **⚠️ MEDIDO: o runner de instrumentação não concede permissões automaticamente.**
+  A expectativa era que concedesse o que está no manifest; o emulador estava com tudo negado,
+  e o teste reprovou. É o estado real de primeira instalação, e virou o cenário do teste.
+  `pm revoke` no pacote sob teste **mata o processo** — por isso as combinações de negativa
+  ficam na JVM, onde varrer todas custa milissegundos, e o aparelho só verifica conceder.
+
+- **A tela de permissões não pede nada no `onCreate`.** A versão anterior disparava o diálogo
+  no instante em que a Activity nascia, com lista incompleta, e **ignorava o resultado** —
+  negar não mudava nada, e o app seguia para o painel simplesmente sem funcionar. Diálogo sem
+  contexto é diálogo negado, e negado duas vezes é negado para sempre. Motivo primeiro,
+  diálogo depois do toque. E o texto fala de capacidade perdida ("Sem câmera, não leio
+  placas"), nunca do identificador da plataforma — há teste que reprova MAIÚSCULA_COM_SUBLINHADO.
+
+- **`shouldShowRequestPermissionRationale` devolve `false` em dois casos opostos** — nunca
+  pedimos, ou negaram em definitivo — e o Android não distingue. Sem registro local do que já
+  foi pedido, o botão "Permitir" apareceria para sempre abrindo um diálogo que o sistema não
+  mostra mais; o sintoma, para o agente, é "apertei e não aconteceu nada".
+
+- **`ACCESS_BACKGROUND_LOCATION` não é pedida.** O serviço em primeiro plano com tipo
+  `location` cobre o turno inteiro. A de segundo plano só acrescentaria o diálogo "o tempo
+  todo" — assustador, e sem capacidade nova. Há teste no aparelho que reprova se ela entrar
+  no manifest final por merge de biblioteca.
+
+- **Só o microfone bloqueia a entrada no app.** Barrar por câmera negada seria o produto se
+  recusando a fazer o que ainda sabe fazer, com o agente já no pátio. Sem Bluetooth o ciclo
+  de voz roda inteiro com fone comum — perde-se o beamforming, o que muda quem é gravado, e
+  isso é dito em voz alta.

@@ -16,7 +16,9 @@ import com.claryon.common.Result
 import com.claryon.evidence.EncryptedEvidenceVault
 import com.claryon.field.BuildConfig
 import com.claryon.field.agent.ClaryonIntentExecutor
+import com.claryon.agent.BuscaDePar
 import com.claryon.field.agent.Identidade
+import com.claryon.field.local.ProvedorDeLocal
 import com.claryon.glasses.DatGlassesFacade
 import com.claryon.glasses.MockDeviceController
 import com.claryon.field.voice.Modelos
@@ -169,6 +171,8 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
 
     private val cofre = EncryptedEvidenceVault(app)
 
+    private val local = ProvedorDeLocal(app)
+
     /**
      * Sem `core-net`, o despacho **sempre** cai na fila durável e o agente ouve
      * "Sem rede. Na fila." — que é a verdade. Quando o transporte existir, troca-se
@@ -200,7 +204,18 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
         agora = { System.currentTimeMillis() },
         // Modo Ocorrência liga o Modo Tático da fila: informativo é suprimido.
         aoTrocarModo = { modo -> saida.modoTatico(modo == ModoOperacao.OCORRENCIA) },
+
+        minhaPosicao = { local.ultimaPosicao() },
+        permissaoDeLocal = { local.temPermissao() },
+
+        // C2 sai por `ConsultaDePosicao`, que precisa do token de sessão do
+        // agente — e o fluxo de autenticação ainda não existe. Enquanto isso,
+        // `Indisponivel`: o agente ouve "Consulta indisponível." em vez de
+        // "Alfa Dois não localizado", que seria afirmar que o companheiro sumiu
+        // quando o que falta é o login. Trocar aqui, e nada mais muda.
+        localizarPar = { BuscaDePar.Indisponivel },
     )
+
 
     /** Reprodução com rota garantida — sobe o HFP, toca, e devolve a rota. */
     private suspend fun reproduzirComRota(pcm: ShortArray, sampleRateHz: Int) {

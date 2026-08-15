@@ -12,6 +12,15 @@
     <uses-permission android:name="android.permission.CAMERA" />
 
     <!--
+      Localização em primeiro plano apenas. ACCESS_BACKGROUND_LOCATION NÃO é
+      pedida: o serviço em primeiro plano com tipo `location` já cobre o turno
+      inteiro, e a permissão de segundo plano acrescentaria o diálogo "o tempo
+      todo" — assustador e desnecessário — sem acrescentar capacidade nenhuma.
+    -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <!--
       Serviço de primeiro plano do pipeline contínuo (M8). Android 14+ exige a
       permissão POR TIPO, além do tipo declarado no <service> e repetido em
       startForeground(); divergir entre os três derruba o serviço.
@@ -20,6 +29,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 

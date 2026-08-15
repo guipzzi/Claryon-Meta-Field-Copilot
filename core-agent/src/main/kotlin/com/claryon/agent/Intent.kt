@@ -40,6 +40,18 @@ sealed interface Intent {
     /** Trocar o modo de operação. */
     data class TrocarModo(val modo: ModoOperacao) : Intent
 
+    /**
+     * Consultar a posição de um par pelo indicativo (C2).
+     * A resposta sai como distância, rumo e estado — nunca coordenadas.
+     */
+    data class ConsultarPosicao(val indicativo: String) : Intent
+
+    /**
+     * Alertar uma ocorrência (C3). A [Ocorrencia] já vem classificada pelo
+     * léxico determinístico — o executor não reclassifica, só despacha.
+     */
+    data class AlertarOcorrencia(val ocorrencia: Ocorrencia) : Intent
+
     /** Nada reconhecido — carrega a transcrição bruta para diagnóstico. */
     data class NaoReconhecida(val transcricao: String) : Intent
 }

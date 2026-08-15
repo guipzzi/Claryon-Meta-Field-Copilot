@@ -47,6 +47,29 @@ sealed interface ActionOutcome {
     /** Modo de operação trocado de fato (energia, câmera e rede já reconfiguradas). */
     data class ModoTrocado(val modo: ModoOperacao) : ActionOutcome
 
+    /** Par localizado (C2). A fala sai de [FalaDePosicao], nunca de coordenadas. */
+    data class PosicaoEncontrada(val posicao: PosicaoRelativa) : ActionOutcome
+
+    /**
+     * O par não foi localizado. **Não é falha do sistema** — é informação: pode
+     * estar fora do talk group, ou sem posição recente. Inventar uma posição
+     * plausível aqui seria dizer a um policial que o apoio está a 800 m quando
+     * está a 6 km.
+     */
+    data class ParNaoLocalizado(val indicativo: String) : ActionOutcome
+
+    /**
+     * Alerta disparado (C3), com a contagem de quem recebeu.
+     *
+     * @param destinatarios `null` = entregue sem contagem conhecida. A mesma
+     *   regra do apoio: contagem desconhecida não vira zero nem número inventado.
+     */
+    data class AlertaDisparado(
+        val tipo: TipoDeOcorrencia,
+        val prioridade: Prioridade,
+        val destinatarios: Int?,
+    ) : ActionOutcome
+
     /** Transcrição não casou com nenhuma intenção. Não é falha: é "repita". */
     data object NaoEntendi : ActionOutcome
 
@@ -70,6 +93,16 @@ enum class FalhaOperacional(val causaCurta: String) {
     PLACA_NAO_LIDA("Placa ilegível."),
     CONSULTA_INDISPONIVEL("Consulta indisponível."),
     SEM_REDE("Sem rede."),
+
+    /**
+     * A consulta de posição precisa da posição **própria** para dizer distância e
+     * rumo. Sem ela não há resposta relativa — e a alternativa, entregar a
+     * coordenada crua do par, é justamente o que a regra de C2 proíbe.
+     */
+    SEM_POSICAO_PROPRIA("Sem sinal de GPS."),
+
+    /** Permissão de localização negada. Falha explícita, nunca degradação muda. */
+    SEM_PERMISSAO_DE_LOCAL("Sem permissão de local."),
     NADA_A_REPETIR("Nada a repetir."),
     INTERNA("Falha interna."),
 }

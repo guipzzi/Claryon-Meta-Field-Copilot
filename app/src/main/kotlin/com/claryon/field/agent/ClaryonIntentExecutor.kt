@@ -5,6 +5,8 @@ import com.claryon.agent.FalhaOperacional
 import com.claryon.agent.Intent
 import com.claryon.agent.IntentExecutor
 import com.claryon.agent.ModoOperacao
+import com.claryon.agent.BuscaDePar
+import com.claryon.agent.Ocorrencia
 import com.claryon.agent.Prioridade
 import com.claryon.common.Result
 import com.claryon.evidence.EvidenceVault
@@ -16,6 +18,9 @@ import com.claryon.sync.TacticalDispatcher
 import com.claryon.sync.TacticalMessage
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+
+/** Coordenada própria, com a precisão que o GPS informou. */
+data class Coordenada(val latitude: Double, val longitude: Double, val precisaoM: Float)
 
 /** Identidade operacional do portador — preenche o template da mensagem tática. */
 data class Identidade(
@@ -50,6 +55,15 @@ class ClaryonIntentExecutor(
     private val identidade: Identidade,
     private val agora: () -> Long,
     private val aoTrocarModo: suspend (ModoOperacao) -> Unit,
+    /**
+     * Onde estou. `null` = sem correção de GPS **ou** sem permissão — a distinção
+     * é feita por [permissaoDeLocal], porque as duas causas exigem recuperações
+     * diferentes do agente (esperar sinal × abrir os ajustes).
+     */
+    private val minhaPosicao: suspend () -> Coordenada? = { null },
+    /** Onde está um par, já relativo a mim. Ver [BuscaDePar]. */
+    private val localizarPar: suspend (String) -> BuscaDePar = { BuscaDePar.Indisponivel },
+    private val permissaoDeLocal: () -> Boolean = { true },
 ) : IntentExecutor {
 
     private val mutex = Mutex()
@@ -91,6 +105,13 @@ class ClaryonIntentExecutor(
             // é dizer que não dá — jamais um "sem restrição" inventado, que num
             // contexto de abordagem seria uma informação de segurança falsa.
             ActionOutcome.Falhou(FalhaOperacional.CONSULTA_INDISPONIVEL)
+
+        // C2 — consulta de posição. Devolve distância, rumo e estado; a coordenada
+        // bruta do par **nunca** chega ao aparelho de outro agente.
+        is Intent.ConsultarPosicao -> consultarPosicao(intent.indicativo)
+
+        // C3 — alerta de ocorrência classificada.
+        is Intent.AlertarOcorrencia -> alertar(intent.ocorrencia)
 
         is Intent.TrocarModo -> {
             aoTrocarModo(intent.modo)
@@ -142,6 +163,61 @@ class ClaryonIntentExecutor(
         return when (despachante.despachar(msg)) {
             is Despacho.Enviada, Despacho.Enfileirada ->
                 ActionOutcome.OcorrenciaRegistrada(identidade.agentId + "@" + agora())
+        }
+    }
+
+    // ── C2: posição de um par ─────────────────────────────────────────────────
+
+    private suspend fun consultarPosicao(indicativo: String): ActionOutcome {
+        // Ordem deliberada: permissão antes de posição. As duas falham, mas só
+        // uma tem conserto pelo agente, e dizer "sem sinal" a quem negou a
+        // permissão o faria esperar por um GPS que nunca vai ser consultado.
+        if (!permissaoDeLocal()) {
+            return ActionOutcome.Falhou(FalhaOperacional.SEM_PERMISSAO_DE_LOCAL)
+        }
+        if (minhaPosicao() == null) {
+            return ActionOutcome.Falhou(FalhaOperacional.SEM_POSICAO_PROPRIA)
+        }
+        return when (val b = localizarPar(indicativo)) {
+            is BuscaDePar.Encontrado -> ActionOutcome.PosicaoEncontrada(b.posicao)
+            // Par ausente NÃO é falha: o sistema funcionou, o par é que não está
+            // localizável. Tratar como erro faria o agente duvidar do rádio.
+            BuscaDePar.NaoLocalizado -> ActionOutcome.ParNaoLocalizado(indicativo)
+            // Já isto É falha, e precisa soar como falha. Dizer "Alfa Dois não
+            // localizado" quando a consulta está fora do ar faz o agente concluir
+            // que o companheiro sumiu — e agir a partir disso.
+            BuscaDePar.Indisponivel -> ActionOutcome.Falhou(FalhaOperacional.CONSULTA_INDISPONIVEL)
+        }
+    }
+
+    // ── C3: alerta de ocorrência ──────────────────────────────────────────────
+
+    private suspend fun alertar(o: Ocorrencia): ActionOutcome {
+        // Posição é opcional no alerta, e de propósito: "tiroteio" sem GPS ainda
+        // precisa sair. Exigir coordenada faria o produto recusar exatamente o
+        // alerta mais urgente — o que o agente grita quando não dá tempo de nada.
+        val coord = if (permissaoDeLocal()) minhaPosicao() else null
+        val msg = TacticalMessage(
+            recipientType = RecipientType.GROUP,
+            recipient = identidade.destinoPadrao,
+            agentId = identidade.agentId,
+            vehiclePrefix = identidade.vehiclePrefix,
+            location = o.logradouro ?: o.referencia,
+            latitude = coord?.latitude,
+            longitude = coord?.longitude,
+            // A fala original vai junto da classificação: o tipo é metadado para
+            // roteamento e prioridade, não substituto do que o agente disse.
+            situation = "${o.tipo.rotulo}: ${o.textoOriginal}".take(SITUACAO_MAX),
+            priority = o.prioridade.name,
+            evidenceStatus = gravacaoAtual?.let { "gravando" },
+        )
+        return when (val d = despachante.despachar(msg)) {
+            is Despacho.Enviada ->
+                ActionOutcome.AlertaDisparado(o.tipo, o.prioridade, d.destinatarios)
+            // Enfileirado não é "alerta disparado". O agente precisa ouvir que
+            // ninguém foi avisado ainda — senão conta com um apoio que não sabe
+            // que existe uma ocorrência.
+            Despacho.Enfileirada -> ActionOutcome.ApoioEnfileirado
         }
     }
 

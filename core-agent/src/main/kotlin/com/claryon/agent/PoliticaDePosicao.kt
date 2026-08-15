@@ -1,0 +1,79 @@
+package com.claryon.agent
+
+/** O que fazer com a coleta de posição em cada momento. */
+data class PlanoDePosicao(
+    val intervaloMs: Long,
+    val deslocamentoMinimoM: Float,
+    val altaPrecisao: Boolean,
+    /** Assinar o canal de posições dos pares — só com o mapa à vista. */
+    val assinarPares: Boolean,
+)
+
+/**
+ * **Política de posição — a decisão que protege a bateria.**
+ *
+ * Duas regras carregam quase todo o ganho:
+ *
+ *  1. **Atualizar por deslocamento, não por tempo.** Agente parado quase não
+ *     custa energia; o GPS só acorda quando ele anda. Numa guarnição em ponto
+ *     fixo — que é boa parte do turno — a diferença é de ordens de grandeza.
+ *  2. **Assinar o canal dos pares apenas enquanto o mapa está visível.** Numa
+ *     guarnição de oito, difundir posição de todos para todos seria 8 × 8 de
+ *     tráfego permanente **para uma tela que fica fechada 95% do turno**. A
+ *     posição própria continua subindo — é ela que alimenta a consulta por voz e
+ *     o fan-out do alerta.
+ *
+ * E uma que é de segurança, não de energia: **Standby reduz cadência, não
+ * desliga**. Um agente em pausa reporta a cada 5 minutos. Sumir do mapa criaria a
+ * expectativa errada — companheiro que desaparece parece em perigo.
+ *
+ * Pura e testável: nenhuma dependência de Android.
+ */
+object PoliticaDePosicao {
+
+    fun planoPara(modo: ModoOperacao, mapaVisivel: Boolean): PlanoDePosicao = when (modo) {
+
+        // Pausa: cadência baixa, mas **nunca zero**.
+        ModoOperacao.STANDBY -> PlanoDePosicao(
+            intervaloMs = 5 * 60 * 1000,
+            deslocamentoMinimoM = 250f,
+            altaPrecisao = false,
+            assinarPares = mapaVisivel,
+        )
+
+        ModoOperacao.ATIVO -> PlanoDePosicao(
+            intervaloMs = 60 * 1000,
+            deslocamentoMinimoM = 50f,
+            altaPrecisao = true,
+            assinarPares = mapaVisivel,
+        )
+
+        // Ocorrência: a posição dos pares vira informação tática de segundo a
+        // segundo, e o custo de bateria é aceitável numa janela curta.
+        ModoOperacao.OCORRENCIA -> PlanoDePosicao(
+            intervaloMs = 15 * 1000,
+            deslocamentoMinimoM = 10f,
+            altaPrecisao = true,
+            assinarPares = mapaVisivel,
+        )
+    }
+
+    /**
+     * `true` se o marcador deve ser mostrado como **esmaecido** — posição que
+     * pode não ser mais verdade.
+     *
+     * Não é polimento: mostrar posição velha como atual é requisito de segurança
+     * invertido. O agente decidiria a abordagem contando com um apoio que já saiu
+     * dali.
+     */
+    fun marcadorObsoleto(idadeS: Int): Boolean = idadeS > OBSOLETO_S
+
+    /** Acima disso, nem esmaecido: o marcador passa a dizer há quanto tempo é. */
+    fun marcadorMuitoVelho(idadeS: Int): Boolean = idadeS > MUITO_VELHO_S
+
+    /** 2 min — mesmo limiar de [FalaDePosicao.IDADE_MAXIMA_S]. Uma regra, duas saídas. */
+    const val OBSOLETO_S = 120
+
+    /** 10 min. */
+    const val MUITO_VELHO_S = 600
+}

@@ -89,6 +89,24 @@ fun utteranceFor(outcome: ActionOutcome): Utterance = when (outcome) {
         Priority.RESPOSTA,
     )
 
+    is ActionOutcome.PosicaoEncontrada ->
+        Utterance.Falar(FalaDePosicao.para(outcome.posicao), Priority.RESPOSTA)
+
+    is ActionOutcome.ParNaoLocalizado ->
+        // Não é earcon de falha: o sistema funcionou, o par é que não está
+        // localizável. Tratar como erro faria o agente duvidar do rádio.
+        Utterance.Falar(FalaDePosicao.naoEncontrado(outcome.indicativo), Priority.RESPOSTA)
+
+    is ActionOutcome.AlertaDisparado -> when (outcome.destinatarios) {
+        null -> Utterance.Falar("Alerta enviado.", Priority.EMERGENCIA)
+        0 -> Utterance.Falar("Alerta enviado. Ninguém próximo.", Priority.EMERGENCIA)
+        1 -> Utterance.Falar("Uma unidade recebeu.", Priority.EMERGENCIA)
+        else -> Utterance.Falar(
+            "${porExtenso(outcome.destinatarios)} unidades receberam.",
+            Priority.EMERGENCIA,
+        )
+    }
+
     ActionOutcome.NaoEntendi ->
         Utterance.SinalizarEFalar(Earcon.FALHA, "Não entendi, repita.", Priority.RESPOSTA)
 
