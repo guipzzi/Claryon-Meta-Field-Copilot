@@ -44,10 +44,15 @@ sealed interface DecisaoDeSoltura {
  *  - **Botão preso.** Coberto pelo teto de duração em [SessaoPtt]; aqui só se
  *    garante que um segundo aperto durante a transmissão não abra outra.
  *
- * A escolha do gatilho físico ficou decidida por medição: o toque na haste dos
- * óculos **pausa a sessão de streaming** (ver `DECISIONS.md`), então o primário é
- * o long-press do botão de volume — que, além de funcionar, é local e não paga a
- * viagem por Bluetooth.
+ * **Só existe um acionador: o bloco de fala na tela.** O toque na haste dos óculos
+ * foi medido e **pausa a sessão de streaming** — apertar para falar derrubaria a
+ * própria transmissão. O botão de volume chegou a ficar registrado como primário,
+ * mas nunca passou de texto: sequestrar o volume de um aparelho institucional é
+ * efeito colateral que ninguém pediu. Ver `DECISIONS.md`.
+ *
+ * Isto continua valendo, e é o motivo de a classe existir mesmo com um gatilho só:
+ * o dedo na tela repica, escorrega e encosta sem intenção tanto quanto um botão
+ * mecânico.
  *
  * Puro e sem relógio: o tempo entra por parâmetro.
  *

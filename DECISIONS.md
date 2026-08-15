@@ -320,16 +320,30 @@ Ordem cronológica inversa (mais recente no topo).
   ```
 
   Um único toque derrubou os dois. Apertar para falar interromperia a própria transmissão —
-  o oposto do PTT. **Gatilho primário passa a ser o long-press do botão de volume**, que
-  ainda ganha em latência: o evento de haste viaja por Bluetooth (100–200 ms estimados),
-  o botão do celular é local. O gatilho fica atrás de `PttTrigger` para que a escolha seja
-  configuração, e o teste virou asserção de regressão — se o SDK mudar, ele falha e a
-  decisão é revisitada.
+  o oposto do PTT.
 
   Assinatura do mock confirmada por **inspeção do artefato** (`javap` sobre
   `mwdat-mockdevice-0.9.0.aar`), já que a doc oficial descreve o comportamento mas não
   publica a API Android: `MockGlassesServices.getCaptouch(): MockCaptouchKit`, com
   `tap()` e `tapAndHold()`.
+
+- **2026-08-15 — O toque na haste sai por completo: do produto, da instrumentação e do plano.**
+  A medição de V1 já tinha derrubado a haste como gatilho de PTT, mas o registro deixava a
+  porta encostada: falava em "gatilho primário passa a ser o long-press do botão de volume",
+  atrás de um `PttTrigger` configurável. Nada disso existia em código — nenhum
+  `dispatchKeyEvent`, nenhuma interface `PttTrigger` — e um plano que sobrevive à sua própria
+  refutação vira dívida silenciosa: quem lê o documento acredita que há dois gatilhos.
+
+  Decisão: **acionamento é por voz (comandos) e pelo botão do app (transmissão), e nada mais.**
+  Removidos `MockDeviceController.tap()`/`tapAndHold()` e o `PttTriggerTest`. O teste de caos
+  do *cascading stop* passou a derrubar a sessão por **desligamento** em vez de gesto — um
+  teste é o último lugar onde uma capacidade removida deveria continuar viva.
+
+  Alternativa descartada: botão de volume como PTT. Ganharia uso com luva e com o aparelho no
+  coldre, mas só funciona com o app em primeiro plano ou com um serviço interceptando a tecla,
+  e sequestrar o volume de um aparelho institucional é um efeito colateral que ninguém pediu.
+  A medição de V1 fica registrada acima como evidência de por que a haste caiu; o que sai é o
+  código, não a razão.
 
 - **`espeak-ng-data` podado para `pt_dict` + `en_dict` (113 dicionários → 2).**
   O modelo Piper declara `espeak: {voice: pt-br}`; os outros 111 idiomas eram peso morto.

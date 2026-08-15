@@ -55,6 +55,52 @@ object Geo {
     }
 
     /**
+     * Ponto a [distanciaM] metros e [rumoGraus] de rumo a partir de um ponto
+     * conhecido — o *problema geodésico direto*, em aproximação esférica.
+     *
+     * **Esta função existe por uma decisão de produto explícita, e ela enfraquece
+     * uma garantia.** O servidor devolve distância e rumo justamente para não
+     * entregar a coordenada do par; aplicar isto sobre a própria posição
+     * reconstrói a coordenada alheia com erro de metros, e a partir daí ela
+     * **existe** na memória deste processo.
+     *
+     * O que se ganha em troca: saber a rua. Numa emergência, "Alfa Dois a 400 m a
+     * nordeste" é orientação; "Alfa Dois na Rui Barbosa com a Anhanguera" é
+     * endereço — e endereço é o que se passa pelo rádio, o que o despachante
+     * entende e o que a ambulância procura.
+     *
+     * O que **continua** valendo depois desta decisão, e é o que a arquitetura de
+     * fato compra: a coordenada nunca trafega, nunca repousa em banco local, e
+     * nunca chega a quem não está no talk group. A migração 0010 fechou a leitura
+     * direta de `agent_positions`. A derivação é do cliente legítimo, com o dado
+     * que ele já tem para tomar a decisão dele.
+     *
+     * Erro do modelo esférico: ~0,3% em 2 km, uns 6 m — abaixo da precisão do GPS
+     * urbano, que é o que limita de verdade.
+     */
+    fun destino(
+        latOrigem: Double,
+        lonOrigem: Double,
+        distanciaM: Double,
+        rumoGraus: Double,
+    ): Pair<Double, Double> {
+        val f1 = Math.toRadians(latOrigem)
+        val l1 = Math.toRadians(lonOrigem)
+        val t = Math.toRadians(rumoGraus)
+        val d = distanciaM / RAIO_M
+
+        val f2 = asin(sin(f1) * cos(d) + cos(f1) * sin(d) * cos(t))
+        val l2 = l1 + atan2(
+            sin(t) * sin(d) * cos(f1),
+            cos(d) - sin(f1) * sin(f2),
+        )
+        // Normaliza a longitude para [-180, 180]: sem isso, alguém perto do
+        // antimeridiano recebe 190° e o mapa o coloca do outro lado do mundo.
+        val lon = ((Math.toDegrees(l2) + 540.0) % 360.0) - 180.0
+        return Math.toDegrees(f2) to lon
+    }
+
+    /**
      * `true` se o deslocamento entre dois pontos supera [limiarM].
      *
      * Usado como gatilho de publicação: agente parado não deve gastar rádio nem

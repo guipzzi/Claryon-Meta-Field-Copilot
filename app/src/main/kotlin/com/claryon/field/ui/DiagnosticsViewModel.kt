@@ -339,14 +339,23 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
      * todas medidas a partir dela, então uma posição própria velha torna a tela
      * inteira falsa — não só uma linha.
      */
-    private fun montarMapa(lista: List<RespostaDePosicao>): EstadoDoMapa {
+    private suspend fun montarMapa(lista: List<RespostaDePosicao>): EstadoDoMapa {
         val minhaIdade = lista.minOfOrNull { it.idadeDoSolicitanteS } ?: Int.MAX_VALUE
         if (lista.isNotEmpty() && minhaIdade > FalaDePosicao.IDADE_MAXIMA_S) {
             return EstadoDoMapa.indisponivel(
                 "Sua posição está desatualizada. As distâncias seriam medidas do lugar errado.",
             )
         }
-        return MapaDePares.montarDeGrandezas(lista, assinado = true)
+        // A origem do mapa vem da coleta local, não do servidor: o servidor
+        // devolve grandezas relativas justamente para nunca ter que devolver
+        // coordenada, e a única coordenada que este aparelho pode ter é a dele.
+        val minha = local.ultimaPosicao()
+        return MapaDePares.montarDeGrandezas(
+            lista,
+            assinado = true,
+            minhaLatitude = minha?.latitude,
+            minhaLongitude = minha?.longitude,
+        )
     }
 
     /** Chamado pelo `ON_STOP` da tela. Fecha a assinatura e descarta o espelho. */

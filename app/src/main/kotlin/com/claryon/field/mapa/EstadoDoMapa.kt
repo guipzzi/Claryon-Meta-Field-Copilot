@@ -66,6 +66,16 @@ data class EstadoDoMapa(
     val assinado: Boolean,
     val temPosicaoPropria: Boolean,
     val motivoIndisponivel: String?,
+    /**
+     * A coordenada do **portador**, e só dela.
+     *
+     * Existe para ancorar o mapa de ruas: os pares chegam como distância e rumo, e
+     * sem uma origem não há onde plotá-los. Nula até a primeira correção de GPS —
+     * e enquanto for nula o mapa não desenha, porque um mapa centrado num lugar
+     * arbitrário mostraria a guarnição inteira na rua errada.
+     */
+    val minhaLatitude: Double? = null,
+    val minhaLongitude: Double? = null,
 ) {
     companion object {
         /**
@@ -108,6 +118,8 @@ object MapaDePares {
     fun montarDeGrandezas(
         posicoes: List<com.claryon.net.RespostaDePosicao>,
         assinado: Boolean,
+        minhaLatitude: Double? = null,
+        minhaLongitude: Double? = null,
     ): EstadoDoMapa = EstadoDoMapa(
         pares = posicoes.map { p ->
             val frescor = frescorDe(p.idadeS)
@@ -127,6 +139,8 @@ object MapaDePares {
         assinado = assinado,
         temPosicaoPropria = true,
         motivoIndisponivel = null,
+        minhaLatitude = minhaLatitude,
+        minhaLongitude = minhaLongitude,
     )
 
     private fun frescorDe(idadeS: Int): Frescor = when {

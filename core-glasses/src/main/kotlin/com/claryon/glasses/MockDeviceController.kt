@@ -167,30 +167,6 @@ class MockDeviceController(context: Context) {
     }
 
     /**
-     * Simula um toque capacitivo na haste. Assinatura confirmada por **inspeção
-     * do artefato** (`javap` sobre `mwdat-mockdevice-0.9.0.aar`):
-     * `MockGlassesServices.getCaptouch(): MockCaptouchKit`, com `tap()` e
-     * `tapAndHold()` — a doc oficial descreve o comportamento mas não publica a
-     * assinatura Android.
-     *
-     * Existe para responder **empiricamente** se o toque serve como gatilho de
-     * PTT: a doc afirma que, com stream ativo, `tap` alterna pausa/retomada e
-     * `tapAndHold` encerra a sessão. Ver `PttTriggerTest`.
-     */
-    fun tap(): Boolean {
-        val d = device ?: return false
-        d.services.captouch.tap()
-        return true
-    }
-
-    /** Toque longo simulado. Ver [tap]. */
-    fun tapAndHold(): Boolean {
-        val d = device ?: return false
-        d.services.captouch.tapAndHold()
-        return true
-    }
-
-    /**
      * Simula o agente **tirando os óculos**. Assinatura confirmada por inspeção
      * do artefato: `MockDevice.doff()`.
      *

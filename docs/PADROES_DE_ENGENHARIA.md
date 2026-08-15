@@ -119,7 +119,7 @@ Todo acesso ao DAT passa por `GlassesFacade` em `core-glasses` — quando a 0.9 
 | Tentar reviver sessão encerrada | *Cascading stop* — criar sessão nova |
 | `getThermalHeadroom()` = `NaN` como 0 | `NaN` = sem informação; manter só o teto de taxa |
 | Testar áudio no MDK | **MDK não simula áudio.** Use fone Bluetooth com HFP |
-| Toque na haste como gatilho livre | É **gesto de sistema**: tap pausa/retoma o stream, tap-and-hold encerra a sessão. Callback de toque só existe com a capacidade de display, que os Ray-Ban não têm. Ver `DECISIONS.md` |
+| Toque na haste como gatilho de qualquer coisa | É **gesto de sistema**: tap pausa/retoma o stream, tap-and-hold encerra a sessão. Callback de toque só existe com a capacidade de display, que os Ray-Ban não têm. Fora do produto desde 2026-08-15: acionamento é por voz e pelo botão do app, e nada mais. Ver `DECISIONS.md` |
 | Modelo só no pacote de teste | No aparelho da organização a IA local não existiria. Empacotar em `assets/models/` |
 | Duas capturas simultâneas | Dois `AudioRecord` na mesma fonte: a segunda falha ou rouba o fluxo da primeira. Fonte única com fan-out |
 | PAT commitado | `local.properties` (já no `.gitignore`) ou `GITHUB_TOKEN` |

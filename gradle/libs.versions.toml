@@ -35,6 +35,21 @@ mwdat-mockdevice = { group = "com.meta.wearable", name = "mwdat-mockdevice", ver
 
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
 
+# Mapa de ruas escuro. MapLibre Native é o fork do Mapbox GL v1 de antes da
+# mudança de licença — BSD-2-Clause, sem chave de API, sem telemetria, e **sem
+# depender do Google Play Services**, que o aparelho da corporação pode não ter.
+#
+# Tiles do OpenFreeMap: livre, sem registro, sem chave, sem limite declarado, com
+# estilo escuro pronto. A alternativa era MapTiler ou Mapbox, e as duas exigem
+# chave em `local.properties` e têm cota — dependência operacional que um piloto
+# de segurança pública não deveria ter.
+#
+# `android-sdk` (11.x) e não `android-sdk-opengl` (13.x): a 13 embarca um módulo
+# `prefab/` com a `.so` não-strippada de 162 MB, que só entra no build de quem
+# linka C++ próprio, mas infla o download da build inteira. A 11.11.0 tem o mesmo
+# `jni/` e 14,8 MB de AAR.
+maplibre = { module = "org.maplibre.gl:android-sdk", version = "11.11.0" }
+
 # `org.json` real para os testes de JVM. O Android empacota essa mesma API, mas o
 # unit test recebe um stub que lança "not mocked" em qualquer método — o que
 # esconderia o caminho de renovação de sessão inteiro atrás de uma exceção de

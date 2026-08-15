@@ -408,22 +408,27 @@ class CaosDoDatTest {
     }
 
     @Test
-    fun sessaoEncerradaPorTapAndHold_naoRevive(): Unit = runBlocking {
-        // Armadilha "Tentar reviver sessão encerrada" — *cascading stop*. Depois
-        // do tap-and-hold (gesto de sistema que encerra a sessão), a mesma
-        // sessão não volta: é preciso criar uma nova. Se o app tentar reviver,
-        // fica num estado em que acha que está ouvindo e não está.
+    fun sessaoEncerradaPeloAparelho_naoRevive(): Unit = runBlocking {
+        // Armadilha "Tentar reviver sessão encerrada" — *cascading stop*. Uma vez
+        // que o aparelho derruba a sessão, ela não volta: é preciso criar outra.
+        // Se o app tentar reviver, fica num estado em que acha que está ouvindo e
+        // não está.
+        //
+        // O encerramento é provocado por **desligamento**, e não pelo toque longo
+        // na haste: o gesto capacitivo saiu do produto por decisão de escopo (ver
+        // `DECISIONS.md`), e um teste é o último lugar onde uma capacidade
+        // removida deveria continuar viva.
         val m = novoMock()
         m.enableWithPhoneCameraFeed()
         val f = facade()
         f.startSession()
         withTimeoutOrNull(10_000) { f.session.first { it == SessionStatus.STARTED } }
 
-        m.tapAndHold()
+        m.desligar()
         val parou = withTimeoutOrNull(10_000) {
             f.session.first { it != SessionStatus.STARTED }
         }
-        Log.i(TAG, "sessão após tapAndHold: $parou")
+        Log.i(TAG, "sessão após desligamento: $parou")
 
         // Sessão NOVA precisa funcionar.
         val nova = f.startSession()

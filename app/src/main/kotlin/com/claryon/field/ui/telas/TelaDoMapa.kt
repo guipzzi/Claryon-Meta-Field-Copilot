@@ -31,7 +31,7 @@ import com.claryon.field.ui.componentes.CabecalhoTatico
 import com.claryon.field.ui.componentes.Etiqueta
 import com.claryon.field.ui.componentes.Fio
 import com.claryon.field.ui.componentes.PontoDeEstado
-import com.claryon.field.ui.componentes.RadarDaGuarnicao
+import com.claryon.field.ui.componentes.MapaDeRuas
 import com.claryon.field.ui.componentes.TextoCorpoMenor
 import com.claryon.field.ui.componentes.TextoDado
 import com.claryon.field.ui.componentes.TextoIndicativo
@@ -127,14 +127,30 @@ fun TelaDoMapa(
 
         LazyColumn(Modifier.fillMaxSize()) {
             item {
-                // O radar primeiro: a pergunta "para que lado" tem resposta
-                // espacial, e a lista embaixo dá o número exato para quem quer.
-                RadarDaGuarnicao(
-                    pares = estado.pares,
-                    distanciasM = estado.pares.map { it.distanciaM },
-                    rumosGraus = estado.pares.map { it.rumoGraus },
-                    modifier = Modifier.padding(Espaco.Padrao),
-                )
+                // O mapa primeiro: numa emergência a pergunta é "onde", e "onde"
+                // se responde com nome de rua — é o que o despachante entende e o
+                // que a guarnição de apoio digita no navegador. A lista embaixo
+                // continua dando distância e rumo exatos, que o mapa aproxima.
+                val lat = estado.minhaLatitude
+                val lon = estado.minhaLongitude
+                if (lat != null && lon != null) {
+                    MapaDeRuas(
+                        minhaLatitude = lat,
+                        minhaLongitude = lon,
+                        pares = estado.pares,
+                        modifier = Modifier.fillMaxWidth().height(320.dp),
+                    )
+                } else {
+                    // Sem posição própria não há mapa — só lista. Centrar num
+                    // ponto arbitrário desenharia a guarnição inteira na rua
+                    // errada, que é pior que não desenhar.
+                    Box(Modifier.fillMaxWidth().padding(Espaco.Padrao)) {
+                        TextoCorpoMenor(
+                            "Sem posição própria. As distâncias abaixo vêm do servidor.",
+                            cor = Cores.TintaFraca,
+                        )
+                    }
+                }
                 Fio()
             }
             items(estado.pares, key = { it.indicativo }) { par ->

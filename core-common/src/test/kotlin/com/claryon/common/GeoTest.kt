@@ -80,6 +80,37 @@ class GeoTest {
     }
 
     @Test
+    fun destinoEhOInversoExatoDeDistanciaERumo() {
+        // A propriedade que justifica a função: aplicar `destino` sobre a saída de
+        // `distanciaM` + `rumoGraus` recupera o ponto original. É isto que torna a
+        // coordenada do par derivável — e é por isso que a decisão de usá-la é de
+        // produto, não de código.
+        val (lat, lon) = serraDouradaLat to serraDouradaLon
+        val d = Geo.distanciaM(pracaCivicaLat, pracaCivicaLon, lat, lon)
+        val r = Geo.rumoGraus(pracaCivicaLat, pracaCivicaLon, lat, lon)
+
+        val (latDerivada, lonDerivada) = Geo.destino(pracaCivicaLat, pracaCivicaLon, d, r)
+        val erro = Geo.distanciaM(lat, lon, latDerivada, lonDerivada)
+        assertTrue("erro de $erro m na reconstrução", erro < 1.0)
+    }
+
+    @Test
+    fun destinoNormalizaLongitudeNoAntimeridiano() {
+        // Sem normalizar, quem está perto de 180° recebe 190° e o mapa o coloca do
+        // outro lado do mundo.
+        val (_, lon) = Geo.destino(0.0, 179.99, 5_000.0, 90.0)
+        assertTrue("longitude fora do intervalo: $lon", lon in -180.0..180.0)
+        assertTrue("deveria ter cruzado para negativo: $lon", lon < 0)
+    }
+
+    @Test
+    fun destinoComDistanciaZero_devolveAOrigem() {
+        val (lat, lon) = Geo.destino(pracaCivicaLat, pracaCivicaLon, 0.0, 45.0)
+        assertEquals(pracaCivicaLat, lat, 1e-9)
+        assertEquals(pracaCivicaLon, lon, 1e-9)
+    }
+
+    @Test
     fun limiarDeDeslocamentoUsaDistanciaReal() {
         // Meio grau de longitude vale 55 km no equador e quase nada perto do
         // polo. Comparar deltas de coordenada em vez de metros publicaria demais
