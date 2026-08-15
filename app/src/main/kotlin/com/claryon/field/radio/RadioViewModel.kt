@@ -135,7 +135,23 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
                 piso = ClienteDePisoLocal(),
                 pcmDoMicrofone = { rotaValida -> audio.microfonePcm(rotaValida) },
                 reproduzir = { pcm, taxa -> audio.reproduzir(pcm, taxa) },
-                emitir = { /* o ciclo de voz já toca; aqui só a barra reage */ },
+                // TODO(voz): sem dono. Ver `DECISIONS.md`, achado de 2026-08-15.
+                //
+                // Esta lambda vazia engole TODOS os earcons do rádio: canal
+                // ocupado, canal perdido em emergência, limite de duração, alerta
+                // P1 recebido e sem rede. A justificativa original — "o ciclo de
+                // voz já toca" — era falsa em dois níveis: o ciclo de voz não tem
+                // porta de entrada no app entregue, e mesmo que tivesse, ele não
+                // sabe do rádio.
+                //
+                // Viola a regra dura "falha nunca é silêncio". Não está consertado
+                // aqui de propósito: a correção certa é dar **um dono único** à
+                // saída de áudio, porque hoje este ViewModel e o
+                // `DiagnosticsViewModel` já instanciam dois
+                // `GlassesAudioManagerImpl` sobre o mesmo estado global do
+                // aparelho. Acrescentar uma segunda fila de som agravaria o
+                // problema em vez de resolvê-lo.
+                emitir = { },
                 duracaoDoEarconMs = { e -> duracaoDoEarcon(e) },
             )
             novo.entrarEmModoAtivo(r)

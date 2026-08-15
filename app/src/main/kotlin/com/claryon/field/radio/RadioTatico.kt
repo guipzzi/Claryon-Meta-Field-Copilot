@@ -154,8 +154,10 @@ class RadioTatico(
     // ── Emissão ───────────────────────────────────────────────────────────────
 
     /**
-     * Chamado ao **pressionar** o gatilho (long-press do botão de volume — o
-     * toque na haste foi descartado por medição: ele pausa a sessão).
+     * Chamado ao **pressionar** o gatilho — hoje, o bloco de fala da tela, e só
+     * ele. O toque na haste foi descartado por medição (pausa a sessão) e o botão
+     * de volume chegou a ficar documentado como primário sem nunca existir em
+     * código. Ver `DECISIONS.md`.
      */
     fun aoPressionar(rota: GlassesAudioRoute, prioridade: PrioridadeTransmissao = PrioridadeTransmissao.P2_APOIO) {
         when (val d = gatilho.aoPressionar(agoraMs())) {

@@ -1069,3 +1069,42 @@ aparelho tem" é exatamente o que se defende numa auditoria.
 - **`Result.success(Transcript(""))`** — texto vazio devolvido como sucesso, indistinguível
   de transcrição legítima que resultou em nada. Num produto cuja regra é que falha nunca é
   silêncio, sucesso vazio é a definição de silêncio. Virou falha tipada.
+
+- **2026-08-15 — Auditoria de conformidade com as três premissas do material CEIA/Meta: um
+  achado domina todos os outros.** Seis agentes independentes varreram o repositório contra
+  (1) operação sem toque, (2) envelope do hardware, (3) orçamento de bateria e IA local.
+  Veredictos: premissa 1 **VIOLA**, premissas 2 e 3 **PARCIAL**. 27 achados.
+
+  **O achado que domina: o ciclo de voz não tem porta de entrada no app entregue.**
+  `DiagnosticsScreen` é a única tela que chama `runCommand`/`falarComando`/`cicloDeVoz`, e ela
+  saiu do `MainActivity` no commit `d888970` e nunca voltou — `grep -rn DiagnosticsScreen`
+  devolve uma linha, a própria definição. Como `IntentExecutor.execute` só é alcançado por
+  ela e por `VoiceCycle`, **C2, C3 e C4 estão mortos por voz**. O app que o agente abre é
+  100% toque, que é exatamente o que a premissa 1 proíbe. Nenhuma suíte apontou: elas cobrem
+  o comportamento das peças, não a existência do caminho até elas.
+
+  É a quinta vez que este projeto encontra o mesmo defeito — capacidade construída, testada e
+  nunca ligada (`RadioTatico`, `startRegistration`, `anunciarCapacidadesPerdidas`,
+  `ColetorDePosicao`, agora o ciclo inteiro). A lição já registrada em §"Fluxo de trabalho"
+  não bastou porque ela pede leitura de código; o que falta é uma **verificação de
+  alcançabilidade** — para cada capacidade do edital, o caminho do gesto do agente até a
+  execução, ou a admissão de que não existe.
+
+  Corolários do mesmo defeito, já confirmados: `WakeWordDetector` é interface sem
+  implementação enquanto `PowerPolicy` declara `wakeWordAtiva = true`; o modo **Standby**
+  (a maior economia de bateria do desenho, porque fecha o SCO) é inalcançável, o serviço sobe
+  em ATIVO e nada o tira de lá; `TelemetriaDoRadio` e todos os `Telemetry.mark()` não têm
+  chamador, então **nenhuma das seis metas está instrumentada** — apesar de a regra do projeto
+  ser "métrica adicionada no fim nunca é adicionada"; `SyncManager.instalar()` e as duas
+  faixas de `WorkManager` não têm chamador; `aoDetectarRedeDisponivel` não tem chamador, então
+  o teto de 5 min do backoff é só custo.
+
+  Dois defeitos de áudio que quebram o rádio na prática, e que nenhum teste pegou porque o
+  MDK não simula áudio: o microfone entrega **16 kHz** e o `RadioTatico`/Opus assumem
+  **8 kHz** — a fala transmitida sai uma oitava grave e na metade da velocidade, e a taxa de
+  pacotes dobra; e a recepção cria, escreve e libera um `AudioTrack` **por quadro de 20 ms**,
+  em corrotinas concorrentes, o que reproduz a fala fora de ordem.
+
+  Também confirmado, do lado bom: **não há IA na nuvem em caminho nenhum.** Whisper e Piper
+  rodam locais, os modelos estão em `app/src/main/assets/`, e nenhum áudio, transcrição ou
+  frame sai do aparelho no caminho crítico.
