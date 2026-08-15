@@ -396,3 +396,23 @@ Ordem cronológica inversa (mais recente no topo).
   arquivo. Round-trip de quadro (inclusive bytes altos e a marca de último) é testado; o
   `TransporteRealtime` em si **não foi verificado contra projeto real** — depende de
   credencial, e está declarado como tal no KDoc.
+
+- **✅ Transporte verificado contra o Supabase real (2026-08-14).**
+  `TransporteRealtimeIntegracaoTest`, três testes executados (não pulados): socket abre e
+  entra no canal; **um quadro de 90 bytes atravessa entre dois clientes byte a byte**;
+  anúncio de fala atravessa com a prioridade preservada. O envelope de canais do Phoenix e
+  os nomes de evento em `ProtocoloRealtime` funcionam como escritos — nenhuma correção de
+  formato de fio foi necessária.
+  Topologia de dois clientes, e não auto-eco, de propósito: em produção o emissor não deve
+  receber a própria voz, então validar por eco provaria uma configuração indesejada. É
+  também a topologia da demonstração.
+
+- **`INTERNET` declarada no manifest do `core-net`, não só no `app`.**
+  Sem isso o teste instrumentado do módulo — que roda num APK próprio, isolado do `app` —
+  falhava ao abrir o socket sem dizer por quê. Declarar a permissão no módulo que de fato a
+  usa faz o consumidor herdá-la por merge, em vez de precisar saber disso.
+
+- **Credenciais do Supabase por `local.properties` → `BuildConfig`, nunca versionadas.**
+  Chave `anon` (respeita RLS), não `service_role` — esta fica só nas variáveis de ambiente
+  das Edge Functions. Ausentes, o teste de integração se declara pulado: ninguém deve
+  precisar de credencial para rodar a suíte.

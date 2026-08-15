@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  core-net é o transporte da rede tática: sem INTERNET não há PTT, alerta nem
+  posição. Declarada aqui, no módulo que de fato a usa, para que ela apareça no
+  APK de teste instrumentado deste módulo — que roda isolado do `app` — e para
+  que o consumidor a herde por merge em vez de precisar saber disso.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+</manifest>

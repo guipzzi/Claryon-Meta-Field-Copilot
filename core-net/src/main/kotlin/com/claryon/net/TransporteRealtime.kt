@@ -32,9 +32,10 @@ data class ConfigRealtime(val projetoUrl: String, val apiKey: String)
  * reconexão em [PoliticaDeReconexao], ambas testadas. O que sobra aqui é
  * encanamento: abrir o socket, empurrar texto, reconectar.
  *
- * ⚠️ **Não verificado contra um projeto real** — depende de credencial. O que é
- * verificável sem rede já está coberto pelos testes das duas peças acima; esta
- * classe é exercitada quando houver projeto (ver `docs/VERIFICACOES_COM_HARDWARE.md`).
+ * ✅ **Verificado contra projeto real** (2026-08-14, `TransporteRealtimeIntegracaoTest`):
+ * dois clientes no mesmo talk group, socket aberto, e um quadro de 90 bytes de
+ * payload atravessando **byte a byte** de um para o outro. Anúncio de fala também
+ * atravessa, com a prioridade preservada.
  */
 class TransporteRealtime(
     private val config: ConfigRealtime,

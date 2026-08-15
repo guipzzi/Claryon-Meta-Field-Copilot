@@ -11,10 +11,9 @@ import java.util.Base64
  * é a parte mais provável de mudar, e concentrá-la aqui faz a correção ser de um
  * arquivo. É também a única parte testável sem rede.
  *
- * ⚠️ **A confirmar contra um projeto real** (item da Fase 2 que depende de
- * credencial): nomes de evento e envelope. A estrutura abaixo segue o protocolo
- * de canais do Phoenix, que é o que o Realtime usa; divergências aparecem no
- * primeiro `join` e são corrigidas aqui.
+ * ✅ **Confirmado contra projeto real** (2026-08-14): o envelope de canais do
+ * Phoenix e os nomes de evento abaixo funcionam como estão — `join` aceito e
+ * broadcast entregue entre dois clientes, com o payload intacto.
  *
  * ## Por que base64
  *
