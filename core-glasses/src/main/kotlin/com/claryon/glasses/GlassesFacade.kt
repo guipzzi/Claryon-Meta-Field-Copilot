@@ -12,7 +12,7 @@ import kotlinx.coroutines.flow.StateFlow
  * não a base inteira. Nenhum outro módulo importa símbolos do DAT.
  *
  * Contrato fixado no M0. A implementação (registro via deeplink do app Meta AI,
- * `createSession`, `addStream`, `capturePhoto`) chega no M1/M2 e é sempre
+ * `createSession`, `addCamera`, `capturePhoto`) chega no M1/M2 e é sempre
  * consultada na doc viva antes de ser escrita.
  */
 interface GlassesFacade {

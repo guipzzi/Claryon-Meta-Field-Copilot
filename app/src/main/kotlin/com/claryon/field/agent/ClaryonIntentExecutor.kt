@@ -20,7 +20,24 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 /** Coordenada própria, com a precisão que o GPS informou. */
-data class Coordenada(val latitude: Double, val longitude: Double, val precisaoM: Float)
+data class Coordenada(
+    val latitude: Double,
+    val longitude: Double,
+    val precisaoM: Float,
+    /**
+     * Para onde o portador está apontando, em graus a partir do norte. `null`
+     * quando o aparelho não sabe — GPS só entrega rumo em movimento, e parado
+     * ele não tem como saber para onde o corpo está virado.
+     *
+     * **É o único dado de posição que nunca sai do aparelho.** Ele existe para
+     * girar a seta na tela do próprio agente e não tem serventia nenhuma para
+     * mais ninguém — então não entra em `PublicadorDePosicao`, não entra no
+     * esquema do servidor, e não há caminho por onde vaze. Um dado que só é
+     * útil localmente deve ficar local; é a versão barata de uma garantia que
+     * em outros pontos deste produto custou muito mais para obter.
+     */
+    val rumoGraus: Float? = null,
+)
 
 /** Identidade operacional do portador — preenche o template da mensagem tática. */
 data class Identidade(

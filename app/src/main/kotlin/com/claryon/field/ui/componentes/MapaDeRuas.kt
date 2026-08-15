@@ -3,6 +3,7 @@ package com.claryon.field.ui.componentes
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.Path
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
@@ -16,14 +17,14 @@ import com.claryon.common.Geo
 import com.claryon.field.mapa.Frescor
 import com.claryon.field.mapa.ParNoMapa
 import com.claryon.field.ui.tema.Cores
-import org.maplibre.android.camera.CameraPosition
-import org.maplibre.android.geometry.LatLng
-import org.maplibre.android.maps.MapView
-import org.maplibre.android.maps.Style
 import org.maplibre.android.annotations.IconFactory
 import org.maplibre.android.annotations.MarkerOptions
-import kotlin.math.cos
-import kotlin.math.ln
+import org.maplibre.android.camera.CameraPosition
+import org.maplibre.android.camera.CameraUpdateFactory
+import org.maplibre.android.geometry.LatLng
+import org.maplibre.android.maps.MapLibreMap
+import org.maplibre.android.maps.MapView
+import org.maplibre.android.maps.Style
 
 /**
  * **Mapa de ruas escuro com a guarnição.**
@@ -36,9 +37,9 @@ import kotlin.math.ln
  * apoio digita no próprio navegador.
  *
  * **O que isso custa, dito com todas as letras.** A posição dos pares chega como
- * distância e rumo; plotá-la sobre ruas exige reconstruí-la por
- * [Geo.destino], e a partir daí a coordenada alheia **existe** na memória deste
- * processo. Era o que o desenho anterior evitava.
+ * distância e rumo; plotá-la sobre ruas exige reconstruí-la por [Geo.destino], e a
+ * partir daí a coordenada alheia **existe** na memória deste processo. Era o que o
+ * desenho anterior evitava.
  *
  * O que continua valendo: a coordenada nunca trafega, nunca repousa em banco
  * local, e nunca chega a quem não está no talk group — a migração 0010 fechou a
@@ -52,12 +53,24 @@ import kotlin.math.ln
  * `MapLibre.getInstance` roda em [com.claryon.field.ClaryonApp], não aqui: a
  * `MapView` lança no construtor se a inicialização não tiver acontecido, e o
  * `remember` que a constrói roda durante a composição, antes de qualquer efeito.
+ *
+ * **Assinaturas conferidas por `javap` no AAR real** (`android-sdk-11.11.0.aar`,
+ * `classes.jar`), não de memória — Regra Zero vale para toda dependência, não só
+ * para o DAT.
  */
 @Composable
 fun MapaDeRuas(
     minhaLatitude: Double,
     minhaLongitude: Double,
+    /** Para onde o portador aponta. `null` parado — a seta vira disco. */
+    meuRumoGraus: Float?,
     pares: List<ParNoMapa>,
+    /**
+     * Indicativo que a câmera deve enquadrar, ou `null` para voltar ao portador.
+     * Trocar este valor **é** o comando de animação: a tela pede o destino, o
+     * mapa decide o percurso.
+     */
+    focoNoIndicativo: String?,
     modifier: Modifier = Modifier,
 ) {
     val contexto = LocalContext.current
@@ -94,16 +107,35 @@ fun MapaDeRuas(
             vista.apply {
                 getMapAsync { mapa ->
                     mapa.setStyle(Style.Builder().fromUri(ESTILO_ESCURO)) {
-                        // Sem bússola, sem logo deslocado, sem gestos de rotação: o
-                        // norte fica em cima. Mapa que gira com o aparelho obriga a
-                        // recalibrar a leitura a cada passo, e o agente está
-                        // andando.
+                        // Sem bússola e sem gestos de rotação: o norte fica em
+                        // cima. Mapa que gira com o aparelho obriga a recalibrar a
+                        // leitura a cada passo, e o agente está andando.
+                        //
+                        // A PINÇA fica ligada — e não precisou de nada: o `javap`
+                        // sobre `MapLibreMapOptions` mostra `zoomGesturesEnabled`
+                        // inicializado em `true` no construtor. Deixo a chamada
+                        // explícita mesmo assim, porque um default que ninguém
+                        // declara é um default que alguém desliga sem perceber.
                         mapa.uiSettings.isRotateGesturesEnabled = false
                         mapa.uiSettings.isTiltGesturesEnabled = false
                         mapa.uiSettings.isCompassEnabled = false
+                        mapa.uiSettings.isZoomGesturesEnabled = true
                         mapa.uiSettings.setAttributionMargins(24, 0, 0, 24)
 
-                        desenhar(mapa, icones, minhaLatitude, minhaLongitude, pares)
+                        // Limites de zoom: além de 17,5 o OpenFreeMap não tem mais
+                        // detalhe para dar e o agente só amplia ruído; aquém de 11
+                        // some o nome da rua, que é a única razão deste mapa
+                        // existir.
+                        mapa.setMinZoomPreference(11.0)
+                        mapa.setMaxZoomPreference(17.5)
+
+                        desenhar(mapa, icones, minhaLatitude, minhaLongitude, meuRumoGraus, pares)
+                        mapa.moveCamera(
+                            CameraUpdateFactory.newLatLngZoom(
+                                LatLng(minhaLatitude, minhaLongitude),
+                                ZOOM_PADRAO,
+                            ),
+                        )
                     }
                 }
             }
@@ -113,147 +145,193 @@ fun MapaDeRuas(
                 // Só redesenha com o estilo pronto: `addMarker` antes disso é
                 // descartado em silêncio, e o mapa abriria vazio na primeira
                 // atualização de posição — que é a mais provável de todas.
-                if (mapa.style?.isFullyLoaded == true) {
-                    desenhar(mapa, icones, minhaLatitude, minhaLongitude, pares)
-                }
+                if (mapa.style?.isFullyLoaded != true) return@getMapAsync
+                desenhar(mapa, icones, minhaLatitude, minhaLongitude, meuRumoGraus, pares)
+                animarPara(mapa, minhaLatitude, minhaLongitude, pares, focoNoIndicativo)
             }
         },
     )
 }
 
 /**
- * Coloca o portador e os pares, e enquadra todo mundo.
+ * Move a câmera — e **só** quando alguém pediu.
  *
- * Enquadrar em vez de fixar o zoom: uma guarnição pode estar toda no mesmo
- * quarteirão ou espalhada por 5 km, e um zoom fixo erra nos dois casos — mostra
- * um ponto só, ou uma nuvem de pontos sem rua legível.
+ * O erro que esta função existe para não cometer: reenquadrar a cada atualização
+ * de posição. As posições chegam a cada poucos segundos; uma câmera que se
+ * recentra sozinha arranca o mapa da mão do agente no meio de uma pinça, e o
+ * gesto de "olhar o quarteirão ao lado" vira uma briga com o app. Depois da
+ * abertura, a câmera só se mexe por ordem explícita: o agente tocou o nome de um
+ * par, ou tocou o botão de voltar para si.
+ */
+private fun animarPara(
+    mapa: MapLibreMap,
+    minhaLat: Double,
+    minhaLon: Double,
+    pares: List<ParNoMapa>,
+    focoNoIndicativo: String?,
+) {
+    val alvo = if (focoNoIndicativo == null) {
+        LatLng(minhaLat, minhaLon)
+    } else {
+        val par = pares.firstOrNull { it.indicativo == focoNoIndicativo } ?: return
+        val rumo = par.rumoGraus ?: return
+        // Par sem posição afirmável não recebe câmera. Voar até um ponto que o
+        // marcador nem desenha entregaria por movimento a certeza que o
+        // esmaecimento nega por opacidade.
+        if (par.frescor == Frescor.ANTIGO) return
+        val (lat, lon) = Geo.destino(minhaLat, minhaLon, par.distanciaM.toDouble(), rumo)
+        LatLng(lat, lon)
+    }
+
+    val atual = mapa.cameraPosition.target
+    // Sem esse guarda a animação reinicia a cada recomposição — 600 ms de voo
+    // que nunca chega, e um mapa que treme.
+    if (atual != null && Geo.distanciaM(atual.latitude, atual.longitude, alvo.latitude, alvo.longitude) < 12.0) {
+        return
+    }
+
+    // 700 ms: rápido o bastante para não fazer esperar, longo o bastante para o
+    // olho acompanhar o percurso — e é o percurso que informa. Um salto
+    // instantâneo até o par obrigaria o agente a reconstruir mentalmente para
+    // que lado o mapa andou; o voo mostra.
+    mapa.animateCamera(
+        CameraUpdateFactory.newLatLngZoom(alvo, ZOOM_PADRAO),
+        DURACAO_DO_VOO_MS,
+    )
+}
+
+/**
+ * Coloca o portador e os pares.
+ *
+ * Não mexe na câmera: enquadramento é decisão de [animarPara], e misturar as duas
+ * coisas foi como a primeira versão acabou reenquadrando a cada dado novo.
  */
 private fun desenhar(
-    mapa: org.maplibre.android.maps.MapLibreMap,
+    mapa: MapLibreMap,
     icones: IconFactory,
     minhaLat: Double,
     minhaLon: Double,
+    meuRumoGraus: Float?,
     pares: List<ParNoMapa>,
 ) {
     mapa.clear()
 
-    val eu = LatLng(minhaLat, minhaLon)
-    mapa.addMarker(
-        MarkerOptions()
-            .position(eu)
-            .icon(icones.fromBitmap(marcador(Cores.NoAr.toArgb(), portador = true))),
-    )
-
-    val pontos = mutableListOf(eu)
     pares.forEach { par ->
         // **`ANTIGO` não entra no mapa.** Acima de dez minutos a lista já para de
         // afirmar posição e passa a dizer idade — e no mapa a afirmação é mais
         // forte, não mais fraca: um ponto sobre uma rua diz *endereço*. Plotar
         // uma correção de quarenta minutos como um pino desenharia a guarnição
         // num quarteirão onde ninguém está, que é o erro que a regra dos dois
-        // minutos existe para impedir. A linha do par continua na lista abaixo,
+        // minutos existe para impedir. A linha do par continua na lista,
         // dizendo a idade — some do mapa, não do painel.
         if (par.frescor == Frescor.ANTIGO) return@forEach
         val rumo = par.rumoGraus ?: return@forEach
         // A reconstrução. Ver o KDoc de `MapaDeRuas` sobre o que ela custa.
         val (lat, lon) = Geo.destino(minhaLat, minhaLon, par.distanciaM.toDouble(), rumo)
-        val p = LatLng(lat, lon)
-        pontos += p
 
         // Opacidade por frescor, como na lista: marcador cheio afirma "está ali",
         // esmaecido diz "estava".
-        val alfa = when (par.frescor) {
-            Frescor.ATUAL -> 255
-            Frescor.ESMAECIDO -> 110
-            Frescor.ANTIGO -> 0 // inalcançável: filtrado acima.
-        }
+        val alfa = if (par.frescor == Frescor.ESMAECIDO) 120 else 255
         val cor = if (par.emMovimento) Cores.Vivo.toArgb() else Cores.Tinta.toArgb()
         mapa.addMarker(
             MarkerOptions()
-                .position(p)
+                .position(LatLng(lat, lon))
                 .title(par.indicativo)
                 .snippet("${par.distanciaFalada} · ${par.atualizadoHa}")
-                .icon(icones.fromBitmap(marcador(cor, alfa = alfa))),
+                .icon(icones.fromBitmap(discoDePar(cor, alfa))),
         )
     }
 
-    // **O portador fica sempre no centro, e o zoom nunca sai da escala de rua.**
-    //
-    // Enquadrar todo mundo (`newLatLngBounds`) parece a escolha óbvia e é errada:
-    // basta um par a 40 km — guarnição de área rural, ou uma posição publicada de
-    // outro município — para a câmera abrir no estado inteiro. Foi o que aconteceu
-    // no primeiro teste: o mapa mostrou de Curitiba a Brasília, sem uma rua
-    // legível em lugar nenhum, para caber um ponto cinza.
-    //
-    // Rua legível é o motivo de este mapa existir. Então o zoom sai da distância
-    // do par mais longe, preso entre bairro (13) e quarteirão (16,5); quem estiver
-    // além disso simplesmente não cabe na tela — e a linha dele na lista continua
-    // dando distância e rumo exatos, que é a informação precisa mesmo.
-    val maisLonge = pares
-        .filter { it.frescor != Frescor.ANTIGO && it.rumoGraus != null }
-        .maxOfOrNull { it.distanciaM } ?: 0
-    mapa.animateCamera(
-        org.maplibre.android.camera.CameraUpdateFactory.newCameraPosition(
-            CameraPosition.Builder().target(eu).zoom(zoomPara(maisLonge, minhaLat)).build(),
-        ),
-        600,
+    // O portador por último: `addMarker` empilha na ordem de inserção, e quem
+    // olha o mapa procura a si mesmo primeiro. Ficar por baixo de um par colado
+    // — dupla na mesma viatura, o caso mais comum do policiamento — seria perder
+    // justamente a referência que orienta todo o resto.
+    mapa.addMarker(
+        MarkerOptions()
+            .position(LatLng(minhaLat, minhaLon))
+            .icon(icones.fromBitmap(setaDoPortador(meuRumoGraus))),
     )
 }
 
 /**
- * Zoom que põe o par mais distante perto da borda, sem sair da escala de rua.
+ * **O símbolo do portador — a seta da Uber.**
  *
- * Web Mercator: a resolução em metros por pixel é `156543 · cos(latitude) / 2^z`.
- * Invertendo para o raio desejado ocupar ~40% da altura útil (≈ 300 px num
- * aparelho de 720 px de largura), sai o `z` abaixo.
+ * Disco branco com anel escuro e uma seta apontando para o rumo. A escolha não é
+ * mimetismo: é a única forma consagrada de dizer *onde estou* e *para onde estou
+ * virado* num só glifo, e o agente já a lê sem aprender, porque usa Uber e Waze.
  *
- * Os limites não são arbitrários. **16,5** é o quarteirão — dá para ler o nome da
- * travessa, e é onde a câmera fica quando não há ninguém por perto, porque a
- * pergunta que sobra é "em que rua **eu** estou". **13** é o bairro: abaixo disso
- * o OpenFreeMap para de rotular via local, e um mapa sem nome de rua é o radar de
- * novo, só que mais pesado.
+ * `Marker` do MapLibre **não tem rotação** — confirmado por `javap`, a classe
+ * expõe só posição, ícone, título e deslocamentos. Então quem gira é o bitmap,
+ * via [Canvas.rotate] antes de rasterizar. Custa um bitmap de 56 px por
+ * atualização de rumo, o que é irrelevante perto de redesenhar tiles.
+ *
+ * **Parado, a seta vira disco.** `hasBearing()` é falso sem deslocamento, e
+ * apontar para o norte porque o GPS não sabe seria inventar direção — o mesmo
+ * erro que `Rumo.deGraus(NaN)` devolvendo NORTE já custou a este projeto.
  */
-private fun zoomPara(maiorDistanciaM: Int, latitude: Double): Double {
-    if (maiorDistanciaM <= 0) return 16.5
-    val metrosPorPixel = maiorDistanciaM / 300.0
-    val z = ln(156_543.03 * cos(Math.toRadians(latitude)) / metrosPorPixel) / ln(2.0)
-    return z.coerceIn(13.0, 16.5)
-}
-
-/**
- * Marcador desenhado em código.
- *
- * Sem arquivo de recurso e sem biblioteca de ícones: são duas formas — disco para
- * par, cruz para o portador — e trazer um conjunto de ícones para isso pesaria
- * mais que o desenho inteiro num APK que já carrega dois modelos de IA.
- */
-private fun marcador(cor: Int, alfa: Int = 255, portador: Boolean = false): Bitmap {
-    val lado = if (portador) 44 else 36
+private fun setaDoPortador(rumoGraus: Float?): Bitmap {
+    val lado = 56
     val bmp = Bitmap.createBitmap(lado, lado, Bitmap.Config.ARGB_8888)
     val c = Canvas(bmp)
     val centro = lado / 2f
-    val tinta = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        this.color = cor
-        this.alpha = alfa
-    }
 
-    if (portador) {
-        // Cruz de mira: marca origem, e não "mais um par".
-        tinta.strokeWidth = 3.5f
-        c.drawCircle(centro, centro, centro - 4f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            this.color = cor
-            this.alpha = 45
-        })
-        c.drawLine(centro - 10f, centro, centro + 10f, centro, tinta)
-        c.drawLine(centro, centro - 10f, centro, centro + 10f, tinta)
+    // Halo de precisão: sugere "por aqui", não "exatamente aqui".
+    c.drawCircle(centro, centro, 26f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Cores.NoAr.toArgb()
+        alpha = 38
+    })
+    // Anel escuro por baixo do disco: sobre rua clara, branco em branco some.
+    c.drawCircle(centro, centro, 15f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.argb(190, 6, 8, 10)
+    })
+    c.drawCircle(centro, centro, 12.5f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.WHITE
+    })
+
+    if (rumoGraus != null && rumoGraus.isFinite()) {
+        val tinta = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Cores.NoAr.toArgb() }
+        c.save()
+        // O rumo do `Location` é graus a partir do norte, sentido horário — a
+        // mesma convenção da tela, com o norte travado em cima.
+        c.rotate(rumoGraus, centro, centro)
+        val seta = Path().apply {
+            moveTo(centro, centro - 8f)
+            lineTo(centro + 5.5f, centro + 6f)
+            lineTo(centro, centro + 3f)
+            lineTo(centro - 5.5f, centro + 6f)
+            close()
+        }
+        c.drawPath(seta, tinta)
+        c.restore()
     } else {
-        // Halo escuro por baixo: sobre rua clara ou parque, o disco sozinho some.
-        c.drawCircle(centro, centro, centro - 2f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            this.color = Cores.Vazio.toArgb()
-            this.alpha = (alfa * 0.85f).toInt()
+        // Sem rumo: disco cheio. Diz "estou aqui" e cala sobre a direção.
+        c.drawCircle(centro, centro, 6f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Cores.NoAr.toArgb()
         })
-        c.drawCircle(centro, centro, centro - 8f, tinta)
     }
+    return bmp
+}
+
+/**
+ * Um par: disco com halo escuro.
+ *
+ * Forma diferente da do portador de propósito. Se par e portador fossem o mesmo
+ * glifo em cores diferentes, um agente daltônico — ou qualquer um sob sol forte —
+ * perderia a distinção mais importante do mapa.
+ */
+private fun discoDePar(cor: Int, alfa: Int): Bitmap {
+    val lado = 36
+    val bmp = Bitmap.createBitmap(lado, lado, Bitmap.Config.ARGB_8888)
+    val c = Canvas(bmp)
+    val centro = lado / 2f
+    c.drawCircle(centro, centro, centro - 2f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Cores.Vazio.toArgb()
+        alpha = (alfa * 0.85f).toInt()
+    })
+    c.drawCircle(centro, centro, centro - 8f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = cor
+        alpha = alfa
+    })
     return bmp
 }
 
@@ -264,6 +342,19 @@ private fun androidx.compose.ui.graphics.Color.toArgb(): Int =
         (green * 255).toInt(),
         (blue * 255).toInt(),
     )
+
+/**
+ * Zoom de quarteirão, fixo.
+ *
+ * Derivar o zoom da distância do par mais longe — como a versão anterior fazia —
+ * dava um mapa que mudava de escala sozinho a cada atualização de posição. O
+ * agente perdia a referência de tamanho a cada poucos segundos, que é o oposto
+ * do que um mapa de campo precisa fazer. Escala fixa, pinça para mudar: é o
+ * contrato da Uber e do Waze, e é o que a mão já sabe.
+ */
+private const val ZOOM_PADRAO = 16.2
+
+private const val DURACAO_DO_VOO_MS = 700
 
 /** Estilo escuro do OpenFreeMap: 47 camadas, sem chave, sem cota declarada. */
 private const val ESTILO_ESCURO = "https://tiles.openfreemap.org/styles/dark"

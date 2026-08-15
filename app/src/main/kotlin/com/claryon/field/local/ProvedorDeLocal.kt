@@ -69,6 +69,11 @@ class ProvedorDeLocal(private val context: Context) {
             latitude = melhor.latitude,
             longitude = melhor.longitude,
             precisaoM = if (melhor.hasAccuracy()) melhor.accuracy else PRECISAO_DESCONHECIDA,
+            // `hasBearing()` é falso parado, e nesse caso o campo fica nulo em
+            // vez de zero: zero é NORTE, uma afirmação, e o aparelho não afirmou
+            // nada. Seta apontando para o norte porque o agente parou seria
+            // exatamente o tipo de dado inventado que este projeto recusa.
+            rumoGraus = if (melhor.hasBearing()) melhor.bearing else null,
         )
     }
 

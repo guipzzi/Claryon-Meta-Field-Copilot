@@ -9,6 +9,14 @@
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!--
+      Exigida por `GlassesAudioManagerImpl`, que troca `AudioManager.mode` para
+      MODE_IN_COMMUNICATION ao abrir o SCO. É permissão normal (concedida na
+      instalação), mas sem a declaração a chamada falha em silêncio — a armadilha
+      que a nossa própria tabela descreve e que nós cometemos. O manifest do
+      sample oficial do DAT declara; o nosso não declarava.
+    -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.CAMERA" />
 
     <!--

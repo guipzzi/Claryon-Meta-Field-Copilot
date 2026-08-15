@@ -76,6 +76,13 @@ data class EstadoDoMapa(
      */
     val minhaLatitude: Double? = null,
     val minhaLongitude: Double? = null,
+    /**
+     * Para onde o portador aponta, em graus a partir do norte. `null` parado.
+     *
+     * Nunca é publicado nem consultado: existe só para girar a seta na tela deste
+     * agente. Ver `Coordenada.rumoGraus`.
+     */
+    val meuRumoGraus: Float? = null,
 ) {
     companion object {
         /**
@@ -120,6 +127,7 @@ object MapaDePares {
         assinado: Boolean,
         minhaLatitude: Double? = null,
         minhaLongitude: Double? = null,
+        meuRumoGraus: Float? = null,
     ): EstadoDoMapa = EstadoDoMapa(
         pares = posicoes.map { p ->
             val frescor = frescorDe(p.idadeS)
@@ -141,6 +149,7 @@ object MapaDePares {
         motivoIndisponivel = null,
         minhaLatitude = minhaLatitude,
         minhaLongitude = minhaLongitude,
+        meuRumoGraus = meuRumoGraus,
     )
 
     private fun frescorDe(idadeS: Int): Frescor = when {

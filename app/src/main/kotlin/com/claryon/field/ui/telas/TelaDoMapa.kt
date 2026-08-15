@@ -1,25 +1,42 @@
 package com.claryon.field.ui.telas
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -27,15 +44,13 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.claryon.field.mapa.EstadoDoMapa
 import com.claryon.field.mapa.Frescor
 import com.claryon.field.mapa.ParNoMapa
-import com.claryon.field.ui.componentes.CabecalhoTatico
 import com.claryon.field.ui.componentes.Etiqueta
 import com.claryon.field.ui.componentes.Fio
-import com.claryon.field.ui.componentes.PontoDeEstado
 import com.claryon.field.ui.componentes.MapaDeRuas
+import com.claryon.field.ui.componentes.PontoDeEstado
 import com.claryon.field.ui.componentes.TextoCorpoMenor
 import com.claryon.field.ui.componentes.TextoDado
 import com.claryon.field.ui.componentes.TextoIndicativo
-import com.claryon.field.ui.componentes.Vazio
 import com.claryon.field.ui.tema.Cores
 import com.claryon.field.ui.tema.Espaco
 
@@ -51,11 +66,11 @@ import com.claryon.field.ui.tema.Espaco
  * dispara `ON_PAUSE` sem que o mapa deixe de estar visível, e fechar ali faria os
  * marcadores sumirem toda vez que uma mensagem chegasse.
  *
- * A representação é **lista ordenada por distância**, não cartografia. É uma
- * escolha, não uma etapa faltando: o dado que decide a ação do agente é
- * *distância, rumo e há quanto tempo* — três grandezas que a lista entrega
- * exatas, e que um ponto sobre um mapa entrega aproximadas e exigindo foco visual
- * que ele não tem para dar.
+ * **O mapa é a tela; a lista é uma gaveta.** A lista abre recolhida e sobe por
+ * cima do mapa quando o agente puxa. A hierarquia carrega o modelo mental certo:
+ * a pergunta padrão de quem abre esta tela é *onde estamos*, e ela se responde
+ * olhando ruas. *Quantos metros exatos até o Bravo Um* é a pergunta seguinte, e
+ * quem a tem sabe onde procurar.
  */
 @Composable
 fun TelaDoMapa(
@@ -84,81 +99,224 @@ fun TelaDoMapa(
         }
     }
 
-    Column(modifier.fillMaxSize()) {
-        CabecalhoTatico(
-            etiqueta = "Posição relativa",
-            titulo = "Guarnição",
-            acessorio = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    PontoDeEstado(
-                        cor = if (estado.assinado) Cores.Vivo else Cores.TintaFraca,
-                        pulsando = estado.assinado,
-                    )
-                    Box(Modifier.width(Espaco.Curto))
-                    Etiqueta(
-                        if (estado.assinado) "recebendo" else "sem sinal",
-                        cor = if (estado.assinado) Cores.Vivo else Cores.TintaFraca,
+    // Recolhida por padrão, por decisão de produto: o mapa é o foco.
+    var listaAberta by remember { mutableStateOf(false) }
+    // `null` = câmera no portador. Trocar este valor é o comando de voo.
+    var foco by remember { mutableStateOf<String?>(null) }
+
+    Box(modifier.fillMaxSize().background(Cores.Vazio)) {
+        val lat = estado.minhaLatitude
+        val lon = estado.minhaLongitude
+
+        if (lat != null && lon != null) {
+            MapaDeRuas(
+                minhaLatitude = lat,
+                minhaLongitude = lon,
+                meuRumoGraus = estado.meuRumoGraus,
+                pares = estado.pares,
+                focoNoIndicativo = foco,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            // Sem posição própria não há mapa — só a causa dita. Centrar num
+            // ponto arbitrário desenharia a guarnição inteira na rua errada.
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(
+                    Modifier.padding(Espaco.Padrao),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Etiqueta("Sem posição própria", cor = Cores.P2)
+                    Box(Modifier.height(Espaco.Curto))
+                    TextoCorpoMenor(
+                        estado.motivoIndisponivel
+                            ?: "Aguardando a primeira correção de GPS.",
+                        cor = Cores.TintaMedia,
                     )
                 }
-            },
+            }
+        }
+
+        CabecalhoFlutuante(
+            assinado = estado.assinado,
+            quantos = estado.pares.count { it.frescor != Frescor.ANTIGO },
+            modifier = Modifier.align(Alignment.TopCenter),
         )
 
-        estado.motivoIndisponivel?.let { motivo ->
-            // Mapa vazio e mapa indisponível são indistinguíveis para quem olha, e
-            // a leitura errada é a perigosa: "ninguém por perto" quando a verdade
-            // é "não estou recebendo".
-            Column(Modifier.fillMaxWidth().padding(Espaco.Padrao)) {
-                Etiqueta("Indisponível", cor = Cores.P2)
-                Box(Modifier.height(Espaco.Curto))
-                TextoCorpoMenor(motivo, cor = Cores.TintaMedia)
-            }
-            return@Column
-        }
+        GavetaDaGuarnicao(
+            pares = estado.pares,
+            aberta = listaAberta,
+            focado = foco,
+            aoAlternar = { listaAberta = !listaAberta },
+            aoTocarPar = { indicativo ->
+                // Tocar de novo no mesmo par devolve a câmera ao portador — é o
+                // gesto de "voltar para mim" sem precisar de um botão a mais.
+                foco = if (foco == indicativo) null else indicativo
+            },
+            motivoIndisponivel = estado.motivoIndisponivel,
+            modifier = Modifier.align(Alignment.BottomCenter),
+        )
+    }
+}
 
-        if (estado.pares.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Vazio(
-                    etiqueta = "Ninguém publicando",
-                    explicacao = "Nenhum par do talk group está enviando posição agora.",
+/**
+ * Faixa de estado por cima do mapa.
+ *
+ * Flutua em vez de empurrar o mapa para baixo: cabeçalho sólido custaria 90 dp de
+ * rua, e rua é o conteúdo. O fundo é translúcido para o mapa continuar legível
+ * por baixo, e a contagem exclui os pares antigos — dizer "3 na guarnição" com
+ * dois deles de meia hora atrás seria contar fantasma.
+ */
+@Composable
+private fun CabecalhoFlutuante(assinado: Boolean, quantos: Int, modifier: Modifier = Modifier) {
+    Row(
+        modifier
+            .fillMaxWidth()
+            .background(Cores.Vazio.copy(alpha = 0.82f))
+            .padding(horizontal = Espaco.Padrao, vertical = Espaco.Medio),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            PontoDeEstado(
+                cor = if (assinado) Cores.Vivo else Cores.TintaFraca,
+                pulsando = assinado,
+            )
+            Box(Modifier.width(Espaco.Curto))
+            Etiqueta(
+                if (assinado) "recebendo" else "sem sinal",
+                cor = if (assinado) Cores.Vivo else Cores.TintaFraca,
+            )
+        }
+        Etiqueta(
+            if (quantos == 1) "1 na guarnição" else "$quantos na guarnição",
+            cor = Cores.TintaMedia,
+        )
+    }
+}
+
+/**
+ * A gaveta.
+ *
+ * Recolhida mostra só a alça e a contagem. Aberta sobe até metade da tela — nunca
+ * a tela inteira, porque perder o mapa de vista para ler uma lista sobre o mapa é
+ * troca ruim.
+ */
+@Composable
+private fun GavetaDaGuarnicao(
+    pares: List<ParNoMapa>,
+    aberta: Boolean,
+    focado: String?,
+    aoAlternar: () -> Unit,
+    aoTocarPar: (String) -> Unit,
+    motivoIndisponivel: String?,
+    modifier: Modifier = Modifier,
+) {
+    val giro by animateFloatAsState(
+        targetValue = if (aberta) 180f else 0f,
+        animationSpec = tween(durationMillis = 260, easing = FastOutSlowInEasing),
+        label = "giro-da-alca",
+    )
+
+    Column(
+        modifier
+            .fillMaxWidth()
+            .background(Cores.Painel)
+            .drawBehind {
+                drawLine(
+                    color = Cores.Traco,
+                    start = Offset(0f, 0f),
+                    end = Offset(size.width, 0f),
+                    strokeWidth = 1f,
                 )
+            },
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    // Sem ripple: o tema é dark-only e sem Material 2, e o
+                    // indication padrão já derrubou o app uma vez aqui.
+                    indication = null,
+                    onClick = aoAlternar,
+                )
+                .padding(horizontal = Espaco.Padrao, vertical = Espaco.Medio),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Etiqueta("Guarnição", cor = Cores.Tinta)
+            Box(Modifier.size(20.dp).rotate(giro), contentAlignment = Alignment.Center) {
+                Chevron()
             }
-            return@Column
         }
 
-        LazyColumn(Modifier.fillMaxSize()) {
-            item {
-                // O mapa primeiro: numa emergência a pergunta é "onde", e "onde"
-                // se responde com nome de rua — é o que o despachante entende e o
-                // que a guarnição de apoio digita no navegador. A lista embaixo
-                // continua dando distância e rumo exatos, que o mapa aproxima.
-                val lat = estado.minhaLatitude
-                val lon = estado.minhaLongitude
-                if (lat != null && lon != null) {
-                    MapaDeRuas(
-                        minhaLatitude = lat,
-                        minhaLongitude = lon,
-                        pares = estado.pares,
-                        modifier = Modifier.fillMaxWidth().height(320.dp),
-                    )
-                } else {
-                    // Sem posição própria não há mapa — só lista. Centrar num
-                    // ponto arbitrário desenharia a guarnição inteira na rua
-                    // errada, que é pior que não desenhar.
-                    Box(Modifier.fillMaxWidth().padding(Espaco.Padrao)) {
+        AnimatedVisibility(
+            visible = aberta,
+            enter = expandVertically(tween(260, easing = FastOutSlowInEasing)) + fadeIn(tween(180)),
+            exit = shrinkVertically(tween(220, easing = FastOutSlowInEasing)) + fadeOut(tween(120)),
+        ) {
+            Column {
+                Fio()
+                when {
+                    motivoIndisponivel != null -> Column(
+                        Modifier.fillMaxWidth().padding(Espaco.Padrao),
+                    ) {
+                        Etiqueta("Indisponível", cor = Cores.P2)
+                        Box(Modifier.height(Espaco.Curto))
+                        TextoCorpoMenor(motivoIndisponivel, cor = Cores.TintaMedia)
+                    }
+
+                    pares.isEmpty() -> Column(
+                        Modifier.fillMaxWidth().padding(Espaco.Padrao),
+                    ) {
+                        Etiqueta("Ninguém publicando", cor = Cores.TintaFraca)
+                        Box(Modifier.height(Espaco.Curto))
                         TextoCorpoMenor(
-                            "Sem posição própria. As distâncias abaixo vêm do servidor.",
-                            cor = Cores.TintaFraca,
+                            "Nenhum par do talk group está enviando posição agora.",
+                            cor = Cores.TintaMedia,
                         )
                     }
+
+                    else -> LazyColumn(Modifier.heightIn(max = 320.dp)) {
+                        items(pares, key = { it.indicativo }) { par ->
+                            LinhaDePar(
+                                par = par,
+                                focado = par.indicativo == focado,
+                                aoTocar = { aoTocarPar(par.indicativo) },
+                            )
+                            Fio()
+                        }
+                    }
                 }
-                Fio()
-            }
-            items(estado.pares, key = { it.indicativo }) { par ->
-                LinhaDePar(par)
-                Fio()
             }
         }
     }
+}
+
+/** Alça da gaveta. Duas linhas em V, giradas 180° quando aberta. */
+@Composable
+private fun Chevron() {
+    Box(
+        Modifier.size(20.dp).drawBehind {
+            val meio = size.width / 2f
+            val topo = size.height * 0.36f
+            val base = size.height * 0.62f
+            drawLine(
+                color = Cores.TintaMedia,
+                start = Offset(meio - 6f, base),
+                end = Offset(meio, topo),
+                strokeWidth = 2f,
+                cap = StrokeCap.Round,
+            )
+            drawLine(
+                color = Cores.TintaMedia,
+                start = Offset(meio, topo),
+                end = Offset(meio + 6f, base),
+                strokeWidth = 2f,
+                cap = StrokeCap.Round,
+            )
+        },
+    )
 }
 
 /**
@@ -168,9 +326,14 @@ fun TelaDoMapa(
  * e "estava ali". Opacidade e não cor — cor já está ocupada por prioridade e por
  * transmissão em todo o resto do painel, e uma terceira gramática cromática aqui
  * faria as três perderem sentido.
+ *
+ * Tocar leva a câmera até ele. Um par `ANTIGO` **não** é tocável: ele não está no
+ * mapa, e um voo até um marcador que não existe entregaria por movimento a
+ * certeza que o esmaecimento nega por opacidade.
  */
 @Composable
-private fun LinhaDePar(par: ParNoMapa) {
+private fun LinhaDePar(par: ParNoMapa, focado: Boolean, aoTocar: () -> Unit) {
+    val alcancavel = par.frescor != Frescor.ANTIGO && par.rumoGraus != null
     val opacidadeAlvo = when (par.frescor) {
         Frescor.ATUAL -> 1f
         Frescor.ESMAECIDO -> 0.45f
@@ -188,7 +351,18 @@ private fun LinhaDePar(par: ParNoMapa) {
     Row(
         Modifier
             .fillMaxWidth()
-            .background(Cores.Vazio)
+            .background(if (focado) Cores.Elevado else Cores.Painel)
+            .then(
+                if (alcancavel) {
+                    Modifier.clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = aoTocar,
+                    )
+                } else {
+                    Modifier
+                },
+            )
             .padding(horizontal = Espaco.Padrao, vertical = Espaco.Medio)
             .alpha(opacidade),
         horizontalArrangement = Arrangement.SpaceBetween,

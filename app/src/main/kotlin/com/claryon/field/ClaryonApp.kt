@@ -12,7 +12,7 @@ import org.maplibre.android.MapLibre
  * Inicializa o DAT **uma vez por processo** via [GlassesRuntime.initialize] —
  * que encapsula `Wearables.initialize` dentro de `core-glasses`, para o `app`
  * nunca importar o SDK. É a pré-condição obrigatória do DAT (APIs antes disso
- * dão `NOT_INITIALIZED`).
+ * lançam `WearablesException`).
  *
  * Fica na `Application` (não em Activity) porque o `ForegroundService` e o
  * `WorkManager` recriam/retomam o processo — o SDK precisa estar pronto em todos

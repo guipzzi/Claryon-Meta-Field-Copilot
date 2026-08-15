@@ -355,6 +355,7 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
             assinado = true,
             minhaLatitude = minha?.latitude,
             minhaLongitude = minha?.longitude,
+            meuRumoGraus = minha?.rumoGraus,
         )
     }
 

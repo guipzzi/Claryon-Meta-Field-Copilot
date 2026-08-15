@@ -50,7 +50,7 @@ Onde o material de apoio (Un12/Un13) divergir da doc oficial, **a doc oficial ve
 3. se != REGISTERED → deeplink Meta AI → retorno via claryonfield://
 4. GlassesAudioManager.iniciar()                 // ⚠️ ANTES do passo 5
 5. Wearables.createSession(AutoDeviceSelector) → session.start()
-6. [sob demanda] session.addStream(config) → stream.start()
+6. [sob demanda] session.addCamera(config) → camera.stream → stream.start()
 ```
 Inverter 4 e 5 → captura de voz intermitente. HFP totalmente configurado **antes** da sessão de streaming.
 
