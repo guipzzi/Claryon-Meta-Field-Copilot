@@ -958,3 +958,45 @@ O **Galaxy A30 não roda este app**: topa em Android 11 (API 30) e o `minSdk` é
 dpi, Android 15), que é o perfil realista de aparelho de corporação e roda. Se o piloto
 precisar alcançar a faixa do A30, é preciso um caminho de compatibilidade com
 `startBluetoothSco()` — decisão de produto, não de código.
+
+## Posição em segundo plano ligada, e o botão em gramática de HUD (2026-08-15)
+
+- **⚠️ `ColetorDePosicao` estava sem chamador — o quarto caso na mesma sessão.**
+  Construído, comentado e nunca instanciado. Agora vive no `CopilotService`, com escopo do
+  **serviço** e não do ViewModel: a coleta tem de sobreviver à tela, porque o agente fecha o
+  app e guarda o celular no bolso. Verificado no emulador — `coleta em ATIVO por gps:
+  60000ms / 50.0m` no log, e o serviço segue vivo depois do HOME.
+
+- **O publicador é injetado antes de o serviço subir.** Ao contrário, o serviço nasce
+  coletando e descartando: o GPS acorda e o dado morre no caminho, que é o pior desperdício
+  possível porque não aparece em lugar nenhum da interface.
+
+- **O serviço não para ao sair da tela.** Só "Encerrar turno" o derruba — é a única ação em
+  que o agente declara que parou de trabalhar. Fechar o app é guardar o celular, não sair de
+  serviço.
+
+- **Postgres Changes descartado por privacidade.** Publicar `agent_positions` no Realtime
+  entregaria a linha inteira, `geom` incluso, a cada aparelho da guarnição. O mapa pergunta e
+  o servidor responde em grandezas (`public.posicoes_do_grupo`). Com a tela aberta 5% do
+  turno, sondar custa menos que assinatura viva — e a garantia permanece verificável.
+
+- **Origem velha invalida a tela inteira, não uma linha.** Se a posição própria está
+  desatualizada, todas as distâncias foram medidas do lugar errado. O mapa recusa mostrar
+  qualquer uma, em vez de exibir seis números plausíveis.
+
+- **Botão: a terceira versão, e a lição das duas descartadas.** Retângulo com texto centrado
+  dizia "toque". Alvo circular dizia o gesto certo e destoava de um painel de fios retos.
+  Quatro colchetes simétricos e finos liam como **enfeite**. A referência do Gotham é HUD, e
+  marca de registro nessa linguagem é **assimétrica e usinada**: duas âncoras em cantos
+  opostos, curtas e grossas. O controle virou interruptor de painel — trilho de estado à
+  esquerda para a visão periférica, rótulo alinhado à esquerda, leitura em monoespaçada à
+  direita, barra de pressão na base.
+
+### Caos verificado no emulador
+
+| Cenário | Resultado |
+|---|---|
+| App fechado (HOME) | Serviço segue vivo, coleta continua |
+| Permissão de local revogada durante a coleta | Sem crash |
+| GPS desligado no meio | Degrada para provedor de rede, sem crash |
+| Processo morto, recriado pelo sistema | Encerra sem reabrir o microfone, como projetado |

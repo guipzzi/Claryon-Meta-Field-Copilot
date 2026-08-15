@@ -254,6 +254,9 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
     @Volatile
     private var tokenCorrente: String? = null
 
+    /** Exposto para o serviço em primeiro plano, que coleta com o app fechado. */
+    val publicadorDePosicao: com.claryon.net.PublicadorDePosicao get() = publicador
+
     private val publicador = PublicadorDePosicaoSupabase(
         config = configRede,
         tokenDeSessao = { autenticacao.tokenValido()?.also { tokenCorrente = it } },

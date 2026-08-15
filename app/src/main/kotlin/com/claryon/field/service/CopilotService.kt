@@ -16,6 +16,12 @@ import com.claryon.agent.ModoOperacao
 import com.claryon.agent.PowerPolicy
 import com.claryon.agent.ThermalGovernor
 import com.claryon.agent.TipoServico
+import com.claryon.field.local.ColetorDePosicao
+import com.claryon.net.PublicadorDePosicao
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import com.claryon.field.MainActivity
 import com.claryon.field.R
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -38,9 +44,28 @@ class CopilotService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    /**
+     * Escopo do serviço, não do ViewModel.
+     *
+     * A coleta de posição tem de sobreviver à tela: o agente fecha o app, guarda
+     * o celular no bolso, e a guarnição continua vendo onde ele está. Um escopo
+     * de ViewModel morre com a composição, que é exatamente o oposto do
+     * comportamento de compartilhamento contínuo.
+     */
+    private val escopo = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    private var coletor: ColetorDePosicao? = null
+
     override fun onCreate() {
         super.onCreate()
         criarCanal()
+        coletor = ColetorDePosicao(
+            context = this,
+            escopo = escopo,
+            publicar = { lat, lon, precisao, velocidade ->
+                publicador?.publicar(lat, lon, precisao, velocidade)
+            },
+        )
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -67,6 +92,11 @@ class CopilotService : Service() {
 
         _modo.value = modo
         entrarEmPrimeiroPlano(modo)
+
+        // A coleta acompanha o modo: cadência e provedor mudam, a existência não.
+        // Standby também publica — sumir do mapa em pausa criaria a expectativa
+        // errada, porque companheiro que desaparece parece em perigo.
+        coletor?.ajustarPara(modo, mapaVisivel = false)
         // START_STICKY: se o sistema matar por memória, é recriado — e o ramo
         // acima decide (com segurança) o que fazer nessa recriação.
         return START_STICKY
@@ -74,6 +104,12 @@ class CopilotService : Service() {
 
     override fun onDestroy() {
         _modo.value = ModoOperacao.STANDBY
+        // Soltar o GPS antes de morrer. Um listener sobrevivente mantém o rádio
+        // de posição acordado sem ninguém consumindo — o pior custo possível,
+        // porque não aparece em lugar nenhum da interface.
+        coletor?.parar()
+        coletor = null
+        escopo.cancel()
         super.onDestroy()
     }
 
@@ -146,6 +182,17 @@ class CopilotService : Service() {
         private const val ID_NOTIFICACAO = 1
         private const val EXTRA_MODO = "modo"
         private const val ACAO_PARAR = "com.claryon.field.PARAR"
+
+        /**
+         * Quem publica a posição no servidor.
+         *
+         * Injetado de fora porque o serviço não pode conhecer `core-net` nem a
+         * sessão do agente — o token vive no cofre cifrado do `app`. Nulo até o
+         * login: sem sessão não há a quem publicar, e o coletor descarta em
+         * silêncio em vez de acumular.
+         */
+        @Volatile
+        var publicador: PublicadorDePosicao? = null
 
         private val _modo = MutableStateFlow(ModoOperacao.STANDBY)
 

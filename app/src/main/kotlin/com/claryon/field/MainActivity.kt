@@ -15,7 +15,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.ui.platform.LocalContext
+import com.claryon.agent.ModoOperacao
 import com.claryon.field.permissoes.PermissoesEssenciais
+import com.claryon.field.service.CopilotService
 import com.claryon.field.radio.RadioViewModel
 import com.claryon.field.ui.CascoTatico
 import com.claryon.field.ui.Destino
@@ -74,6 +77,7 @@ class MainActivity : ComponentActivity() {
                         destino = destino,
                         aoNavegar = { destino = it },
                         aoEncerrarTurno = {
+                            CopilotService.parar(this@MainActivity)
                             radio.fechar()
                             diag.autenticacao.sair()
                             mostrarLogin = true
@@ -117,17 +121,33 @@ private fun Operacao(
 
     LaunchedEffect(Unit) { diag.anunciarEstadoDegradado() }
 
+    val contexto = LocalContext.current
     DisposableEffect(Unit) {
         // O rádio lê o histórico com o token do agente; quem o guarda é o cofre
         // cifrado, que vive no ViewModel de diagnóstico.
         radio.tokenDeSessao = { diag.autenticacao.tokenValido() }
+
+        // **Coleta de posição em segundo plano.**
+        //
+        // Sobe daqui, de tela visível: iniciar um serviço em primeiro plano a
+        // partir do background é `ForegroundServiceStartNotAllowedException`.
+        // E o publicador é injetado antes do `iniciar`, senão o serviço nasce
+        // coletando e descartando — o pior desperdício, porque o GPS acorda e o
+        // dado morre no caminho.
+        CopilotService.publicador = diag.publicadorDePosicao
+        CopilotService.iniciar(contexto, ModoOperacao.ATIVO)
         radio.abrir(
             canal = CANAL_DEMO,
             nomeDoCanal = NOME_DO_CANAL,
             agenteId = AGENTE_DEMO,
             indicativo = INDICATIVO_DEMO,
         )
-        onDispose { radio.fechar() }
+        onDispose {
+            radio.fechar()
+            // O serviço **não** para aqui: é justamente ele que mantém a posição
+            // subindo com o app fechado. Só o "Encerrar turno" o derruba, que é a
+            // única ação em que o agente declara que parou de trabalhar.
+        }
     }
 
     CascoTatico(destino = destino, aoNavegar = aoNavegar, noAr = noAr) { modifier ->

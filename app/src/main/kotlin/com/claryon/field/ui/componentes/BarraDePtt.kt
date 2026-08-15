@@ -1,6 +1,7 @@
 package com.claryon.field.ui.componentes
 
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -185,22 +186,28 @@ private fun ConteudoNoAr(estado: EstadoDoPtt.NoAr) {
 }
 
 /**
- * Repouso: retângulo pleno, sem ornamento.
+ * Repouso: um interruptor de instrumento, não um botão de página.
  *
- * Voltou a ser retângulo depois do experimento com alvo circular — e a lição do
- * caminho de ida e volta é que **a forma não era o problema; a borda era**. Os
- * colchetes de mira eram decoração fingindo de afordância: enquadravam sem
- * explicar, e num painel feito de fios retos soavam como um adorno estranho.
+ * O caminho até aqui teve duas versões descartadas, e cada uma ensinou algo. O
+ * retângulo com texto centralizado dizia "toque", não "segure". O alvo circular
+ * dizia o gesto certo mas destoava de um painel feito de fios retos. E os quatro
+ * colchetes simétricos da primeira tentativa liam como **enfeite**, não como
+ * marca de registro.
  *
- * A gramática aqui é a do Gotham: a ênfase vem do **contraste de superfície**,
- * não de contorno. O botão é um bloco cheio, o rótulo é monoespaçado caixa-alta,
- * e o único fio é o de 1 px que separa da lista — o mesmo fio que estrutura o
- * resto do aplicativo. Nada de cantos arredondados, nada de sombra, nada de
- * moldura própria.
+ * A referência do Gotham é HUD — instrumentação militar e de inteligência — e a
+ * marca de registro nessa linguagem é **assimétrica e usinada**: duas âncoras em
+ * cantos opostos, curtas e grossas, como as marcas de alinhamento de um visor.
+ * Quatro finas e iguais são ornamento; duas na diagonal são referência.
  *
- * O que o retângulo não conseguia dizer sozinho — que é **segurar**, não tocar —
- * passou para duas coisas que não são forma: o rótulo diz o verbo, e o anel de
- * progresso preenche a borda inferior enquanto o dedo desce.
+ * A estrutura é a de um interruptor de painel, e cada parte carrega dado:
+ *
+ *  - **Trilho de estado à esquerda**, 4 px, na cor do estado. É o que a visão
+ *    periférica pega com o aparelho no suporte da viatura, sem foco.
+ *  - **Rótulo alinhado à esquerda** — texto centralizado é gramática de botão de
+ *    página; instrumento alinha à esquerda e deixa a leitura à direita.
+ *  - **Leitura à direita**, em monoespaçada: o estado por extenso, no lugar onde
+ *    um mostrador o colocaria.
+ *  - **Barra de pressão na base**, que preenche enquanto o dedo desce.
  */
 @Composable
 private fun ConteudoPronto(canal: String, pressao: Float) {
@@ -218,30 +225,78 @@ private fun ConteudoPronto(canal: String, pressao: Float) {
     }
 
     Box(Modifier.height(Espaco.Medio))
+    InterruptorDePtt(pressao = pressao, corDoTrilho = Cores.Vivo, leitura = "PRONTO")
+}
+
+/**
+ * O interruptor.
+ *
+ * Desenhado inteiro em `drawBehind` para que trilho, âncoras e barra de pressão
+ * fiquem no mesmo sistema de coordenadas — compor isso com `Box` aninhado exigiria
+ * alinhar três caixas por padding, e qualquer mudança de altura quebraria o
+ * conjunto.
+ */
+@Composable
+private fun InterruptorDePtt(
+    pressao: Float,
+    corDoTrilho: Color,
+    leitura: String,
+) {
+    val avanco = pressao.coerceIn(0f, 1f)
+    val fundo by animateColorAsState(
+        targetValue = if (avanco > 0f) Cores.Pressionado else Cores.Elevado,
+        animationSpec = tween(durationMillis = 90),
+        label = "fundo-interruptor",
+    )
 
     Box(
         Modifier
             .fillMaxWidth()
-            .height(56.dp)
-            .background(if (pressao > 0f) Cores.Pressionado else Cores.Elevado)
+            .height(60.dp)
+            .background(fundo)
             .drawBehind {
-                // Barra de progresso na base, crescendo da esquerda. É o retorno
-                // no intervalo entre o dedo descer e o primeiro quadro sair — e
-                // vive na borda, não no meio, para não competir com o rótulo.
-                if (pressao > 0f) {
+                val trilho = 4.dp.toPx()
+                // Trilho de estado. Engrossa sob pressão — o mesmo dado, mais
+                // presente, sem mudar de cor e sem pedir foco.
+                drawRect(
+                    color = corDoTrilho,
+                    size = androidx.compose.ui.geometry.Size(
+                        trilho * (1f + avanco * 0.8f),
+                        size.height,
+                    ),
+                )
+
+                // Âncoras de registro: superior-direita e inferior-esquerda.
+                // Assimétricas de propósito — duas na diagonal são referência de
+                // alinhamento; quatro iguais viram moldura.
+                val braco = 11.dp.toPx()
+                val esp = 2.dp.toPx()
+                val cor = Cores.TracoForte
+                drawLine(cor, Offset(size.width - braco, 0f), Offset(size.width, 0f), esp)
+                drawLine(cor, Offset(size.width, 0f), Offset(size.width, braco), esp)
+                drawLine(cor, Offset(0f, size.height), Offset(braco, size.height), esp)
+                drawLine(cor, Offset(0f, size.height - braco), Offset(0f, size.height), esp)
+
+                // Barra de pressão na base, do trilho para a direita.
+                if (avanco > 0f) {
                     drawRect(
                         color = Cores.NoAr,
                         topLeft = Offset(0f, size.height - 3f),
-                        size = androidx.compose.ui.geometry.Size(
-                            size.width * pressao.coerceIn(0f, 1f),
-                            3f,
-                        ),
+                        size = androidx.compose.ui.geometry.Size(size.width * avanco, 3f),
                     )
                 }
-            },
-        contentAlignment = Alignment.Center,
+            }
+            .padding(horizontal = Espaco.Padrao),
+        contentAlignment = Alignment.CenterStart,
     ) {
-        Text("SEGURE PARA FALAR", style = Tipo.Acao, color = Cores.Tinta)
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("SEGURE PARA FALAR", style = Tipo.Acao, color = Cores.Tinta)
+            Etiqueta(leitura, cor = Cores.TintaMedia)
+        }
     }
 }
 
