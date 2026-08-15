@@ -558,3 +558,35 @@ Ordem cronológica inversa (mais recente no topo).
   `initializationError`, sem dizer qual método; e corrotinas do `backgroundScope` **não** são
   acordadas por `advanceUntilIdle()` nesta versão — medido, `subscriptionCount` ficava em
   zero. O escopo do receptor nos testes é filho do agendador, não do teste.
+
+
+## Fase 3 — modo diferido, telemetria e caos de aparelho (2026-08-14)
+
+- **⚠️ MEDIDO com MockDeviceKit: tirar os óculos do rosto é invisível para o app.**
+  Dobrar as hastes e desligar o aparelho levam o stream de STREAMING a STOPPED; `doff` não
+  muda nada. A doc esclarece que a sessão reage ao *doff* "when wear detection is enabled",
+  e **não há API para habilitar** — é ajuste do aparelho, no app Meta AI.
+  Consequência: com a detecção desligada, óculos fora do rosto seguem com sessão e rota
+  ativas, e o beamforming que isola quem os veste deixa de valer — um PTT apertado nessa
+  condição difunde a conversa ao redor. Mitigações existentes (PTT explícito, teto de 30 s,
+  pré-roll nunca persistido) limitam a exposição, mas não substituem a notificação.
+  A asserção fixa o comportamento medido: se um SDK futuro notificar, o teste falha e a
+  limitação sai da lista. Verificação em aparelho real registrada no doc de hardware.
+
+- **Modo diferido guarda Opus codificado, não PCM.** Um minuto de fala ocupa ~90 KB em vez
+  de ~1 MB, e é o mesmo formato que vai para a rede — sem recodificar, sem perder qualidade
+  de novo. Escrita atômica (`.tmp` + rename): processo morto no meio deixaria um arquivo que
+  o drenador tentaria enviar para sempre.
+  **A distinção que não pode se perder:** isto grava fala que o agente *decidiu* transmitir
+  apertando o botão; o pré-roll vive em RAM e some se o botão não for apertado. A diferença
+  entre as duas é a diferença entre rádio e escuta ambiente.
+  Poda por validade de 6 h: fala de ontem chegando hoje não é informação operacional, é
+  ruído — e guardar voz indefinidamente contraria a política de retenção.
+
+- **Telemetria declara o que NÃO mede.** As medições são internas: captura→envio e
+  recepção→reprodução. A saída Bluetooth (40–150 ms) e a rede ficam fora do que qualquer
+  código dentro do app enxerga. O relatório diz isso em texto, e há teste que falha se a
+  ressalva sumir — publicar medição interna como se fosse boca a ouvido seria um número
+  otimista num documento técnico. Janela deslizante de 200 amostras: percentil recente é
+  mais útil que média de tudo, porque a rede de agora importa mais que a de três horas atrás.
+  Sem amostras devolve `null`, nunca zero: zero pareceria uma medição excelente.

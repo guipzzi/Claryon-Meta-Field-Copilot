@@ -88,6 +88,26 @@ class MockDeviceController(context: Context) {
         return true
     }
 
+    /**
+     * Simula o agente **tirando os óculos**. Assinatura confirmada por inspeção
+     * do artefato: `MockDevice.doff()`.
+     *
+     * É o cenário de campo mais banal que existe — e um dos que mais quebra
+     * produto: acontece no meio de uma transmissão, sem aviso.
+     */
+    fun tirarDoRosto(): Boolean = device?.let { it.doff(); true } ?: false
+
+    /** Recolocar. */
+    fun vestir(): Boolean = device?.let { it.don(); true } ?: false
+
+    /** Simula **dobrar as hastes** — o gesto de guardar os óculos no bolso. */
+    fun dobrar(): Boolean = device?.let { it.fold(); true } ?: false
+
+    fun desdobrar(): Boolean = device?.let { it.unfold(); true } ?: false
+
+    /** Simula a **bateria acabando** no meio da operação. */
+    fun desligar(): Boolean = device?.let { it.powerOff(); true } ?: false
+
     /** Restaura a pilha real do SDK. Idempotente, como [enableWithPhoneCameraFeed]. */
     fun disable() {
         if (!habilitado) return

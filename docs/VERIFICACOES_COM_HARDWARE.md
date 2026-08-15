@@ -91,6 +91,24 @@ adb shell dumpsys batterystats > bs.txt
 Meta: ≤ 12 %/h em modo Ativo. Hoje a política de energia é testada como lógica
 pura — o consumo real nunca foi medido.
 
+## Detecção de uso — o achado do caos com MockDeviceKit
+
+Medido no emulador com MDK 0.9.0: **dobrar as hastes e desligar o aparelho mudam
+o estado observado pelo app (STREAMING → STOPPED); tirar do rosto não muda nada.**
+
+A doc explica: a sessão reage ao *doff* "when wear detection is enabled" — e não
+há API para habilitar. É ajuste do aparelho, no app Meta AI.
+
+| O que verificar no aparelho real | Por que importa |
+|---|---|
+| Com detecção de uso **ligada**, o app é notificado ao tirar os óculos? | Se não for, óculos fora do rosto seguem com sessão e rota ativas |
+| A rota SCO cai quando os óculos saem do rosto? | Se não cair, `GlassesAudioRoute` também não detecta |
+
+**A consequência a carregar:** fora do rosto, o beamforming que isola quem os
+veste deixa de valer. Um PTT apertado nessa condição difunde a conversa ao redor.
+Mitigações que já existem no produto: o PTT é explícito, tem teto de 30 s, e o
+pré-roll nunca é persistido — mas nenhuma delas substitui a notificação.
+
 ## Modo avião
 
 Comando de voz com o rádio desligado: transcrição local, resposta falada, e o
