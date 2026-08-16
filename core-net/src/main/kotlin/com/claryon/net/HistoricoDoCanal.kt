@@ -67,7 +67,12 @@ class HistoricoDoCanal(
                 FalaDoCanal(
                     id = o.getString("id"),
                     indicativo = o.optJSONObject("agents")?.optString("indicativo").orEmpty(),
-                    transcricao = o.optString("transcricao").orEmpty(),
+                    // `isNull` ANTES de `optString`: para um valor JSON nulo o
+                    // `optString` devolve a **string** `"null"`, e ela chegava à
+                    // tela como se fosse a fala do agente. Vazio é a verdade —
+                    // "não transcrito" —, e quem decide como exibir isso é a UI,
+                    // não o parser.
+                    transcricao = if (o.isNull("transcricao")) "" else o.optString("transcricao"),
                     prioridade = o.optInt("prioridade", 3),
                     tipo = o.optString("tipo", "ptt"),
                     criadaEmIso = o.optString("criada_em"),

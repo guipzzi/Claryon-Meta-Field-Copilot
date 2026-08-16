@@ -208,7 +208,12 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
                         registro?.registrar(
                             transmissaoId = id,
                             talkGroupId = canal,
-                            tipo = "fala",
+                            // `ptt` e não "fala": o CHECK da tabela aceita
+                            // `('ptt','alerta')` e a função ramifica por este
+                            // campo — com um valor inventado ela caía no ramo
+                            // geográfico e estourava. Valor de domínio não se
+                            // escolhe por leitura agradável.
+                            tipo = "ptt",
                             prioridade = prio,
                             duracaoMs = dur,
                             // Sem transcrição ainda: o STT do PTT é a Fase 3. O

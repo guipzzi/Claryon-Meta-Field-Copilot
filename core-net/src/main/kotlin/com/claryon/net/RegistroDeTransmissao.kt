@@ -1,7 +1,10 @@
 package com.claryon.net
 
+import android.util.Log
 import com.claryon.common.ClaryonError
 import com.claryon.common.Result
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -54,9 +57,16 @@ class RegistroDeTransmissao(
         prioridade: Int,
         duracaoMs: Long,
         transcricao: String?,
-    ): Result<Unit> {
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        // **`Dispatchers.IO` e não o dispatcher de quem chama.** O chamador é o
+        // `viewModelScope`, cujo dispatcher é a Main, e `execute()` do OkHttp é
+        // bloqueante: a primeira versão lançava `NetworkOnMainThreadException` —
+        // exceção de mensagem NULA, 30 ms depois da fala. Como a falha era
+        // engolida de propósito, o sintoma era a tabela ficar vazia sem nenhum
+        // sinal. Pôr o dispatcher aqui, e não no chamador, faz a garantia valer
+        // para todo caminho futuro em vez de depender de quem lembra.
         val token = tokenDeSessao()
-            ?: return Result.failure(
+            ?: return@withContext Result.failure(
                 ClaryonError.Sync("transmit.sem_sessao", "Sem token de sessão."),
             )
 
@@ -79,11 +89,19 @@ class RegistroDeTransmissao(
             .post(corpo.toString().toRequestBody(JSON))
             .build()
 
-        return runCatching {
+        runCatching {
             client.newCall(req).execute().use { resp ->
                 if (resp.isSuccessful) {
+                    Log.i(TAG, "transmissão $transmissaoId registrada")
                     Result.success(Unit)
                 } else {
+                    // **Falha não propaga, mas não é silenciosa.** A primeira
+                    // versão só devolvia `Result.failure` — e como o chamador
+                    // descarta o resultado de propósito (perder o registro não
+                    // pode derrubar o PTT), o defeito ficava invisível. Passei
+                    // uma hora sem saber por que a tabela continuava vazia.
+                    val corpoDaResposta = runCatching { resp.body?.string() }.getOrNull()
+                    Log.w(TAG, "transmit recusou ${resp.code}: ${corpoDaResposta?.take(200)}")
                     Result.failure(
                         ClaryonError.Sync(
                             "transmit.http_${resp.code}",
@@ -93,6 +111,7 @@ class RegistroDeTransmissao(
                 }
             }
         }.getOrElse {
+            Log.w(TAG, "transmit falhou: ${it.message}")
             Result.failure(
                 ClaryonError.Sync("transmit.falhou", it.message ?: "Falha de rede."),
             )
@@ -100,6 +119,7 @@ class RegistroDeTransmissao(
     }
 
     private companion object {
+        const val TAG = "ClaryonField"
         val JSON = "application/json".toMediaType()
     }
 }

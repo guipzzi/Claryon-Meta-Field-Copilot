@@ -353,7 +353,15 @@ private fun RegistroDeTrafego(item: ItemDeTrafego) {
                 Column(Modifier.weight(1f)) {
                     CabecalhoDoRegistro(item)
                     Box(Modifier.height(Espaco.Micro))
-                    TextoCorpo(item.fala.texto, cor = tinta(item.tintaDoTexto))
+                    // Fala sem transcrição não é fala vazia — é áudio que ninguém
+                    // transcreveu ainda (o STT do PTT é fase seguinte). Um balão
+                    // em branco faria o agente procurar o texto que sumiu; dizer
+                    // o que houve custa uma linha e não mente.
+                    if (item.fala.texto.isBlank()) {
+                        Etiqueta("áudio sem transcrição", cor = Cores.TintaFraca)
+                    } else {
+                        TextoCorpo(item.fala.texto, cor = tinta(item.tintaDoTexto))
+                    }
                     item.rotuloDeEntrega?.let {
                         Box(Modifier.height(Espaco.Micro))
                         // `Cores.TintaFraca` e não `P2`: cor já significa

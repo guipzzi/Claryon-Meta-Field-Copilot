@@ -88,12 +88,27 @@ Deno.serve(async (req) => {
     const { data } = await supabase
       .from('memberships').select('agent_id').eq('talk_group_id', talk_group_id)
     destinatarios = (data ?? []).map((m) => m.agent_id).filter((a) => a !== author_agent_id)
-  } else {
+  } else if (origem?.lon != null && origem?.lat != null) {
     const raio = RAIO_POR_PRIORIDADE[prioridade] ?? 0
     const { data } = await supabase.schema('private').rpc('agentes_no_raio', {
       lon: origem.lon, lat: origem.lat, raio_m: raio, excluir: author_agent_id,
     })
     destinatarios = (data ?? []).map((a: { agent_id: string }) => a.agent_id)
+  } else {
+    // Alerta sem origem: cai no talk group, não estoura.
+    //
+    // A versão anterior lia `origem.lon` sem guarda — enquanto a linha do INSERT,
+    // vinte linhas abaixo, já fazia `origem ? ... : null`. Duas leituras opostas
+    // do mesmo campo no mesmo arquivo: uma admitia que ele pode faltar, a outra
+    // não. Quem faltasse com a origem recebia 500, e como o cliente engolia a
+    // falha, o sintoma era a tabela ficar vazia sem sinal nenhum.
+    //
+    // Degradar para o talk group é a escolha certa: um alerta sem coordenada
+    // ainda tem destinatários óbvios — a própria guarnição —, e entregar a menos
+    // gente é infinitamente melhor que não entregar a ninguém.
+    const { data } = await supabase
+      .from('memberships').select('agent_id').eq('talk_group_id', talk_group_id)
+    destinatarios = (data ?? []).map((m) => m.agent_id).filter((a) => a !== author_agent_id)
   }
 
   // 3) Transação: transmissão + entregas.
