@@ -12,7 +12,35 @@ achado que fechou a Fase 0. Enquanto elas não existirem no projeto:
 O código Kotlin que as chama já existe (`core-net/.../RegistroDeTransmissao.kt`) e
 está ligado. Falta só o destino.
 
-## Passo a passo
+## Caminho recomendado: o script
+
+O CLI do Supabase **para de responder neste ambiente** — os dois primeiros deploys
+funcionaram e, a partir daí, `supabase functions deploy` passou a travar sem emitir
+uma linha sequer. Sem saída não há diagnóstico, e passo de entrega que às vezes
+trava não é passo de entrega. Use:
+
+```bash
+cd ~/Downloads/Claryon\ -\ Field\ Copilot && python3 servidor/deploy_funcao.py transmit ack
+```
+
+```bash
+cd ~/Downloads/Claryon\ -\ Field\ Copilot && python3 servidor/deploy_funcao.py --listar
+```
+
+Não precisa de CLI, de Docker nem de `supabase login`: usa o mesmo
+`supabase_access_token` de `local.properties` que o `executar_sql.py` já usa.
+
+Dois achados que o script carrega, e que custaram tempo:
+
+- **A Management API recusa requisição sem `User-Agent`.** O `403` com corpo
+  `error code: 1010` é do **Cloudflare**, não do Supabase, e não tem nada a ver
+  com escopo de token. Foi por isso que a primeira tentativa pareceu "sem
+  permissão".
+- **`entrypoint_path` é relativo a `source/`, que o servidor já prefixa.** Passar
+  `source/index.ts` produz `.../source/source/index.ts` e um 400 que diz
+  exatamente isso.
+
+## Caminho alternativo: o CLI (quando ele coopera)
 
 **1. Instalar o CLI** (não está na máquina):
 
