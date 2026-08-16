@@ -1137,3 +1137,54 @@ aparelho tem" é exatamente o que se defende numa auditoria.
 
   Consequência prática: o MDK continua sem servir para testar o ciclo de voz. Fone Bluetooth
   com HFP permanece a única bancada honesta.
+
+- **2026-08-16 — `CLAUDE.md` vira fonte única da verdade; `ARCHITECTURE.md`, `GUIA_TECNICO.md`
+  e `INDICE.md` saem.** Medida a sobreposição antes de decidir: "Sequências que não podem ser
+  invertidas" existia em **três** arquivos (ARCHITECTURE, GUIA_TECNICO §4, PADROES);
+  "arquitetura de módulos" em **quatro**; "Regra Zero" em **três**. Eram ~565 linhas
+  duplicadas, e duplicação foi exatamente o mecanismo pelo qual 96 linhas de regra dura
+  divergiram em silêncio em 15/08 — o mesmo texto em dois lugares diverge, e nada denuncia.
+
+  O `CLAUDE.md` novo tem 144 linhas e carrega o que é **regra**: os três pilares, as
+  proibições, os invariantes sustentados por compilador, o gatilho de leitura por área, e o
+  índice. O que é **referência** (`PADROES_DE_ENGENHARIA.md`) e **história** (`DIARIO`,
+  `DECISIONS`) continua linkado e não é colado — colar o documento inteiro é o antipadrão que
+  o material do programa descreve. `AGENTS.md` fica como ponteiro de dez linhas para
+  ferramentas que procuram esse nome, com a regra explícita de não guardar conteúdo próprio.
+  Os arquivos apagados continuam no histórico do git; nada se perdeu.
+
+- **2026-08-16 — Três defeitos que reordenam o plano, achados na auditoria dos três pilares.**
+
+  **(a) O PTT não é demonstrável hoje.** `RadioTatico.kt:88` declara `sampleRateHz = 8_000`
+  como padrão e `RadioViewModel` não sobrescreve, enquanto `GlassesAudioManagerImpl` captura
+  a 16 kHz. A voz transmitida sai uma oitava abaixo e com o dobro da duração. Não é detalhe
+  de qualidade: é a ausência de qualquer vídeo, checkpoint ou demonstração possível. Meia
+  sessão de conserto, e é a maior alavanca do projeto.
+
+  Corolário que a auditoria anterior não tinha visto: o mesmo 8 kHz faz
+  `PreRollBuffer(sampleRateHz = 8_000)` guardar **300 ms reais** em vez dos 600 ms que
+  anuncia — o recurso que existe para não cortar a primeira sílaba corta a primeira sílaba —
+  e faz `amostrasPorQuadro = 160` partir cada bloco de 20 ms em dois "quadros", dobrando a
+  taxa de pacotes.
+
+  **(b) As três Edge Functions não têm chamador.** `grep "functions/v1" --include=*.kt`
+  devolve **zero**. `transmissions` nunca recebe INSERT, e `HistoricoDoCanal.falas()` devolve
+  lista vazia sempre. O fio do canal construído em 16/08 exibe apenas as inserções otimistas
+  locais, que somem em 10 s na recarga. A superfície visível do Pilar 1 está vazia em
+  produção — e isso é maior que "falta escrever o campo `transcricao`".
+
+  **(c) `AgrupadorDeQuadros` não existe**, apesar de `Transmissao.kt:28` afirmar que existe.
+  São 50 mensagens por segundo de ~300 B para 30 B de voz.
+
+  É a **sexta** vez que este projeto encontra capacidade construída, testada e nunca ligada.
+  Por isso "construído" passa a ter definição escrita no `CLAUDE.md`: tem chamador em
+  `src/main` alcançável em runtime. Classe testada sem chamador é escrita, não construída.
+
+- **2026-08-16 — Achado de segurança que nenhuma auditoria anterior tinha levantado:
+  personificação é possível hoje.** O protocolo de fio não carrega identidade do emissor —
+  `ProtocoloRealtime.kt:51-57` põe `indicativo` como string livre e `interpretar` (`:88-96`)
+  confia nela sem verificar nada. O canal é autorizado só pela chave anon compilada no APK
+  (`TransporteRealtime.kt:78`), então qualquer portador do APK entra no talk group e forja
+  `fala.anuncio` no nome de qualquer indicativo. **Cifrar o payload não conserta isso** —
+  chave de grupo prova pertencimento, não autoria. Join autenticado por JWT mais anúncio
+  assinado conserta. Registrado como pré-condição de qualquer trabalho de E2EE.

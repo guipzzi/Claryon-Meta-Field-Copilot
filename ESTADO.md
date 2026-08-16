@@ -1,4 +1,4 @@
-# Onde estamos — 2026-08-15 · `9b0f03b`+
+# Onde estamos — 2026-08-16 · `e181789`+
 
 Fonte única de "estado da conversa". **Reescrito ao fim de cada sessão, nunca acrescentado.**
 Teto duro: **60 linhas**. O que não couber é história e vai para `DECISIONS.md`. Aqui só
@@ -23,6 +23,17 @@ entra o que muda a próxima decisão: o que funciona, o que está quebrado, o qu
 
 ## O que está quebrado, e nós sabemos
 
+0. **O PTT NÃO É DEMONSTRÁVEL HOJE.** `RadioTatico.kt:88` tem `sampleRateHz = 8_000` como
+   padrão e `RadioViewModel` não sobrescreve, enquanto a captura entrega 16 kHz. A voz
+   transmitida sai **uma oitava abaixo, com o dobro da duração**. Meia sessão de conserto,
+   e é a maior alavanca do projeto.
+0b. **As três Edge Functions não têm um único chamador em Kotlin.** `grep "functions/v1"
+   --include=*.kt` devolve zero. Logo `transmissions` nunca recebe INSERT e
+   `HistoricoDoCanal.falas()` devolve lista vazia **sempre** — o fio do canal que acabou de
+   ser construído mostra só as inserções otimistas locais, que somem em 10 s na recarga.
+   A superfície visível do Pilar 1 está vazia em produção.
+0c. `AgrupadorDeQuadros` **não existe no repositório**, apesar de `Transmissao.kt:28` afirmar
+   que existe. São 50 mensagens/s de ~300 B para 30 B de voz.
 1. **O ciclo de voz não tem porta de entrada.** `DiagnosticsScreen` é a única tela que chama
    `runCommand`/`falarComando`/`cicloDeVoz`, e o nome só aparece uma vez no projeto: na
    própria definição (`ui/DiagnosticsScreen.kt:48`). C2, C3 e C4 estão mortos por voz; o app
@@ -56,13 +67,15 @@ entra o que muda a próxima decisão: o que funciona, o que está quebrado, o qu
 
 ## O que vem a seguir
 
-1. Porta de entrada do ciclo de voz — sem ela, nada acima importa.
-2. Dono único da saída de áudio (item 2 e 3 acima saem juntos).
-3. 16 kHz ponta a ponta e um `AudioTrack` só.
-4. Revisão humana de `specs/gatilho-por-voz.spec.md` — está **proposta** e sobrepõe uma regra
-   dura vigente; sobrepor regra dura é decisão humana, não do agente.
-5. Instrumentar `Telemetry`. "Métrica adicionada no fim nunca é adicionada."
-6. Entregáveis da Etapa 5 do edital — prazo **22/08**.
+Plano completo e faseado em [`ROADMAP.md`](ROADMAP.md). O caminho crítico:
+
+1. **16 kHz ponta a ponta** — sem isso não há vídeo, nem checkpoint, nem demo.
+2. **Porta de entrada do ciclo de voz** — um botão em `TelaDeGuarnicao`. Whisper, Piper,
+   roteador e executor já existem, testados e inalcançáveis.
+3. **Fonte única de microfone com fan-out** — 1 e 2 não coexistem sem ela.
+4. **JWT no canal + `ClienteDePisoRemoto`** — hoje o piso é resolvido em RAM do processo.
+5. **Transcrição na origem** — acumulador, Whisper no `finally`, quarto evento no protocolo.
+6. **Entregáveis da Etapa 5 — prazo 22/08.**
 
 **Pendências que não se resolvem sozinhas:** rotacionar o PAT do GitHub exposto no setup ·
 `security-crypto` em `1.1.0-alpha06` · `MockDeviceKitStreamTest` roda isolado · conferir se o
