@@ -26,15 +26,21 @@ brew install supabase/tap/supabase
 supabase login
 ```
 
-**3. Deployar as duas funções**, da raiz do projeto:
+**3. Deployar as duas funções.** O `cd` faz parte do comando: o CLI procura
+`supabase/functions/<nome>/index.ts` **relativo ao diretório atual**, e rodar do
+home devolve `Entrypoint path does not exist`.
 
 ```bash
-supabase functions deploy transmit --project-ref dzrhfghbldwvycysnzpb
+cd ~/Downloads/Claryon\ -\ Field\ Copilot && supabase functions deploy transmit --project-ref dzrhfghbldwvycysnzpb
 ```
 
 ```bash
-supabase functions deploy ack --project-ref dzrhfghbldwvycysnzpb
+cd ~/Downloads/Claryon\ -\ Field\ Copilot && supabase functions deploy ack --project-ref dzrhfghbldwvycysnzpb
 ```
+
+`WARNING: Docker is not running` é esperado e pode ser ignorado. Docker só serve
+para rodar as funções localmente (`supabase functions serve`); o deploy empacota e
+envia para a nuvem, sem container.
 
 **4. Conferir que subiram** — o esperado é **401** e não 404. 401 significa que a
 função existe e recusou a chamada sem JWT, que é o comportamento correto:
