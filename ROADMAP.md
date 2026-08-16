@@ -1,204 +1,741 @@
 # Roadmap — Claryon Field
 
-Fases até **18/09/2026**. Cada fase termina com algo **demonstrável**, e o critério
-de aceite é verificável — não é opinião sobre estar pronto.
+Fases de **16/08/2026 a 18/09/2026**. Cada fase termina com algo demonstrável e um
+critério de aceite verificável — não é opinião sobre estar pronto.
 
-**Critério de "construído":** tem chamador em `src/main` alcançável pelo agente em
-runtime. Classe testada sem chamador é *escrita*, não construída.
+Trilha do edital: **Produtividade**. IA **local**, no aparelho do agente. Escopo pode
+crescer por melhoria; §14.1 veda mudança de **domínio**, não de detalhe.
 
 ---
+
+## Critério de "construído"
+
+Tem chamador em `src/main` alcançável pelo agente **em runtime, sem passar por tela de
+diagnóstico**. Classe testada sem chamador é *escrita*, não construída. Tela de
+diagnóstico não conta como caminho: `DiagnosticsScreen` é hoje a única que chama
+`cicloDeVoz` e não é composta — por isso o ciclo de voz está morto apesar de pronto.
+
+Três perguntas fecham qualquer item:
+
+1. Que gesto ou fala do agente chega até esta linha de código?
+2. O que aparece na tela ou no ouvido quando ela falha?
+3. Qual comando prova que ela rodou? (`adb logcat -s ClaryonField`, `dumpsys`, consulta SQL,
+   `Telemetry`.)
+
+---
+
 ## Caminho crítico
 
-## Sequência mínima até os três pilares demonstráveis
+Oito passos. Cada um é pré-condição do seguinte.
 
-Sete passos. Cada um é pré-condição do seguinte — tirar qualquer um quebra a cadeia.
+**1. 16 kHz ponta a ponta.** `RadioTatico.kt:88` declara `sampleRateHz: Int = 8_000` e
+`RadioViewModel` não sobrescreve, contra 16 kHz da captura. A voz transmitida sai uma
+oitava abaixo com o dobro da duração. **O Pilar 1 está quebrado hoje no caminho feliz.**
+Meia sessão, maior alavanca do projeto.
 
-**1. Taxa de amostragem 16 kHz ponta a ponta** (`RadioViewModel.kt:184-200` passando `sampleRateHz = 16_000` para `RadioTatico`, cujo default é 8 kHz em `RadioTatico.kt:91`).
-Por que é o primeiro: **o Pilar 1 está quebrado hoje no caminho feliz.** A voz sai uma oitava abaixo com o dobro da duração. Não existe demonstração, vídeo nem checkpoint com isso no lugar. Custa meia sessão e é a maior alavanca do projeto inteiro.
+**2. Porta de entrada do ciclo de voz.** Whisper, Piper, `DeterministicIntentRouter`,
+`LexicoDeOcorrencias` e `ClaryonIntentExecutor` estão prontos e inalcançáveis. Um botão
+resolve hoje; a voz resolve na Fase 2. "Construir, testar e não ligar já aconteceu cinco
+vezes aqui" (`AGENTS.md`).
 
-**2. Porta de entrada do ciclo de voz** (um botão em `TelaDeGuarnicao` chamando `cicloDeVoz()`).
-Por que vem antes de qualquer melhoria de IA: `VoiceCycle`, `WhisperCppStt`, `PiperTts`, `DeterministicIntentRouter`, `LexicoDeOcorrencias` e `ClaryonIntentExecutor` estão todos prontos, testados e **inalcançáveis**, porque `DiagnosticsScreen` não é composta. O Pilar 3 não precisa de código novo para existir — precisa de um caminho. "Construir, testar e não ligar já aconteceu cinco vezes aqui" (`AGENTS.md`).
+**3. Fonte única de microfone com fan-out.** Os passos 1 e 2 **não coexistem** sem ela:
+`RadioTatico` já coleta o mesmo `Flow` frio duas vezes e `cicloDeVoz` abre uma terceira
+captura. É a primeira dependência declarada em `specs/gatilho-por-voz.spec.md`.
 
-**3. Fonte única de microfone com fan-out.**
-Por que é obrigatório e não otimização: os passos 1 e 2 **não coexistem** sem ele. `RadioTatico.kt:145` e `:231` já coletam o mesmo `Flow` frio duas vezes, e `cicloDeVoz` abre uma terceira captura — o próprio código admite (`DiagnosticsViewModel.kt:676-683`) que duas capturas simultâneas fazem "a segunda falhar ao inicializar ou roubar o fluxo da primeira". É também a primeira dependência declarada em `specs/gatilho-por-voz.spec.md`.
+**4. Dono único da saída, com fila de prioridade unificada.** Rádio e ciclo de voz têm
+hoje duas filas que não se enxergam: um P1 do rádio não interrompe fala do copiloto
+(item 3 do `ESTADO.md`). E o `AudioTrack` ainda nasce e morre por quadro de 20 ms.
 
-**4. JWT no canal Realtime + `ClienteDePisoRemoto`.**
-Por que é o divisor entre demo e produto: com `ClienteDePisoLocal` (`RadioViewModel.kt:192`) o piso é resolvido **em RAM do próprio processo**. Dois aparelhos falam por cima um do outro. E com a chave anon na URL (`TransporteRealtime.kt:78`), qualquer portador do APK ouve o grupo inteiro. Sem estes dois, "rede de comunicação" é um aparelho falando sozinho.
+**5. Telemetria instrumentada.** Sobe do fim para aqui. A Fase 2 tem meta **numérica** de
+latência, e `Telemetry.mark` (`core-common/.../Telemetry.kt`) não tem um único chamador.
+Sem ele, "tipo Alexa" continua sendo adjetivo.
 
-**5. Transcrição na origem: acumulador → Whisper no `finally` → evento `fala.transcricao` → roteamento por `transmissaoId` no receptor.**
-Por que a ordem interna importa: o texto **não pode** viajar no anúncio, porque o anúncio sai antes da fala (`SessaoPtt.kt:123`). Precisa de um quarto evento no protocolo (hoje há três, `ProtocoloRealtime.kt:30-32`) e de roteamento fora do laço de reprodução, porque `Receptor.kt:146` anula `transmissaoCorrente` antes de o texto chegar. O acumulador tem exatamente dois pontos de acoplamento — `SessaoPtt.kt:131` e `:151` — e a invariante é transcrever os bytes que foram ao ar, não os que foram capturados.
+**6. Gatilho por voz e talk group por voz.** É a decisão D1, aprovada. Depende de 3, 4 e 5.
+Muda o produto de "app de toque" para o que a premissa promete.
 
-**6. Dono único da escrita de posição + batimento alcançável.**
-Por que não dá para pular: hoje dois escritores publicam sem se enxergar (`CopilotService.kt:62` e `DiagnosticsViewModel.kt:320,334`) a 720 escritas/h, o segundo apaga `speed_mps` e regrava correção de até 120 s como `now()`. O Pilar 2 funciona, mas é caro e mente sobre frescor — e frescor falso é o defeito que `montarMapa` (`DiagnosticsViewModel.kt:346`) existe para impedir.
+**7. Servidor honesto: JWT no canal, piso remoto, transcrição na origem, turno e retenção.**
+Hoje o piso é resolvido em RAM do próprio processo, qualquer portador do APK entra no
+canal pela chave anon, as três Edge Functions não têm chamador em Kotlin, e o indicativo
+é string livre não verificada — personificação é possível.
 
-**7. `Telemetry.mark` instrumentado.**
-Por que é o último e ainda assim é crítico: os checkpoints das 15h00 e 16h00 são **validação ao vivo**, não documento. "Eficiência de bateria" e latência sem número medido são afirmação. `Telemetry.mark` (`core-common/.../Telemetry.kt:17`) não tem um único chamador no repositório.
+**8. Conhecimento de domínio on-device.** RAG extrativo primeiro, LLM depois. É a única
+frente do plano que pode ser cortada inteira sem quebrar nada — e por isso é a última.
+
+**Corte de emergência.** Se restarem três dias úteis: passos 1, 2, 4 e 7 entregam os três
+pilares em nível demonstrável. Passo 6 sem passo 5 é aceitável em demonstração e
+indefensável em documento — a meta vira afirmação sem medida.
 
 ---
 
-**Corte de emergência.** Se restarem só três dias úteis, os passos 1, 2 e 4 sozinhos entregam os três pilares em nível demonstrável: PTT audível entre dois aparelhos com piso arbitrado pelo servidor, copiloto respondendo por voz, e mapa que já funciona. O passo 5 (transcrição na origem) é o que diferencia a proposta, mas é o único da lista que pode ser apresentado como arquitetura provada em bancada de um aparelho se o tempo acabar.
-
----
 ## Fases
 
-### FASE 0 — Entrega da Etapa 5: documento, deck e 90 segundos filmáveis (16/08 a 22/08, prazo duro)
+### FASE 0 — MVP mínimo demonstrável e a entrega da Etapa 5 (16/08 a 22/08, prazo duro)
 
-**Objetivo.** Garantir a passagem no Segundo Filtro, que avalia o documento — e tornar o produto filmável para que "viabilidade técnica" (30 pts) seja demonstrada, não afirmada.
+**Objetivo.** Chegar em 22/08 com um app que faz o que o documento diz, e escrever o
+documento sobre o que funciona — não sobre o que está planejado. O template não foi
+preenchido antes de propósito (D5): descrever capacidade inexistente é a forma mais cara
+de errar num critério de viabilidade técnica.
 
-**Itens**
-
-- [TRANSVERSAL] Obter o template obrigatório da Etapa 5 (§5.5 usa a palavra "obrigatoriamente"). Se não estiver em mãos hoje, e-mail para aiglassesbrasil@ceia.ufg.br — esforço: 0,2 sessão — depende: nada. É o primeiro item porque bloqueia a escrita.
-- [TRANSVERSAL] Reler a proposta submetida na Etapa 1 e cruzar com os três pilares. §14.1 veda alteração de escopo; o documento tem de ser continuidade, não pivô — esforço: 0,5 sessão — depende: nada.
-- [P1] Corrigir a taxa de amostragem: passar `sampleRateHz = 16_000` na construção de `RadioTatico` (RadioViewModel.kt:184-200) e alinhar o codec. Sem isso o PTT sai uma oitava abaixo e não há vídeo possível — esforço: 0,5 sessão — depende: nada. É o item de maior retorno por hora do projeto inteiro.
-- [P1] `AudioTrack` único e serial na recepção: substituir a criação por quadro (GlassesAudioManagerImpl.kt:201-244) por um track de longa duração alimentado por fila, e trocar o `escopo.launch` de RadioTatico.kt:295 por consumo serializado — esforço: 1 sessão — depende: taxa 16 kHz.
-- [P3] Porta de entrada mínima do copiloto: um botão "Copiloto" em `TelaDeGuarnicao` que chama `cicloDeVoz()`. Não é o desenho final (o final é wake word), é o caminho alcançável que prova que C2/C3/C4 existem — esforço: 0,5 sessão — depende: nada.
-- [TRANSVERSAL] Gravar o vídeo: PTT audível entre dois aparelhos (ou aparelho + fone HFP), um comando de voz respondido por áudio, e o mapa acompanhando o portador — esforço: 0,5 sessão — depende: os três itens acima.
-- [TRANSVERSAL] Escrever o documento no template: os três pilares, arquitetura em camadas (`app` orquestra, `core-*` só dependem de `core-common`), a justificativa explícita de privacidade (checkpoint obrigatório + 20 pts de Considerações éticas), a estratégia de energia (checkpoint), e a tabela "o que o servidor vê e o que não vê" — esforço: 2 sessões — depende: template em mãos.
-- [TRANSVERSAL] Deck atualizado incorporando os feedbacks dos mentores do Ideathon de 15/08 (§5.5 exige explicitamente) — esforço: 1 sessão — depende: documento.
-
-**Aceite.** Documento e apresentação enviados até 22/08 no template da organização, com vídeo anexo de ≤ 90 s em que: (a) uma fala transmitida por PTT é reproduzida no aparelho receptor em tom e duração corretos — verificável por espectrograma comparando entrada e saída; (b) um comando falado produz resposta por áudio sem toque na tela após o disparo; (c) o mapa gira com o deslocamento. O documento declara base legal LGPD (arts. 7º II/III e 23 — nunca consentimento, que de subordinado não é livre) e a estratégia de energia por modo.
-
-**Destrava.** A própria continuidade do projeto. Sem passar no Segundo Filtro (23 a 29/08, resultado em 31/08), nenhuma fase seguinte é executada. É a única fase cujo custo de falha é total.
-
-### FASE 1 — Barramento de áudio único: uma fonte, um destino, 16 kHz ponta a ponta (23/08 a 29/08)
-
-**Objetivo.** Substituir os múltiplos donos de microfone e alto-falante por um barramento único com fan-out, que é a pré-condição de arquitetura para PTT, STT na origem, wake word e evidência coexistirem.
+**Não há vídeo nesta fase.** O edital não pede vídeo — a palavra não aparece nele. Era
+proposta minha, não requisito. Se a organização vier a pedir, ele é subproduto de meia
+sessão sobre um app que já funciona; não é entrega e não dita prioridade.
 
 **Itens**
 
-- [P1+P3] `FonteUnicaDeMicrofone` em `core-audio`: um `AudioRecord` por rota, `SharedFlow` com fan-out para N consumidores (pré-roll, transmissão ao vivo, VAD/wake word, cofre de evidência), contagem de referência e reconferência de rota **durante** o stream, não só na abertura — esforço: 2 sessões — depende: nada. Elimina os dois `collect` sobre `Flow` frio de RadioTatico.kt:145 e :231.
-- [P1] Codec Opus fora da thread principal: `withContext(Dispatchers.Default)` nas chamadas de `MediaCodecOpus` e escopo próprio em vez de `viewModelScope` — esforço: 0,5 sessão — depende: barramento. Verificável por StrictMode com `detectCustomSlowCalls`.
-- [P1] `AgrupadorDeQuadros`: 3 quadros de 20 ms por mensagem. Hoje são 50 mensagens/s de ~300 B para 30 B de voz — ordem de 10x de sobrecarga. E `Transmissao.kt:28` já afirma que a peça existe — corrigir código ou documentação, não deixar as duas divergindo — esforço: 1 sessão — depende: nada.
-- [P1] Um `AudioTrack` de longa duração como dono único da saída, com fila de prioridade **unificada** entre rádio e ciclo de voz, para que um P1 do rádio interrompa a fala do copiloto (pendência remanescente do item 3 do ESTADO) — esforço: 1,5 sessão — depende: barramento.
-- [REFAT] Quebrar `DiagnosticsViewModel` (798 linhas, em produção): extrair `MapaViewModel`, `CopilotoViewModel` e `EvidenciaViewModel`; o que sobrar de diagnóstico fica atrás de `BuildConfig.DEBUG` — esforço: 2 sessões — depende: porta de entrada da Fase 0. Sem isso, "arquitetura desacoplada" não sobrevive à primeira feature nova.
-- [P1] Primeiro teste do orquestrador: `app/src/test/.../radio/RadioTaticoTest.kt` cobrindo taxa de amostragem, contagem de `AudioRecord` abertos e serialização da reprodução — esforço: 1 sessão — depende: os itens acima. Hoje não existe nenhum teste em `app/src/test` sobre `radio/`, que é exatamente onde vivem os três defeitos.
+- [P1] Passar `sampleRateHz = 16_000` na construção de `RadioTatico` (`RadioTatico.kt:88`
+  é o default de 8 kHz que ninguém sobrescreve) e alinhar o codec — esforço: 0,5 sessão —
+  depende: nada.
+- [P1] `AudioTrack` único e serial na recepção, substituindo a criação por quadro de 20 ms
+  em `GlassesAudioManagerImpl` — esforço: 1 sessão — depende: 16 kHz.
+- [P3] Porta de entrada do copiloto por **botão** em `TelaDeGuarnicao` chamando
+  `cicloDeVoz()`. Não é o desenho final (o final é a Fase 2), é o caminho alcançável que
+  prova que C2/C3/C4 existem — esforço: 0,5 sessão — depende: nada.
+- [P1] Chamar a Edge Function `transmit` a partir do Kotlin. Hoje `grep "functions/v1"
+  --include=*.kt` devolve zero, logo `transmissions` nunca recebe INSERT e
+  `HistoricoDoCanal.falas()` devolve lista vazia **sempre**: o fio do canal mostra só
+  inserções otimistas que somem na recarga — esforço: 1 sessão — depende: nada.
+- [SEG] Deletar `servidor/funcoes/locate.ts` e derivar identidade do JWT em `transmit.ts`
+  e `ack.ts`. `locate.ts:21-23` aceita `solicitante_id` do corpo e chama
+  `private.posicao_relativa` com `service_role`, reabrindo na borda a trilateração que a
+  migração 0006 fechou no banco — violação direta de regra dura do `AGENTS.md` — esforço:
+  0,5 sessão — depende: nada. Melhor relação risco/esforço do projeto.
+- [UX] Devolver o âmbar ao uso único, que é a regra escrita no próprio
+  `ui/tema/Cores.kt` ("o âmbar tem um significado só: você está no ar"). Hoje `Cores.NoAr`
+  aparece em `MapaDeRuas.kt:420,432,455`, `TelaDoMapa.kt:245,246,255`, `TelaDeLogin.kt:203,240`
+  e `TelaDeGuarnicao.kt:172` — esforço: 0,5 sessão — depende: nada. Entra aqui porque custa
+  quase nada e conserta toda captura de tela que for para o documento.
+- [REFAT] `CopilotService`: `stopSelf()` em `:80` e `:89` acontecem antes de qualquer
+  `startForeground()` (que só existe em `:133`/`:135`), e `parar()` usa `startService` em
+  `:215` em vez de `startForegroundService` — esforço: 0,3 sessão — depende: nada. Duas
+  linhas, e o sintoma é crash de ciclo de vida em aparelho que a equipe não escolheu.
+- [TRANSVERSAL] Reler a proposta da Etapa 1 e conferir se ela menciona WhatsApp ou IA em
+  nuvem. §14.1 veda mudança de domínio; melhoria dentro do domínio está confirmada com os
+  avaliadores (D6). O documento é continuidade com detalhamento, nunca pivô — esforço: 0,5
+  sessão — depende: nada.
+- [TRANSVERSAL] Escrever o documento e o deck no template da organização (20 a 22/08): os
+  três pilares, a arquitetura em camadas, IA 100% local com os modelos que estão de fato no
+  APK, a política de dados em duas camadas, e a tabela "o que o servidor vê / o que não vê"
+  **com os itens ruins na coluna HOJE** — esforço: 2,5 sessões — depende: todos os itens
+  acima, porque o documento descreve o que roda.
+- [TRANSVERSAL] Meia página de análise de risco voluntária (art. 38 da LGPD): risco
+  identificado, medida adotada, risco residual assumido — esforço: 0,3 sessão — depende:
+  nada. Artefato curto que separa nota mediana de nota alta em Considerações éticas (20 pts).
 
-**Aceite.** Com PTT e ciclo de voz disparados simultaneamente, `adb logcat -s ClaryonField` registra **exatamente um** `AudioRecord` aberto e **um** `AudioTrack` vivo. `./gradlew :app:testDebugUnitTest` verde incluindo o novo `RadioTaticoTest`. StrictMode não acusa violação na Main durante 30 s de transmissão contínua. Contagem de mensagens no fio cai de ~50/s para ~17/s medida no `TransporteRealtime`.
+**Aceite.** Instalação limpa num aparelho zerado. (a) Uma fala transmitida por PTT é
+reproduzida em tom e duração corretos — verificável por espectrograma comparando entrada
+e saída, com o pico de F0 dentro de 5% do original. (b) Um toque no botão "Copiloto"
+produz resposta falada sem outro toque. (c) O fio do canal exibe a fala vinda de
+`transmissions` **depois de recarregar a tela** — prova de que a Edge Function foi
+chamada. (d) `grep -r "locate" servidor/funcoes/` não devolve arquivo. (e) `grep -rn
+"Cores.NoAr" app/src/main` só aparece em código de transmissão. (f) Documento e deck
+enviados até 22/08, cada afirmação de capacidade correspondendo a um caminho alcançável.
 
-**Destrava.** Tudo. É a peça que `specs/gatilho-por-voz.spec.md` lista como primeira dependência (`fonte-unica-de-microfone-com-fanout`), e sem ela wake word e STT na origem competem com o PTT pelo mesmo microfone.
-
-### FASE 2 — Copiloto por voz de verdade: "Hey Claryon" alcançável e barato (30/08 a 05/09)
-
-**Objetivo.** Entregar o Pilar 3 como produto: mãos livres do início ao fim, com IA 100% on-device e latência medida.
-
-**Itens**
-
-- [P3] Silero VAD substituindo o detector por energia RMS: `com.k2fsa.sherpa.onnx.Vad` já está no AAR. Confirmar a assinatura por `javap` no artefato antes de escrever (Regra Zero) — esforço: 1 sessão — depende: barramento de áudio.
-- [P3] Wake word por transcrição em português contra léxico fechado, e não por KWS (o único preset do AAR é chinês): VAD abre janela curta → whisper-tiny quente transcreve → casamento contra léxico fechado → earcon → janela de comando — esforço: 2 sessões — depende: Silero VAD + contexto quente.
-- [P3] Contexto do Whisper mantido quente entre invocações: hoje `cicloDeVoz` faz `Modelos.whisper()` e `release()` por ciclo (DiagnosticsViewModel.kt:698,726), recarregando 77,7 MB. Vira um `object` de processo com liberação por política térmica/energia — esforço: 1 sessão — depende: quebra do DiagnosticsViewModel.
-- [P3] Gazetteer de logradouros carregado em produção: `configurarGazetteer` (LexicoDeOcorrencias.kt:220) só é chamado em teste. Embarcar a lista da região da demonstração como asset — esforço: 0,5 sessão — depende: nada.
-- [P3] `WakeWordDetector` implementado de fato e `PowerPolicy` religada, tornando o modo **Standby** alcançável (item 5 do ESTADO): sem fala, o HFP fecha e o rádio dorme — esforço: 1 sessão — depende: wake word.
-- [P3] Ligar `localizarPar` ao `consultar_posicao` já existente, entregando "Hey Claryon, onde está a guarnição do Sgt. Paiva?" por voz, com resposta em grandezas relativas — esforço: 1 sessão — depende: wake word.
-- [REFAT] `CopilotService`: mover `stopSelf()` para depois de `startForeground()` (:81) e trocar `startService` por `startForegroundService` em `parar()` (:212) — esforço: 0,3 sessão — depende: nada. São duas linhas e evitam crash de ciclo de vida na demonstração.
-- [TRANSVERSAL] Revisão humana de `specs/gatilho-por-voz.spec.md` antes do diff: a spec sobrepõe regra dura vigente e está marcada como **proposta** — esforço: 0 (é decisão do usuário) — depende: decisão 4.
-
-**Aceite.** Com o aparelho no bolso e fone HFP no ouvido, dizer "Hey Claryon, onde está a guarnição do Sgt. Paiva?" produz resposta falada em pt-BR sem nenhum toque na tela. `Telemetry.mark` registra o tempo entre fim da fala e início do áudio de resposta, e a mediana de 10 tentativas fica registrada no relatório — número medido, não prometido. Com o app em Standby por 10 min sem fala, `dumpsys audio` mostra SCO fechado.
-
-**Destrava.** O Pilar 3 como diferencial de pitch, e o checkpoint obrigatório "Uso de Inteligência Artificial ... funcional e comprovável" (§8.1) na forma que o programa prefere em três seções: IA local.
-
-### FASE 3 — Rede de verdade: dois aparelhos que se ouvem e leem o mesmo texto (06/09 a 11/09)
-
-**Objetivo.** Transformar o PTT de aparelho solitário em rede multiusuário com transcrição na origem, que é o pedido central do Pilar 1.
-
-**Itens**
-
-- [P1/SEG] Canal Realtime privado amarrado ao JWT do agente: hoje `TransporteRealtime.kt:78` autoriza só pela chave anon do APK e `ProtocoloRealtime.kt:37-42` não envia `access_token`. Qualquer portador do APK entra em `realtime:tg-<uuid>` e recebe todos os quadros e indicativos. **Confirmar a API de canal privado/`setAuth` na doc oficial do Supabase antes de qualquer diff** — esforço: 1,5 sessão — depende: nada. Maior risco do sistema pelo menor esforço.
-- [P1] Trocar `ClienteDePisoLocal` por `ClienteDePisoRemoto` (RadioViewModel.kt:192 → ClientesDePiso.kt:53): o `floor_grants` atômico de `0005_controle_de_piso.sql` existe, está concedido e nunca foi usado. Sem isso não há rede, há aparelhos falando por cima — esforço: 1 sessão — depende: JWT no canal.
-- [P1] Acumulador do PCM transmitido em `SessaoPtt`, derivado dos **dois pontos únicos** por onde o áudio passa: o laço de pré-roll (`SessaoPtt.kt:131`) e o `collect` ao vivo (`:151`). A invariante é transcrever exatamente os bytes que foram ao ar — esforço: 1 sessão — depende: barramento.
-- [P1] Disparar o Whisper no `finally` de `SessaoPtt.kt:159-181`, **fora** do `withTimeoutOrNull` de :166 e em escopo de aplicação, para não competir com a codificação ao vivo nem morrer ao sair da tela — esforço: 1 sessão — depende: acumulador + contexto quente.
-- [P1] Quarto evento `fala.transcricao` no protocolo (`ProtocoloRealtime.kt:30-32` tem três; `interpretar:87-111` não conhece o quarto). O texto não pode viajar no anúncio, que sai antes da fala (`SessaoPtt.kt:123`) — esforço: 0,5 sessão — depende: acumulador.
-- [P1] Roteamento da transcrição no receptor chaveado por `transmissaoId`, **fora** do laço de reprodução: hoje `Receptor.kt:61,136,146` anula `transmissaoCorrente` antes de o texto chegar — esforço: 1 sessão — depende: evento no protocolo.
-- [P1] Chamar a Edge Function `transmit` a partir do Kotlin e incluir `transcricao` no INSERT de `transmit.ts:58-62`. Hoje não há nenhuma ocorrência de `functions/v1` no Kotlin, então `transmissions` nunca é escrita e `HistoricoDoCanal.falas()` devolve vazio sempre — esforço: 1 sessão — depende: evento no protocolo.
-- [SEG] Deletar `locate.ts` e derivar identidade do JWT em `transmit.ts` e `ack.ts`: `locate.ts:21-23` aceita `solicitante_id` do corpo e chama `private.posicao_relativa` com `service_role`, reabrindo na borda a trilateração que a migração 0006 fechou no banco. `public.consultar_posicao` já existe e já deriva do JWT — esforço: 0,5 sessão — depende: nada. É a melhor relação risco/esforço do projeto.
-- [SEG] Coluna `ativo` em `agents`, conferida dentro de `private.current_agent_id()` (`0002_rls.sql:37-45`): toda política de linha, todo RPC e o controle de piso passam por essa função, então um UPDATE desliga o agente de tudo de uma vez. Hoje não existe revogação institucional — esforço: 0,5 sessão — depende: nada.
-
-**Aceite.** Dois aparelhos autenticados com JWTs distintos no mesmo talk group: A aperta o PTT e fala; B ouve o áudio inteligível; **os dois** exibem no fio do canal exatamente a mesma string de transcrição, com o mesmo `transmissaoId`. Um terceiro aparelho com o APK mas sem sessão válida recebe erro ao tentar entrar no canal — verificável por log do socket. B aperta o PTT durante a fala de A e recebe recusa de piso vinda do servidor, não da RAM local.
-
-**Destrava.** O Pilar 1 completo e o argumento central de privacidade do pitch: a transcrição nasce no aparelho de origem, viaja idêntica para todos, e nenhum áudio vai a serviço externo no caminho crítico.
-
-### FASE 4 — Geolocalização honesta e barata, com energia comprovada (12/09 a 15/09)
-
-**Objetivo.** Entregar o Pilar 2 com um único escritor, frescor que não mente e custo de rádio medido — que é também o checkpoint obrigatório de bateria.
-
-**Itens**
-
-- [P2/REFAT] Dono único da escrita de posição: remover `publicarPosicao()` de `DiagnosticsViewModel.kt:320` e `:334`, deixando `ColetorDePosicao` como único escritor. Resolve de uma vez o custo 12x, a escrita redundante, o apagamento de `speed_mps` (`:418` envia `null`) e a falsificação de frescor — esforço: 1 sessão — depende: quebra do DiagnosticsViewModel.
-- [P2] Batimento alcançável com o agente parado: hoje `BATIMENTO_MS` vive dentro do callback (`ColetorDePosicao.kt:131`) que `minDistance` bloqueia. Segunda assinatura com `minDistance = 0f` ou alarme externo com `getCurrentLocation` — esforço: 1 sessão — depende: dono único.
-- [P2] Idade real da correção carimbada no servidor: `publicar_posicao` (migração 0011) recebe `medida_em` e grava `updated_at = now() - idade`. Sem isso, `idade_s` mede a idade do **upload**, não da medição, e toda a honestidade da migração 0007 é decorativa — esforço: 1 sessão — depende: dono único.
-- [P2] Porta de precisão e filtro de salto no `ColetorDePosicao` (hoje só há validação de domínio em `:188-190`): teto de `accuracy` e teste de velocidade implícita antes de publicar — esforço: 1 sessão — depende: dono único.
-- [P2] `ProvedorDeLocal.ultimaPosicao()` escolhendo a **melhor** correção, não a mais nova: `maxByOrNull { elapsedRealtimeNanos }` (`:63`) faz um fix de rede de 3 s com 1.200 m vencer um GPS de 25 s com 6 m — esforço: 0,5 sessão — depende: nada.
-- [P2] Cadência do mapa fora do tail timer de RRC: subir de 5 s (`DiagnosticsViewModel.kt:794`) para ~30 s. O esmaecimento tem granularidade de 120 s, então a informação é a mesma e o modem dorme — esforço: 0,3 sessão — depende: dono único.
-- [P2/REFAT] Contenção de exceção no `while(true)` de `abrirMapa` (`:305,322-335`), equivalente ao `semDerrubarOProcesso` do RadioTatico: hoje uma exceção mata a corrotina, `bombaDoMapa` fica não-nulo, a reabertura é recusada e a tela congela exibindo marcadores velhos como se fossem ao vivo — esforço: 0,5 sessão — depende: nada.
-- [P2] Tabela de trilha com retenção definida (prometida em comentário em `0001:49-51`, inexistente). Sem ela o pilar é "última posição conhecida", não rastreamento — e o caso "resumo da última hora" do Pilar 3 fica sem fonte de dados — esforço: 1 sessão — depende: decisão 6.
-- [TRANSVERSAL] Instrumentar `Telemetry.mark` (`core-common/.../Telemetry.kt:17`, hoje sem nenhum chamador) e `TelemetriaDoRadio.registrar/contar`: latência de PTT, latência do ciclo de voz, idade e precisão por publicação, resultado HTTP, e contagem de despertares do rádio — esforço: 1,5 sessão — depende: as fases anteriores. "Métrica adicionada no fim nunca é adicionada" — esta é a última janela.
-- [P3] "Hey Claryon, envie um resumo da última hora" lendo trilha + `transmissions`, sumarizado on-device pelo léxico já existente (sem LLM escolhendo ação — ele só preenche campos de intenção definida) — esforço: 1,5 sessão — depende: trilha + Fase 3.
-
-**Aceite.** Turno simulado de 8 h com o app em ATIVO: o servidor registra número de publicações compatível com a `PoliticaDePosicao` (não 720/h), medido por consulta; `Telemetry` exporta mediana e p95 de latência de PTT e de ciclo de voz e a curva de bateria por `dumpsys batterystats`. Com o agente parado por 30 min, a posição continua sendo renovada pelo batimento. Uma correção com 800 m de erro é descartada, verificável por log. "Resumo da última hora" responde por áudio.
-
-**Destrava.** O Pilar 2 e os dois checkpoints obrigatórios do dia 18/09 que hoje não têm prova: "Eficiência de bateria" (16h00) deixa de ser estratégia descrita e passa a ser número medido.
-
-### FASE 5 — Provar no palco: segurança demonstrável, ensaio dos checkpoints e travamento (16/09 a 18/09)
-
-**Objetivo.** Fechar as garantias que a banca avalia em Considerações éticas (20 pts) e ensaiar o dia inteiro, porque a janela real de código em 18/09 é de ~5h30 com dois cortes obrigatórios.
-
-**Itens**
-
-- [SEG] Permissão de câmera do DAT pedida em produção (item 8 do ESTADO): hoje nunca é pedida, e em hardware real a leitura de placa quebra no primeiro uso — exatamente no onboarding das 09h30, que é a única janela — esforço: 0,5 sessão — depende: nada. Prioridade absoluta dentro da fase.
-- [SEG] Coletar `Stream.errorStream` (item 7 do ESTADO): sem ele perdemos `PERMISSIONS_DENIED`, `HINGE_CLOSED`, `THERMAL_HOT`, `BATTERY_LOW` tipados, e `STOPPED` não é tratado como terminal — então sem `camera.stop()` o próximo `addCamera` falha. Falha nesse ponto durante o checkpoint é falha silenciosa — esforço: 1 sessão — depende: nada.
-- [SEG] Assinatura do manifesto de custódia (`Manifesto.kt:28-31` declara a lacuna: quem tem escrita no diretório reescreve tudo). Chave no Keystore, assinatura incremental sobre o hash corrente, uma a cada 10 s de janela — esforço: 1 sessão — depende: cofre já instanciado.
-- [SEG] E2EE do áudio **com autenticação de origem**, ou declarado como roadmap — ver decisão 5. Se entrar: par Ed25519 por aparelho no Keystore assinando cada anúncio, **antes** de qualquer chave de grupo. Chave simétrica de grupo sem assinatura por emissor não é um degrau abaixo de sender keys: qualquer membro forja um P1 em nome de outra guarnição, e `RadioTatico.kt:289-290` confia cegamente em `anuncio.autorIndicativo` e `anuncio.prioridade`, disparando `Earcon.PRIORITARIA` que por desenho toma o canal. **Não** fazer rotação de época client-driven: sem árbitro, dois aparelhos que detectam a mesma saída geram TGKs distintas e metade do grupo deixa de ouvir a outra — esforço: 3 sessões se entrar, 0 se virar roadmap — depende: decisão 5 + confirmação das primitivas do Tink por `javap`.
-- [SEG] Retenção executada de fato: job aplicando `expira_em` em `transmissions`. Hoje o campo é lógico e nada o executa — "retenção definida" é auditável em cinco minutos — esforço: 0,5 sessão — depende: nada.
-- [SEG] Registro de acesso dentro de `consultar_posicao` (art. 37 da LGPD): quem consultou a posição de quem. A função já é ponto único de passagem, então transforma reciprocidade em prestação de contas por poucas linhas — esforço: 0,5 sessão — depende: nada.
-- [REFAT] Limpar ramos mortos e documentação que afirma capacidade inexistente: `Transmissao.kt:28` (agrupamento), `SessaoPtt.kt:56-59` (captura que não espera a rede — `:108` aguarda `piso.pedir` antes do `collect` de `:137`, hoje gratuito só porque o piso é local), `PADROES_DE_ENGENHARIA.md:193-195`, `transmissao.nova` difundido por `transmit.ts:74` e não interpretado pelo cliente, `SupabaseSyncGateway` mirando a inexistente `tactical_messages`, `CanalDePosicoes` sem instanciação, `mapaVisivel` fixo em `false` — esforço: 1 sessão — depende: fases anteriores.
-- [TRANSVERSAL] Ensaio cronometrado dos dois checkpoints obrigatórios: 15h00 (IA + câmera/microfone + output por áudio) e 16h00 (privacidade + bateria), cada um em ≤ 10 min, com roteiro escrito e o aparelho já pareado — esforço: 1 sessão — depende: tudo.
-- [TRANSVERSAL] Ensaio do pitch de 18h00 e reescrita final de `ESTADO.md` + `git push origin master` — esforço: 1 sessão — depende: tudo.
-
-**Aceite.** Roteiro dos dois checkpoints executado de ponta a ponta em ≤ 10 min cada, cronometrado, com o app instalado do zero num aparelho limpo (prova de que a permissão de câmera do DAT é pedida e concedida no primeiro uso). Verificação de segurança: um agente marcado `ativo = false` perde acesso a canal, piso e consulta de posição na mesma transação. `servidor/verificacoes/` roda verde. Nenhum `TODO` de capacidade inexistente permanece na documentação — verificável por grep dos termos removidos.
-
-**Destrava.** O dia 18/09. A janela real de código no evento é de ~5h30 com dois cortes obrigatórios e almoço: nada novo se constrói lá. Quem chega construindo, perde.
+**Destrava.** A continuidade do projeto. Sem passar no Segundo Filtro (23 a 29/08,
+resultado em 31/08), nenhuma fase seguinte é executada. É a única fase cujo custo de
+falha é total.
 
 ---
+
+### FASE 1 — Barramento de áudio único e o que mede as metas (23/08 a 29/08)
+
+**Objetivo.** Uma fonte de microfone, um destino de áudio, uma fila de prioridade, e
+instrumentação que transforma meta em número. É a janela do Segundo Filtro: não há
+entregável externo, e é o melhor momento para mexer na fundação.
+
+**Itens**
+
+- [P1+P3] `FonteUnicaDeMicrofone` em `core-audio`: um `AudioRecord` por rota, `SharedFlow`
+  com fan-out para N consumidores (pré-roll, transmissão ao vivo, VAD, gatilho, cofre),
+  contagem de referência e reconferência de rota **durante** o stream, não só na abertura —
+  esforço: 2 sessões — depende: nada.
+- [P1] Dono único da saída: um `AudioTrack` de longa duração com **fila de prioridade
+  unificada** entre rádio e ciclo de voz, para que um P1 do rádio interrompa a fala do
+  copiloto (pendência remanescente do item 3 do `ESTADO.md`) — esforço: 1,5 sessão —
+  depende: barramento.
+- [P1] Codec Opus fora da thread principal: `withContext(Dispatchers.Default)` e escopo
+  próprio em vez de `viewModelScope` — esforço: 0,5 sessão — depende: barramento.
+  Verificável por StrictMode com `detectCustomSlowCalls`.
+- [P1] `AgrupadorDeQuadros`: 3 quadros de 20 ms por mensagem. Hoje são 50 mensagens/s de
+  ~300 B para 30 B de voz. `Transmissao.kt:28` **afirma que a peça existe** e ela não existe
+  no repositório — corrigir código ou documentação, nunca deixar as duas divergindo —
+  esforço: 1 sessão — depende: nada.
+- [TRANSVERSAL] Instrumentar `Telemetry.mark` e `TelemetriaDoRadio.registrar/contar`:
+  latência de PTT, latência de gatilho, latência de ciclo de voz, idade e precisão por
+  publicação de posição, resultado HTTP, contagem de despertares do rádio. Exportar p50/p95
+  por um comando de diagnóstico — esforço: 1,5 sessão — depende: barramento. **Antecipado do
+  fim do roadmap para aqui**: a Fase 2 tem meta numérica e sem isto ela não tem aceite.
+- [REFAT] Quebrar `DiagnosticsViewModel` (798 linhas, em produção, instanciado por
+  `MainActivity.kt:52`): extrair `MapaViewModel`, `CopilotoViewModel` e `EvidenciaViewModel`;
+  o que sobrar de diagnóstico vai para trás de `BuildConfig.DEBUG` — esforço: 2 sessões —
+  depende: porta de entrada da Fase 0.
+- [P1] `RadioTaticoTest` em `app/src/test`: taxa de amostragem, contagem de `AudioRecord`
+  abertos e serialização da reprodução. Hoje não há nenhum teste sobre `radio/`, que é
+  exatamente onde vivem os três defeitos — esforço: 1 sessão — depende: os itens acima.
+
+**Aceite.** Com PTT e ciclo de voz disparados ao mesmo tempo, `adb logcat -s ClaryonField`
+registra **exatamente um** `AudioRecord` aberto e **um** `AudioTrack` vivo. Um P1 chegando
+durante fala do copiloto corta a fala em ≤ 200 ms, medido por `Telemetry`. StrictMode não
+acusa violação na Main durante 30 s de transmissão contínua. Contagem de mensagens cai de
+~50/s para ~17/s medida em `TransporteRealtime`. `./gradlew :app:testDebugUnitTest` verde
+com o novo `RadioTaticoTest`. `Telemetry` exporta p50 e p95 de latência de PTT.
+
+**Destrava.** Tudo. É a primeira dependência declarada em `specs/gatilho-por-voz.spec.md`
+(`fonte-unica-de-microfone-com-fanout`), e sem ela gatilho por voz, transcrição na origem
+e cofre de evidência competem pelo mesmo microfone.
+
+---
+
+### FASE 2 — Gatilho por voz aprovado e talk group falado (30/08 a 05/09)
+
+**Objetivo.** Entregar o fluxo que o usuário aprovou (D1): mãos livres do início ao fim,
+incluindo abrir transmissão. A justificativa é operacional e está registrada — numa
+abordagem, com uma mão na pistola e outra no volante, não há mão para tocar nos óculos.
+
+**Fluxo aprovado, textual:**
+
+```
+"Hey Claryon"  +  "guarnição 3 na escuta"
+  → resolve o talk group "guarnição 3" contra a lista fechada dos grupos DO AGENTE
+  → BIP de confirmação: está gravando e transmitindo
+  → transmissão ao vivo em quadros de 20 ms
+  → teto duro de 30 s contados A PARTIR DO BIP
+  → fecha por detecção de silêncio da voz do agente
+```
+
+Duas propriedades desse desenho são invariantes, não preferências:
+
+1. **"guarnição N na escuta" ≠ "na escuta".** O número do grupo torna a frase específica e
+   a tira do vocabulário corrente de rádio policial. O casamento é **integral**: frase mais
+   qualquer palavra extra = recusa.
+2. **O KWS nunca abre canal.** Ele antecipa o earcon; quem abre é a transcrição íntegra em
+   português contra léxico fechado, com o grupo resolvido e o piso concedido. Com o KWS
+   desligado o sistema continua correto e perde só a sensação de resposta imediata. Se
+   alguém "otimizar" deixando o KWS decidir sozinho, o produto passa a abrir canal com
+   tráfego de rádio ambiente.
+
+**Latência vira número (D2), com os dois relógios separados:**
+
+| Marca | Alvo |
+|---|---|
+| fim de "Hey Claryon" → **início** do earcon `OUVI_VOCE` | p95 ≤ **500 ms** |
+| fim do enunciado completo → BIP de canal aberto | p95 ≤ **1 200 ms** |
+| fim do enunciado completo → primeiro quadro de 20 ms no ar | p95 ≤ **1 500 ms** |
+| falso aceite que **abre canal** | ≤ 1 por 8 h |
+| falso aceite que só toca earcon | ≤ 0,5 por hora |
+| recall do gatilho em 30 pronúncias reais, por fone HFP | ≥ 90% |
+
+Os 500 ms não são escolha de conforto. **Verificado por mim no artefato**
+(`core-voice/libs/sherpa-onnx-1.13.5.aar`, pool de constantes de
+`KeywordSpotterKt.class`): os presets referenciados por `getKwsModelConfig` são
+`sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01` e
+`sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01`, e **os dois** carregam
+`encoder/decoder/joiner-epoch-12-avg-2-chunk-16-left-64.onnx`. A doc do sherpa atribui
+320 ms de latência algorítmica ao chunk-16 contra 160 ms ao chunk-8 — **número que ainda
+não reconferi na fonte nesta sessão e que precisa de confirmação antes de virar linha de
+spec**. Se ele se confirmar, um alvo de 300 ms é impossível por construção com estes
+artefatos, e descer dele exige um modelo chunk-8 que os presets do AAR não trazem.
+
+**Correção de fato na spec, antes de qualquer diff.** `specs/gatilho-por-voz.spec.md`
+afirma que o único preset do AAR é chinês. São dois, e o segundo é inglês. Isso derruba um
+risco aceito da spec como está escrita e transforma o KWS de otimização hipotética em
+caminho real — ainda que com recall desconhecido em pt-BR.
+
+**Itens**
+
+- [TRANSVERSAL] Revisão da spec com a aprovação D1 escrita e datada dentro dela, mais as
+  três correções: dois presets de KWS (não um), teto de **30 s** no item 13 — que hoje diz
+  12 000 ms enquanto `SessaoPtt.kt:234` já declara `DURACAO_MAXIMA_MS = 30_000L` — e faixa
+  de duração do enunciado subindo de 0,6–2,5 s (`spec:149`) para 1,2–4,0 s, porque a frase
+  ficou mais longa — esforço: 0,5 sessão — depende: nada. **A aprovação precisa estar na
+  spec, não só na conversa**: `CLAUDE.md` diz que sobrepor regra dura é decisão humana, e
+  `docs/PADROES_DE_ENGENHARIA.md:190` continua dizendo o contrário até ser editado.
+- [P3] Silero VAD substituindo o detector por energia RMS. `SileroVadModelConfig` está no
+  AAR (verificado: a classe existe em `com/k2fsa/sherpa/onnx/`). **Duas instâncias, não
+  uma**: a do gatilho quer segmentos curtos, a da transmissão precisa tolerar 30 s via
+  `maxSpeechDuration`. Confirmar a assinatura por `javap` antes de escrever — esforço: 1
+  sessão — depende: barramento.
+- [P3] Contexto do Whisper quente entre invocações: hoje `cicloDeVoz` faz `Modelos.whisper()`
+  e `release()` por ciclo, recarregando 77,7 MB (`ggml-tiny.bin` tem 77 691 713 B em
+  `app/src/main/assets/models/`). Vira `object` de processo com liberação por política
+  térmica — esforço: 1 sessão — depende: quebra do `DiagnosticsViewModel` — esforço: 1
+  sessão.
+- [P3] Verificador do gatilho: VAD abre janela → whisper pt transcreve → casamento integral
+  contra léxico fechado → grupo resolvido → earcon → piso → BIP → quadros — esforço: 2
+  sessões — depende: VAD + contexto quente + telemetria.
+- [P3] KWS como adiantamento do earcon, atrás de flag, com o preset inglês e a grafia
+  fonética de "Claryon". Último item da fase porque é o único que sai sem quebrar nada —
+  esforço: 1 sessão — depende: verificador funcionando.
+- [P1] Seleção de talk group por voz, em três diffs: migração `0012` com coluna
+  `rotulo_falado text` única por `unit_id` em `talk_groups` (nunca derivar o número por
+  substring de `nome` — `'GTA-3 Alfa'` casaria "3" por acidente); carga do mapa
+  `{rotulo_falado → id}` no login, que a RLS já limita ao que o agente pode ver; e
+  `RadioTatico.trocarDeGrupo(id)` reconectando o transporte **sem tocar em `AudioDoAgente`**
+  — esforço: 2 sessões — depende: verificador.
+- [P1] Matar o canal fixo: `CANAL_DEMO` e `NOME_DO_CANAL` em `MainActivity.kt:236-237` e o
+  fallback morto `TALK_GROUP_PADRAO = "demo"` em `RadioViewModel.kt:450` — esforço: 0,3
+  sessão — depende: seleção por voz.
+- [P3] Recusa honesta e audível: falar um grupo a que o agente não pertence responde "você
+  não é da guarnição 3", não silêncio. Descarte silencioso é para gatilho não reconhecido;
+  autorização negada merece resposta — esforço: 0,3 sessão — depende: seleção por voz.
+- [P3] Fecho por silêncio, escrito com honestidade na spec: *o sistema detecta ausência de
+  fala, não ausência da fala do agente* — o isolamento depende do beamforming dos óculos.
+  Parada por toque continua existindo e é a única que não depende do microfone — esforço:
+  0,5 sessão — depende: VAD.
+- [P1] Teto de 30 s avaliado **fora** do `collect` de quadros. Hoje ele é avaliado dentro,
+  então uma fonte que para de emitir mantém o canal tomado indefinidamente — e subir de 12
+  para 30 s dobra a janela de dano sem consertar a causa — esforço: 0,5 sessão — depende:
+  nada.
+- [P3] `WakeWordDetector` implementado de fato e `PowerPolicy` religada, tornando o modo
+  **Standby** alcançável (item 5 do `ESTADO.md`) — esforço: 1 sessão — depende: KWS ou VAD.
+- [P3] Gazetteer de logradouros em produção: `configurarGazetteer` só é chamado em teste —
+  esforço: 0,5 sessão — depende: nada.
+
+**Aceite.** Aparelho no bolso, fone HFP no ouvido, nenhum toque na tela. Dizer "Hey
+Claryon, guarnição 3 na escuta" produz earcon, BIP e transmissão que um segundo ouvinte
+recebe; parar de falar fecha o canal; falar 40 s corridos fecha aos 30 s por teto. Dizer
+"guarnição 9 na escuta", grupo a que o agente não pertence, produz recusa falada e
+**nenhum quadro no ar** — verificável por contagem de mensagens no transporte. Trinta
+pronúncias reais gravadas por HFP dão recall ≥ 90%. `Telemetry` exporta p95 das três
+marcas da tabela acima, e os três números entram no `ESTADO.md` medidos, não prometidos.
+Oito horas de rádio ambiente gravado e reproduzido não abrem canal nenhuma vez.
+
+**Destrava.** A premissa do produto. E o checkpoint de IA do dia 18/09 na forma que o
+programa prefere: local, funcional e comprovável.
+
+---
+
+### FASE 3 — Servidor honesto: rede, posição e retenção em duas camadas (06/09 a 11/09)
+
+**Objetivo.** Transformar o PTT de aparelho solitário em rede multiusuário, e a posição de
+"última coordenada" em capacidade com base legal, prazo e prestação de contas. Rede e
+posição estão na mesma fase porque são a mesma camada — protocolo, RLS e migração.
+
+**Regra de sequenciamento, antes da lista.** A tabela de trilha entra **na mesma sessão**
+em que entram a porta de turno, o job de retenção e o log de acesso. Nunca antes. Criar a
+trilha sem os três controles deixa o sistema estritamente pior do que está hoje: passa a
+existir rastro contínuo do deslocamento de agentes sem recorte de turno, sem prazo
+executado e sem registro de quem leu. Se o calendário apertar, o certo é **não criar a
+tabela** e declarar a política por escrito — banca pontua política e controle, não a
+existência de uma tabela.
+
+**Itens**
+
+- [P1/SEG] Canal Realtime privado amarrado ao JWT do agente. Hoje o transporte autoriza só
+  pela chave anon do APK e o protocolo não envia `access_token`: qualquer portador do APK
+  entra em `realtime:tg-<uuid>` e recebe todos os quadros e indicativos. **Confirmar a API
+  de canal privado/`setAuth` na doc oficial do Supabase antes de qualquer diff** — esforço:
+  1,5 sessão — depende: nada. Maior risco do sistema pelo menor esforço.
+- [P1] `ClienteDePisoRemoto` no lugar de `ClienteDePisoLocal`: o `floor_grants` atômico de
+  `0005_controle_de_piso.sql` existe, está concedido e nunca foi usado. Sem isso não há
+  rede, há aparelhos falando por cima — esforço: 1 sessão — depende: JWT no canal.
+- [SEG] Indicativo derivado do JWT no protocolo, nunca do payload. Hoje ele é string livre
+  não verificada, então personificação é possível — e um P1 forjado em nome de outra
+  guarnição toma o canal por desenho — esforço: 1 sessão — depende: JWT no canal.
+- [SEG] Coluna `ativo` em `agents`, conferida dentro de `private.current_agent_id()`
+  (`0002_rls.sql:37-45`). Toda política de linha, todo RPC e o controle de piso passam por
+  essa função: um UPDATE derruba o agente de canal, piso, posição e consulta na mesma
+  transação. Revogação institucional é item que a banca procura por nome — esforço: 0,5
+  sessão — depende: nada.
+- [P1] Acumulador do PCM transmitido em `SessaoPtt`, derivado dos dois pontos únicos por
+  onde o áudio passa (pré-roll e `collect` ao vivo). A invariante é transcrever **os bytes
+  que foram ao ar**, não os que foram capturados — esforço: 1 sessão — depende: barramento.
+- [P1] Whisper disparado no `finally` de `SessaoPtt`, **fora** do `withTimeoutOrNull` e em
+  escopo de aplicação, para não competir com a codificação ao vivo nem morrer ao sair da
+  tela — esforço: 1 sessão — depende: acumulador + contexto quente.
+- [P1] Quarto evento `fala.transcricao` no protocolo (hoje há três) e roteamento no
+  receptor chaveado por `transmissaoId`, **fora** do laço de reprodução — o texto não pode
+  viajar no anúncio, que sai antes da fala — esforço: 1,5 sessão — depende: acumulador.
+- [P2/REFAT] Dono único da escrita de posição: `ColetorDePosicao` como único escritor.
+  Resolve num diff o custo de 720 escritas/h, a escrita redundante, o apagamento de
+  `speed_mps` e a falsificação de frescor — esforço: 1 sessão — depende: quebra do
+  `DiagnosticsViewModel`.
+- [P2] Batimento alcançável com o agente parado, idade real da correção carimbada no
+  servidor (`medida_em`, não hora do upload), porta de precisão com teste de salto, e
+  `ultimaPosicao()` escolhendo a **melhor** correção e não a mais nova — esforço: 2 sessões
+  — depende: dono único.
+- [P2] Arredondamento de distância dentro de `consultar_posicao` e `posicoes_do_grupo`. O
+  arredondamento para 50/100 m existe em `locate.ts` e está morto; a função viva devolve
+  precisão métrica crua — esforço: 0,3 sessão — depende: nada.
+- [SEG] **Camada 1 — corregedoria.** `private.turnos` com índice único parcial de turno
+  aberto por agente, `public.iniciar_turno()`/`encerrar_turno()`, `publicar_posicao`
+  **recusando escrita fora de turno aberto**, encerramento automático por inatividade, e
+  `private.trilha_de_posicao` particionada por dia, sem GRANT para `authenticated` e sem
+  índice geográfico — esforço: 2 sessões — depende: dono único. Sem o encerramento
+  automático, "esqueci de encerrar" vira 24 h de rastreamento e a defesa jurídica inteira
+  cai; ele é parte do controle, não refinamento.
+- [SEG] **Camada 2 — janela de 30 minutos para pares.** `public.rastro_do_par(indicativo)`
+  devolvendo série de distância e azimute dos últimos 30 min, com a idade de cada ponto
+  declarada, sujeita à mesma reciprocidade que a consulta de posição já pratica — esforço:
+  1 sessão — depende: camada 1.
+- [SEG] Job de retenção executando os dois prazos e o `expira_em` de `transmissions`, que
+  hoje é campo lógico sem executor. Prazos como constante única numa migração, alteráveis
+  em uma linha. **Confirmar a assinatura de `cron.schedule` na doc do Supabase antes do
+  diff** — esforço: 1 sessão — depende: camada 1.
+- [SEG] Registro de acesso nas duas portas: linha por consulta em `consultar_posicao`,
+  sessão em `abrir_mapa`/`fechar_mapa` para a porta de alto volume. **Nunca gravar a
+  resposta**, e o autor sai de `private.current_agent_id()`, jamais do indicativo do
+  protocolo — log com autor forjável produz prova falsa e é pior que log nenhum — esforço:
+  1 sessão — depende: indicativo do JWT.
+- [SEG] `public.quem_me_consultou()`: o titular vê quem o consultou — esforço: 0,3 sessão —
+  depende: log de acesso. Converte conformidade em característica de produto.
+
+**Aceite.** Dois pares autenticados com JWTs distintos no mesmo talk group: A fala, B ouve
+áudio inteligível, **os dois** exibem a mesma string de transcrição com o mesmo
+`transmissaoId`. B aperta o PTT durante a fala de A e recebe recusa de piso vinda do
+servidor. Um terceiro cliente com o APK e sem sessão válida recebe erro ao entrar no canal.
+Um agente marcado `ativo = false` perde canal, piso e consulta na mesma transação. Fora de
+turno aberto, `publicar_posicao` **recusa** — verificável por SQL. `cron.job_run_details`
+mostra a retenção executada. `servidor/verificacoes/` roda verde.
+
+**Aceite com um aparelho só (D7).** O segundo par é uma sessão headless com JWT distinto
+rodando no emulador ou num script Deno: ela prova protocolo, piso remoto, RLS e roteamento
+de transcrição — tudo menos qualidade de áudio, que continua sendo provada por
+espectrograma no aparelho físico. **A fase não fica bloqueada por hardware**, mas o item de
+áudio entre dois aparelhos reais fica marcado como pendente até o segundo celular chegar.
+
+**Destrava.** O Pilar 1 completo e o argumento central de privacidade: a transcrição nasce
+no aparelho de origem, viaja idêntica para todos, e nenhum áudio vai a serviço externo.
+
+---
+
+### FASE 4 — Conhecimento de domínio on-device (12/09 a 14/09)
+
+**Objetivo.** Responder "minha Glock 19 emperrou, como faço?" com IA rodando no aparelho do
+agente. É a frente mais vistosa do plano e a menos crítica: entra depois de tudo que
+quebra o produto se faltar.
+
+**A ordem entrega valor antes de risco, e as duas etapas são independentes:**
+
+- **Etapa A — RAG extrativo, sem LLM nenhum.** Embedder + índice local + Piper lendo o
+  trecho recuperado *verbatim*, com o número do documento citado. Custa poucas centenas de
+  MB, latência quase zero, zero alucinação, e **responde a pergunta hoje**. É entregável e
+  demonstrável sozinha.
+- **Etapa B — LLM como camada de redação por cima do A.** O modelo recebe o trecho e o
+  reescreve em três frases faladas. Se decepcionar em pt-BR, desliga por flag e a Etapa A
+  continua de pé.
+
+**O produto nunca fica dependendo do LLM funcionar.** Esse é o ponto do desenho, e é a
+resposta direta ao padrão que o `AGENTS.md` registra: a Etapa A tem caminho alcançável
+antes de qualquer linha de código de LLM existir.
+
+**Dois fatos verificados neste repositório mudam a escolha de motor e precisam estar aqui:**
+
+1. **O ggml deste projeto é compilado como biblioteca compartilhada.**
+   `core-voice/build/intermediates/merged_native_libs/release/.../lib/arm64-v8a/` contém
+   `libggml.so`, `libggml-base.so` e `libggml-cpu.so`. O `lib/arm64-v8a/` dentro do APK é
+   um diretório plano, e llama.cpp compilado pelo mesmo CMake produz **os mesmos três nomes
+   de arquivo**. Ou o merge de jniLibs falha, ou um `pickFirst` faz whisper.cpp e llama.cpp
+   linkarem contra uma única revisão de ggml, com ABI incompatível e crash só em runtime.
+   Isso não é "alguns MB de disco duplicado": é renomear os alvos do llama.cpp ou unificar
+   revisões de ggml, e unificar arrisca o STT que hoje funciona. **"É uma tarde" está
+   errado.**
+2. **Llama 3.2 1B e 3B são texto puro.** O pedido inclui interpretação de foto e vídeo
+   depois; visão só existe em 11B/90B, que não cabem no aparelho. Escolher 1B hoje é
+   escolher trocar de família, tokenizador e prompt depois — não "trocar um arquivo".
+   Somem-se a licença própria do Llama (não é open source) e a política de uso aceitável
+   que veda armas, num produto cujo caso de uso-bandeira é manejo de pistola: isso é
+   parecer jurídico, e ele vem antes do código, não depois.
+
+Por isso o motor **não está decidido aqui** — está na lista de decisões em aberto, com os
+dois candidatos e o que precisa ser confirmado antes de qualquer linha em `build.gradle.kts`.
+
+**Itens**
+
+- [P3] `core-knowledge`, módulo novo que depende só de `core-common` e **não** declara
+  dependência de `core-agent` — esforço: 0,5 sessão — depende: nada.
+- [P3] Corpus curado com o número do documento em cada trecho, de material de licença
+  compatível com embarque em APK. **Este é o item de maior risco de cronograma da fase** e
+  não é tarefa de engenharia — esforço: 1 sessão de curadoria — depende: decisão sobre a
+  fonte.
+- [P3] Embedder + índice vetorial local + recuperação por similaridade com **limiar**.
+  Abaixo do limiar, o copiloto diz que não sabe — esforço: 2 sessões — depende: corpus.
+- [P3] Etapa A alcançável por voz: "Hey Claryon, Glock 19 emperrou" → recupera → Piper lê o
+  trecho citando o documento — esforço: 0,5 sessão — depende: índice + Fase 2.
+- [P3] Teste que prova que a saída do modelo **nunca** alcança `ClaryonIntentExecutor`.
+  Fronteira de módulo é necessária e não suficiente: `app` importa os dois e é lá que a
+  `String` do LLM e o executor se encontram. A garantia tem de ser um teste em `app`, do
+  mesmo jeito que a garantia de posição é do servidor e não do cliente — esforço: 0,5 sessão
+  — depende: Etapa A.
+- [P3] Etapa B atrás de flag, com o motor decidido pela decisão em aberto e o modelo em
+  `filesDir` (nunca em `assets/`: o loader recebe caminho de arquivo, e asset não tem
+  caminho no sistema de arquivos — comprimido ou não) — esforço: 3 sessões — depende:
+  decisão do motor + Etapa A. **Primeiro item cortado se o calendário apertar.**
+- [P3] Degradação por flag ou RAM disponível no boot: aparelho fraco fica na Etapa A, que já
+  está pronta por construção. Nenhum caminho novo, nenhum código morto — esforço: 0,3 sessão
+  — depende: Etapa B.
+- [TRANSVERSAL] Regra dura reescrita **como spec proposta em `specs/`, com aceite em EARS**,
+  não como diff direto no `AGENTS.md`: o LLM continua proibido de escolher ação, e ganha uma
+  exigência a mais — só fala sobre o que recuperou, e sem recuperação acima do limiar diz que
+  não sabe — esforço: 0,5 sessão — depende: nada. Revisão humana antes do diff.
+
+**Aceite.** Modo avião, sem rede nenhuma. "Hey Claryon, minha Glock 19 emperrou" produz
+resposta falada que cita o número do documento de origem, em ≤ 4 s do fim da fala, medido
+por `Telemetry`. Uma pergunta fora do corpus produz "não encontrei procedimento para isso"
+e não uma invenção — verificável com 10 perguntas fora de domínio. `./gradlew build` verde
+com o módulo novo e **um** conjunto de `libggml*.so` no APK, verificável por
+`unzip -l app-release.apk | grep ggml`. O teste de fronteira falha se alguém ligar a saída
+do LLM ao executor.
+
+**Destrava.** O argumento de Produtividade e o checkpoint de IA. Não destrava nenhum outro
+item do roadmap — de propósito.
+
+---
+
+### FASE 5 — UX/UI, travamento e ensaio (15/09 a 17/09)
+
+**Objetivo.** Refinar o que a plateia vê, e travar. Refinamento vem por último porque tela
+de app que ainda vai mudar é retrabalho — os itens de UX que custam quase nada já entraram
+na Fase 0.
+
+**Os modelos combinados, sem reabrir discussão.** Dark-only, densidade de painel de
+instrumento, estrutura feita de fios de 1 px e não de caixas, âmbar com um significado só.
+Está tudo escrito em `ui/tema/Cores.kt` — a fase é fazer o app obedecer o próprio sistema.
+**Três coisas foram rejeitadas três vezes e não voltam:** colchetes decorativos, alvos
+circulares e âncoras assimétricas. `TelaDoMapa.kt:245-255` desenha exatamente um alvo
+circular com `drawCircle` e uma linha de rumo — é o primeiro a sair.
+
+**Itens**
+
+- [UX] Auditoria do sistema atual com a skill `audit-design-system`, produzindo a lista de
+  divergências entre `Cores.kt`/`Tema.kt` e o que as sete telas de fato usam — esforço: 0,5
+  sessão — depende: nada.
+- [UX] Remover o alvo circular do mapa (`TelaDoMapa.kt:245-255`) e substituir por marca de
+  rumo em fio, coerente com o resto — esforço: 0,5 sessão — depende: auditoria.
+- [UX] Tela de guarnição como painel: canal ativo nomeado pelo `rotulo_falado` real (não
+  mais `"GTA-3 Alfa"` fixo), estado do piso, estado da rota de áudio, e quem está falando —
+  esforço: 1 sessão — depende: Fase 2 e Fase 3.
+- [UX] Estados de falha visíveis e honestos: hoje a UI mostra `ENFILEIRADA` sem fila alguma.
+  Todo estado exibido tem de corresponder a estado que existe — esforço: 1 sessão — depende:
+  auditoria.
+- [UX] Escala tipográfica de dado tabular: indicativo, distância, rumo e idade alinhados por
+  coluna, com tabular figures. É o que faz a tela ler como instrumento e não como app de
+  mensagem — esforço: 0,5 sessão — depende: auditoria.
+- [UX] Movimento com a skill `motion-design`, e só onde carrega informação: o pulso do "no
+  ar", a transição de piso concedido/negado, o esmaecimento do marcador por idade. Nada
+  decorativo — esforço: 1 sessão — depende: itens acima.
+- [UX] Teste de captura por tela para não regredir depois — esforço: 0,5 sessão — depende:
+  itens acima.
+- [SEG] Permissão de câmera do DAT pedida em produção (item 8 do `ESTADO.md`): hoje nunca é
+  pedida, e em hardware real a leitura de placa quebra no primeiro uso — exatamente no
+  onboarding, que é a única janela — esforço: 0,5 sessão — depende: nada. **Prioridade
+  absoluta dentro da fase.**
+- [SEG] Coletar `Stream.errorStream` e tratar `STOPPED` como terminal (item 7 do
+  `ESTADO.md`): sem `camera.stop()` o próximo `addCamera` falha, e sem os erros tipados não
+  se sabe por que a demonstração parou — esforço: 1 sessão — depende: nada.
+- [SEG] Assinatura do manifesto de custódia com chave no Keystore, assinatura incremental
+  sobre o hash corrente — esforço: 1 sessão — depende: cofre instanciado.
+- [REFAT] Limpar ramos mortos e documentação que afirma capacidade inexistente — lista
+  completa na seção seguinte — esforço: 1 sessão — depende: fases anteriores.
+- [TRANSVERSAL] Criar `docs/INDICE.md`, que `CLAUDE.md` e `AGENTS.md` citam e **não existe
+  no repositório** — esforço: 0,3 sessão — depende: nada. O gatilho de leitura de
+  `AGENTS.md` aponta hoje para um arquivo ausente.
+- [TRANSVERSAL] Ensaio cronometrado dos dois checkpoints obrigatórios, cada um em ≤ 10 min,
+  com roteiro escrito e aparelho já pareado — esforço: 1 sessão — depende: tudo.
+- [TRANSVERSAL] Ensaio do pitch, reescrita final de `ESTADO.md`, `git push origin master` —
+  esforço: 1 sessão — depende: tudo.
+
+**Aceite.** App instalado do zero num aparelho limpo executa os dois roteiros de checkpoint
+em ≤ 10 min cada, cronometrado, com a permissão de câmera do DAT pedida e concedida no
+primeiro uso. `grep -rn "Cores.NoAr" app/src/main` só devolve código de transmissão.
+Nenhum `drawCircle` decorativo permanece. Nenhum estado exibido na UI corresponde a
+capacidade inexistente — verificável por grep dos termos removidos. `docs/INDICE.md` existe
+e cada linha aponta para arquivo que existe.
+
+**Destrava.** O dia 18/09. A janela real de código no evento é de ~5h30 com dois cortes
+obrigatórios e almoço: nada novo se constrói lá. Quem chega construindo, perde.
+
+---
+
+### 18/09 — o dia
+
+Sem itens. Execução do roteiro, os dois checkpoints, o pitch. A única coisa que se faz de
+código é corrigir o que quebrar em hardware que a equipe nunca tocou — e para isso a Fase 5
+deixou `errorStream` coletado e permissão de câmera pedida, que são os dois pontos que só
+falham lá.
+
+---
+
 ## Refatoração que não dá para adiar
 
-- **Taxa de amostragem divergente** (`RadioTatico.kt:91` declara 8 kHz; `GlassesAudioManagerImpl.kt:288` entrega 16 kHz; `RadioViewModel.kt:184-200` não sobrescreve). Não dá para adiar porque não é degradação, é quebra: a voz transmitida sai uma oitava abaixo com o dobro da duração. Nenhum vídeo, nenhum checkpoint e nenhuma demonstração do Pilar 1 é possível enquanto isso estiver no lugar. Custo: meia sessão.
-- **Múltiplos donos do microfone.** `RadioTatico.kt:145` e `:231` fazem dois `collect` sobre o mesmo `Flow` frio, abrindo dois `AudioRecord` sobre `VOICE_COMMUNICATION`, e `cicloDeVoz` abre uma terceira captura — o próprio KDoc em `DiagnosticsViewModel.kt:676-683` admite que a segunda "falha ao inicializar ou rouba o fluxo da primeira". Não dá para adiar porque wake word, STT na origem e cofre de evidência **todos** precisam beber da mesma fonte: cada feature nova do roadmap agrava o defeito em vez de conviver com ele. E `startRecording()` está no caminho crítico do toque do PTT.
-- **`AudioTrack` construído e liberado por quadro de 20 ms** (`GlassesAudioManagerImpl.kt:201-244`), com `delay(dur + 50)` de padding, lançado em corrotinas concorrentes por `RadioTatico.kt:295`. São 50 tracks por segundo, cada um com 50 ms de cauda artificial, tocando fora de ordem. Não dá para adiar porque é gap estrutural na recepção — a fala recebida é entrecortada por construção, independentemente da rede, e a plateia do checkpoint ouve isso.
-- **Codec Opus na thread principal.** `MediaCodecOpus` roda em `viewModelScope` (`RadioViewModel.kt:186`) sem `withContext`, com `TIMEOUT_US` de 20 ms bloqueando a Main a cada chamada. Não dá para adiar porque a meta de resposta é ≤ 2,0 s e um ANR durante o checkpoint das 15h00 é reprovação ao vivo.
-- **`DiagnosticsViewModel` com 798 linhas fazendo trabalho de produção.** `MainActivity.kt:52` o instancia; ele detém o mapa, o publicador de posição, o `EncryptedEvidenceVault` (`:230`), o `TacticalDispatcher` (`:455`) e o ciclo de voz morto. Não dá para adiar porque o usuário pediu explicitamente "arquitetura desacoplada e código limpo": toda feature de voz ou de mapa das Fases 2 e 4 entra nesta classe e a piora. Refatorar depois de mais 500 linhas custa três vezes mais. Extrair `MapaViewModel`, `CopilotoViewModel` e `EvidenciaViewModel`; o resto vai para trás de `BuildConfig.DEBUG`.
-- **Dois escritores de posição.** `ColetorDePosicao` via `CopilotService.kt:62` e o laço do mapa em `DiagnosticsViewModel.kt:320,334`, a 5 s fixos (`:794`), sem se enxergarem. Não dá para adiar porque um único diff resolve quatro defeitos de uma vez: custo de 720 escritas/h (12x o teto do modo ATIVO), escrita redundante, apagamento de `speed_mps` (`:418` envia `null` e o upsert de `0008` sobrescreve) e falsificação de frescor. E "eficiência de bateria" é checkpoint obrigatório às 16h00.
-- **`while(true)` do mapa sem contenção de exceção** (`DiagnosticsViewModel.kt:305,322-335`), enquanto `RadioTatico` já resolveu o mesmo problema com `semDerrubarOProcesso`. Não dá para adiar porque o modo de falha é o pior possível num produto de segurança pública: uma exceção em `tokenDeSessao` mata a corrotina, `bombaDoMapa` fica não-nulo, `abrirMapa` recusa reabrir, e a tela **congela exibindo marcadores velhos como se fossem ao vivo**. Falha silenciosa que parece funcionamento.
-- **`CopilotService`: `stopSelf()` antes de qualquer `startForeground()`** (`:81`) e `parar()` usando `startService` em vez de `startForegroundService` (`:212`). Não dá para adiar porque são duas linhas e o sintoma é crash de ciclo de vida em aparelho desconhecido — e o celular do dia 18/09 é fornecido pela organização, OEM e versão que a equipe não escolhe.
-- **`Stream.errorStream` nunca coletado e `STOPPED` não tratado como terminal** (item 7 do `ESTADO.md`). Não dá para adiar porque sem `camera.stop()` o próximo `addCamera` falha, e a única janela de pareamento no evento é o onboarding das 09h30. Perder `PERMISSIONS_DENIED` e `THERMAL_HOT` tipados significa não saber por que a demonstração parou, no palco.
-- **Permissão de câmera do DAT nunca pedida em produção** (item 8 do `ESTADO.md`). Não é feature: é um caminho de permissão que existe em todo lugar menos onde o agente passa. Não dá para adiar porque a equipe **nunca terá os óculos antes do dia 18/09** — é bug cego que só se manifesta na hora em que não há tempo de corrigir.
-- **Documentação que afirma capacidade inexistente.** `Transmissao.kt:28` cita `AgrupadorDeQuadros` como existente (não existe no repositório); `ProtocoloRealtime.kt:18-26` usa esse agrupamento como premissa do cálculo de sobrecarga; `SessaoPtt.kt:56-59` e `PADROES_DE_ENGENHARIA.md:193-195` afirmam que a captura não espera a rede, quando `SessaoPtt.kt:108` aguarda `piso.pedir` antes do `collect` de `:137` — hoje gratuito **só porque o piso é local**, e deixa de ser no momento em que o piso vira remoto na Fase 3. Não dá para adiar porque documentação que mente é pior que ausente: o próximo agente confia nela e constrói em cima.
-- **Ramos mortos nos dois lados.** `transmissao.nova` difundido por `transmit.ts:74` e não interpretado por `ProtocoloRealtime.kt:87-111`; `SupabaseSyncGateway.kt:29` mirando `tactical_messages`, tabela que nenhuma das 10 migrações cria (todo push desse tipo falha); `CanalDePosicoes` completo e testado sem instanciação; `PlanoDePosicao.altaPrecisao` e `.assinarPares` sem leitor; `mapaVisivel` fixo em `false` (`CopilotService.kt:99`). Não dá para adiar até o fim porque cada um deles é uma promessa que a banca pode cobrar no pitch — e responder "está escrito mas não ligado" numa avaliação de viabilidade técnica (30 pts) custa caro.
+- **Taxa de amostragem divergente.** `RadioTatico.kt:88` declara `sampleRateHz: Int = 8_000`
+  e `RadioViewModel` não sobrescreve, contra 16 kHz da captura. Não é degradação, é quebra:
+  a voz sai uma oitava abaixo com o dobro da duração. Nenhuma demonstração do Pilar 1 é
+  possível enquanto isso estiver no lugar. Meia sessão.
+- **Múltiplos donos do microfone.** Dois `collect` sobre o mesmo `Flow` frio em
+  `RadioTatico`, mais uma terceira captura em `cicloDeVoz`; o próprio KDoc do
+  `DiagnosticsViewModel` admite que a segunda "falha ao inicializar ou rouba o fluxo da
+  primeira". Cada feature nova do roadmap agrava o defeito em vez de conviver com ele.
+- **`AudioTrack` construído e liberado por quadro de 20 ms**, com padding artificial, em
+  corrotinas concorrentes. São 50 tracks por segundo tocando fora de ordem: a fala recebida
+  é entrecortada por construção, independentemente da rede.
+- **Duas filas de prioridade que não se enxergam** (item 3 do `ESTADO.md`). Um P1 do rádio
+  não interrompe a fala do copiloto. Num produto de segurança pública, prioridade que não
+  interrompe não é prioridade.
+- **Codec Opus na thread principal**, com `TIMEOUT_US` de 20 ms bloqueando a Main a cada
+  chamada. Um ANR durante checkpoint é reprovação ao vivo.
+- **`DiagnosticsViewModel` com 798 linhas fazendo trabalho de produção**, instanciado por
+  `MainActivity.kt:52`, detendo mapa, publicador de posição, cofre, despachante e o ciclo de
+  voz morto. Toda feature de voz ou de mapa entra nesta classe e a piora; refatorar depois
+  de mais 500 linhas custa três vezes mais.
+- **Dois escritores de posição** que não se enxergam, a 720 escritas/h, um apagando
+  `speed_mps` do outro e regravando correção velha como `now()`. Um diff resolve quatro
+  defeitos, e frescor falso é exatamente o que o esmaecimento do mapa existe para impedir.
+- **`while(true)` do mapa sem contenção de exceção**, enquanto `RadioTatico` já resolveu o
+  mesmo problema com `semDerrubarOProcesso`. O modo de falha é o pior possível: a corrotina
+  morre, a reabertura é recusada, e a tela **congela exibindo marcadores velhos como se
+  fossem ao vivo**.
+- **`CopilotService` com `stopSelf()` em `:80` e `:89` antes de qualquer
+  `startForeground()`** (que só existe em `:133`/`:135`), e `parar()` usando `startService`
+  em `:215`. Duas linhas, e o aparelho do dia é de OEM que a equipe não escolhe.
+- **`locate.ts` aceitando `solicitante_id` do corpo** e chamando `private.posicao_relativa`
+  com `service_role`. Anula na borda a garantia que a migração 0006 construiu no banco.
+  Meia sessão para apagar; a nota inteira se a banca abrir `servidor/funcoes/`.
+- **Indicativo como string livre não verificada** no protocolo. Personificação é possível
+  hoje, e `RadioTatico` confia cegamente em `autorIndicativo` e `prioridade` para disparar o
+  earcon que toma o canal.
+- **Documentação que afirma capacidade inexistente.** `Transmissao.kt:28` cita
+  `AgrupadorDeQuadros` como existente e ele não está no repositório;
+  `docs/PADROES_DE_ENGENHARIA.md:190` continua dizendo "nunca por palavra de ativação"
+  depois de a decisão ter sido tomada em contrário; `specs/gatilho-por-voz.spec.md:149`
+  fixa 0,6–2,5 s para um enunciado que ficou mais longo e `:179` fixa 12 000 ms de teto
+  contra os `30_000L` de `SessaoPtt.kt:234`; `specs/gatilho-por-voz.spec.md:255` proíbe
+  endereçar talk group, que agora é requisito. Documentação que mente é pior que ausente: o
+  próximo agente confia nela e constrói em cima.
+- **`docs/INDICE.md` não existe**, e é citado por `CLAUDE.md` e por `AGENTS.md` como o
+  índice de onde buscar o trecho antes de tocar em áudio, posição ou fala. O gatilho de
+  leitura aponta para o vazio.
+- **Ramos mortos nos dois lados.** `transmissao.nova` difundido pelo servidor e não
+  interpretado pelo cliente; `SupabaseSyncGateway` mirando `tactical_messages`, tabela que
+  nenhuma das dez migrações cria; `CanalDePosicoes` completo, testado e sem instanciação;
+  `mapaVisivel` fixo em `false`; arredondamento de distância implementado só no arquivo que
+  vai ser apagado. Cada um é uma promessa que a banca pode cobrar no pitch.
 
 ---
-## Riscos
 
-- **A equipe pode ser eliminada no Segundo Filtro (23 a 29/08), e todo o código posterior vira aposta.** O resultado só sai em 31/08; das 150 equipes do Primeiro Filtro, 5 chegam ao presencial. Mitigação: a Fase 0 é absoluta e nenhum item dela é negociável; e os itens de código escolhidos para ela (16 kHz, `AudioTrack` único, porta de entrada por botão) foram selecionados por **também** melhorarem o vídeo anexo ao documento. Nada entra na Fase 0 que não apareça no vídeo.
-- **O template obrigatório da Etapa 5 não está confirmado em mãos.** §5.5 usa a palavra "obrigatoriamente" e o template não está no PDF do edital — foi (ou seria) distribuído no Ideathon de 15/08. Mitigação: e-mail para aiglassesbrasil@ceia.ufg.br **hoje**, 16/08, antes de escrever uma linha do documento. Escrever fora do template e reformatar depois custa uma sessão inteira que não sobra.
-- **§14.1 veda alteração de escopo, e os três pilares foram redefinidos pelo usuário depois da submissão.** "Fica terminantemente vedada a alteração do escopo do projeto/ideia submetido durante a execução do programa." Se a proposta original prometeu algo que os três pilares não cobrem — ou se prometeu IA em nuvem e o produto é on-device, ou o contrário — o documento de 22/08 é atacável. Mitigação: reler a submissão da Etapa 1 antes de escrever; enquadrar os três pilares como **detalhamento** do escopo submetido, com continuidade explícita, nunca como pivô. Ver decisão 2.
-- **A equipe nunca tocará nos óculos antes de 18/09.** §9 do edital: óculos e smartphone são "exclusivamente fornecidos pela organização" e devolvidos ao fim. Todo o trabalho de HFP/SCO, câmera do DAT e ciclo de vida de stream é desenvolvido às cegas. Mitigação: fone Bluetooth HFP genérico como bancada honesta (já é a postura do projeto); tratar cada caminho de erro do DAT como alcançável e testado com o `MockDeviceKit`; e resolver na Fase 5 a permissão de câmera e o `errorStream`, que são exatamente os dois que só falham em hardware real.
-- **O celular do dia é da organização — OEM e versão de Android desconhecidos, e roteamento SCO varia bastante entre fabricantes.** Mitigação: `allowFallbackToDefault = BuildConfig.DEBUG` já protege contra cair no microfone do celular em release (`AudioDoAgente.kt:62`); adicionar ao roteiro do onboarding das 09h30 uma prova de rota **audível** antes de qualquer outra coisa, para descobrir divergência às 09h35 e não às 15h00.
-- **A janela real de código no dia é de ~5h30 líquidas** (11h00–17h30, com cortes obrigatórios às 15h00 e 16h00, almoço, e travamento às 17h30). Mitigação: nada de novo se constrói lá. A Fase 5 termina em 17/09 com o app travado e o roteiro dos checkpoints cronometrado; o dia 18 é execução e pitch.
-- **Regra Zero pode dobrar o tempo das Fases 3 e 5.** A API de canal privado/`setAuth` do Supabase Realtime e as primitivas do Tink no APK **não foram confirmadas** por doc oficial nem por `javap`. `AGENTS.md` é explícito: não confirmou, pare e pergunte. Mitigação: gastar a primeira meia sessão de cada uma dessas fases só em confirmação, antes de qualquer diff — e se a API não existir na forma esperada, o plano B do canal é validação de token na Edge Function com rotação curta, não improviso no cliente.
-- **E2EE mal desenhado derruba o rádio em vez de protegê-lo.** Rotação de época iniciada pelo cliente, sem árbitro, produz split-brain: dois aparelhos que detectam a mesma saída de membro geram chaves distintas e metade do grupo deixa de ouvir a outra — no evento exato em que a composição mudou, que é o momento operacionalmente mais crítico. E chave simétrica de grupo **sem assinatura por emissor** permite que qualquer membro forje um P1 em nome de outra guarnição, ataque de maior impacto do sistema, porque `RadioTatico.kt:289-290` confia cegamente em `anuncio.autorIndicativo` e `anuncio.prioridade`. Mitigação: canal privado por JWT primeiro (que resolve 80% da exposição real por 20% do esforço); E2EE só entra com assinatura de origem antes da cifra; e se não couber, vira roadmap declarado no documento — declarar honestamente pontua mais em Considerações éticas do que entregar cifra decorativa.
-- **A bancada pode não ter dois aparelhos e dois fones HFP**, e sem isso o Pilar 1 não é testável como rede: hoje a equipe só consegue provar que um aparelho fala consigo mesmo. Mitigação: confirmar hoje (decisão 7); dois Android com minSdk 31 e dois fones HFP baratos resolvem, e sem eles a Fase 3 não tem critério de aceite verificável.
-- **Whisper-tiny recarregando 77,7 MB por invocação** (`DiagnosticsViewModel.kt:698,726`) torna wake word por transcrição inviável em latência e bateria — e é justamente o desenho que `specs/gatilho-por-voz.spec.md` propõe, porque o único preset de KWS do AAR é chinês. Mitigação: contexto quente é o primeiro item da Fase 2, não o último; se a latência medida não fechar, o recuo é wake word por energia+VAD com confirmação por transcrição curta, mantendo o léxico fechado.
-- **A spec `gatilho-por-voz.spec.md` está como proposta e sobrepõe regra dura vigente** ("transmissão nunca por palavra de ativação: um falso positivo difundiria para a guarnição inteira"). O agente não pode aprová-la sozinho. Se a decisão travar, a Fase 2 perde o item central. Mitigação: a decisão 4 oferece um caminho intermediário que não exige sobrepor regra dura nenhuma — voz comanda o copiloto, PTT continua obrigatório para transmitir. Esse caminho está disponível hoje e não bloqueia nada.
-- **Rotacionar o PAT do GitHub exposto no setup continua pendente** (`ESTADO.md`), e o build depende dele para resolver os artefatos do DAT via GitHub Packages (`settings.gradle.kts`). Um PAT revogado por exposição derruba o build no pior momento. Mitigação: rotacionar antes da Fase 1 e confirmar que o build offline funciona depois da primeira sincronização, como o `ESTADO.md` afirma.
+## Riscos, com mitigação
+
+- **Eliminação no Segundo Filtro (23 a 29/08).** Resultado só em 31/08; todo código
+  posterior é aposta até lá. Mitigação: a Fase 0 é absoluta e o documento descreve apenas
+  capacidade com caminho alcançável — a forma mais barata de perder viabilidade técnica
+  (30 pts) é afirmar o que não roda.
+- **Um aparelho só até data indefinida (D7).** Sem o segundo celular, o Pilar 1 não é
+  testável como rede em áudio. Mitigação: aceite da Fase 3 desmembrado — protocolo, piso
+  remoto e roteamento de transcrição provados por sessão headless com JWT distinto; áudio
+  entre dois aparelhos físicos fica marcado como pendente explícito, não como item verde.
+- **A equipe nunca tocará nos óculos antes de 18/09.** Todo o trabalho de HFP/SCO, câmera e
+  ciclo de vida de stream é feito às cegas. Mitigação: fone Bluetooth HFP como bancada
+  honesta; `MockDeviceKit` para os caminhos de erro; e permissão de câmera e `errorStream`
+  resolvidos na Fase 5, que são exatamente os dois que só falham em hardware real.
+- **Banda estreita, não banda larga.** A doc do DAT descreve o áudio dos óculos como 8 kHz
+  mono. O passo "16 kHz ponta a ponta" conserta o pitch — que é defeito real — mas não vira
+  banda larga: é contêiner de 16 kHz sobre conteúdo estreito. Todo número público de recall
+  de KWS e de WER assume banda larga. Mitigação: **nenhuma medição da Fase 2 vale se for
+  feita pelo microfone do celular** — as 30 pronúncias do aceite passam por fone HFP.
+- **O KWS disponível é inglês, e chunk-16.** Verificado por mim no artefato: os dois presets
+  do AAR são wenetspeech e gigaspeech, ambos `chunk-16-left-64`. Recall de "Claryon" em
+  pt-BR por grafia fonética é desconhecido. Mitigação estrutural, não empírica: **o KWS
+  nunca abre canal**, só antecipa o earcon; recall ruim degrada a sensação, não a correção.
+  E a licença individual do pacote gigaspeech **não está confirmada** — confirmar antes de
+  embarcar (o sherpa-onnx ser Apache-2.0 não decide a licença de cada modelo pré-treinado).
+- **Meta de latência escrita antes de medida.** Os 500 ms da Fase 2 dependem de um número de
+  320 ms atribuído ao chunk-16 pela doc do sherpa, ainda não reconferido nesta sessão.
+  Mitigação: meia sessão de medição no Samsung **antes** de a meta entrar na spec — se o
+  piso algorítmico for maior, o alvo sobe e a razão fica escrita, em vez de a spec conter um
+  número impossível por construção.
+- **Colisão de `libggml*.so`.** Verificado: este projeto já produz `libggml.so`,
+  `libggml-base.so` e `libggml-cpu.so` como bibliotecas compartilhadas, e `lib/arm64-v8a/`
+  no APK é diretório plano. llama.cpp pelo mesmo CMake produz os mesmos nomes. Mitigação:
+  decidir o motor **antes** de escrever qualquer linha (ver decisões em aberto); se for
+  llama.cpp, renomear os alvos é pré-requisito, não detalhe; e o aceite da Fase 4 exige
+  `unzip -l` mostrando um conjunto só.
+- **Corpus do RAG sem origem definida.** Não há corporação parceira no repositório, e POP
+  oficial de PM tem prazo administrativo e restrição de distribuição. A Etapa A inteira
+  depende disso. Mitigação: corpus inicial de material aberto e de manual de fabricante,
+  com o desenho deixando a fonte trocável — e o documento dizendo que o corpus é do
+  contratante, não do produto.
+- **Licença e política de uso do modelo.** O Llama tem licença própria (não é open source) e
+  política de uso aceitável que veda armas, contra um caso de uso de manejo de pistola. O
+  Qwen3 é Apache-2.0. Mitigação: a licença entra como critério de decisão do motor, não como
+  descoberta posterior.
+- **Afirmação falseável no documento.** Dizer "nunca coordenadas" é demonstravelmente falso
+  a partir deste repositório: `MapaDeRuas.kt:265` e `:370` reconstroem a coordenada absoluta
+  do par com `Geo.destino(minhaLat, minhaLon, distanciaM, rumo)`. Se a banca fizer a conta,
+  toda outra afirmação de privacidade passa a ser lida com desconfiança. Mitigação: declarar
+  o limite em texto, e declarar o que as migrações 0006/0009/0010 de fato impedem — dump em
+  massa, par arbitrário e trilateração de terceiros.
+- **Auditoria virando o segundo banco de vigilância.** Logar cada sondagem do mapa registra
+  quando o agente estava olhando a tela — monitoramento comportamental do próprio titular,
+  criado em nome de protegê-lo. Mitigação obrigatória: sessionizar a porta de alto volume e
+  **nunca gravar a resposta devolvida**.
+- **Janela de 30 minutos dimensionada pelo caso raro.** É a decisão do usuário e entra como
+  decidida, mas o mecanismo é o clássico de escalada: todo mundo passa a ler meia hora de
+  todo mundo, o turno inteiro. Mitigação: a janela é o **teto** e cada abertura passa pelo
+  log de acesso; emergência prolongada, se precisar de mais, ganha porta própria com
+  registro de quem abriu.
+- **Regra Zero pode dobrar o tempo das Fases 3 e 4.** A API de canal privado/`setAuth` do
+  Supabase Realtime, a assinatura de `cron.schedule` e as coordenadas Maven do motor de LLM
+  **não estão confirmadas**. Mitigação: a primeira meia sessão de cada fase é só confirmação,
+  antes de qualquer diff; plano B do canal é validação de token na Edge Function com rotação
+  curta, não improviso no cliente.
+- **E2EE mal desenhado derruba o rádio em vez de protegê-lo.** Rotação de época iniciada
+  pelo cliente, sem árbitro, produz split-brain justamente quando a composição do grupo
+  muda. E chave de grupo sem assinatura por emissor não impede a forja de um P1. Mitigação:
+  canal privado por JWT primeiro (resolve a exposição real por uma fração do esforço); E2EE
+  só entra com assinatura de origem antes da cifra; se não couber, vira roadmap declarado —
+  declarar honestamente pontua mais que entregar cifra decorativa.
+- **A Fase 4 rouba a folga que o caminho crítico não tem.** O LLM é a feature mais vistosa e
+  a menos crítica. Mitigação: ela é a última, a Etapa B é o primeiro corte, e nenhum aceite
+  de outra fase depende dela.
 
 ---
-## Decisões que dependem de humano
 
-- **1. Template da Etapa 5 — você tem o arquivo em mãos?** (sim / não). Se não, eu redijo hoje o e-mail para aiglassesbrasil@ceia.ufg.br e começo o documento em Markdown estruturado para migrar depois. §5.5 diz "obrigatoriamente seguir o modelo", então essa é a pendência de maior risco do momento.
-- **2. Qual trilha foi marcada na inscrição?** Escolha uma: (a) Produtividade — é a única que nomeia "mãos-livres" e cita comunicação, automação e apoio à decisão, ou seja, os três pilares; (b) Informação; (c) outra. Preciso saber para enquadrar o documento sem violar §14.1 — segurança pública **não é trilha**, é área de atuação, e o §7.1 a acomoda por "gestão de políticas públicas".
-- **3. A proposta submetida na Etapa 1 prometeu IA local ou IA em nuvem?** (local / nuvem / não especificou). O edital admite nuvem explicitamente em §8.1, mas escreve "IA local" em três outros lugares. Se a proposta prometeu local, nuvem fica vedada por §14.1 mesmo sendo permitida pelo edital — e nossa arquitetura on-device vira obrigação, não escolha. Se não especificou, ganhamos liberdade tática e a IA local vira argumento de pitch.
-- **4. Gatilho por voz para transmitir — você aprova sobrepor a regra dura?** Escolha uma: **(a) recomendado** — voz comanda **só** o copiloto ("Hey Claryon, ..."); transmitir no rádio continua exigindo PTT explícito. Não sobrepõe regra nenhuma, entrega mãos livres para o Pilar 3, e mantém a garantia de que falso positivo nunca difunde para a guarnição. **(b)** voz também abre transmissão, com dupla verificação (VAD + transcrição em pt contra léxico fechado + earcon + teto de duração), como propõe `specs/gatilho-por-voz.spec.md`. **(c)** rejeitar a spec e manter a regra atual sem alteração.
-- **5. Criptografia ponta a ponta do áudio — qual escopo até 18/09?** Escolha uma: **(a) recomendado** — canal Realtime privado amarrado ao JWT + assinatura Ed25519 por emissor em cada anúncio, e E2EE completo declarado como roadmap no documento. Resolve o risco real (qualquer portador do APK ouve o grupo hoje) e o ataque de maior impacto (forjar P1 de outra guarnição), sem inventar gestão de chaves de grupo em 30 dias. **(b)** E2EE completo com chave de grupo por época — 3 sessões, risco de split-brain que faz a guarnição deixar de se ouvir, e sem assinatura por emissor a cifra não impede a forja. **(c)** só canal privado por JWT, E2EE inteiro como roadmap.
-- **6. Transcrição no servidor — cifrada ou em claro?** Escolha uma: **(a) recomendado para o hackathon** — em claro, com `transmissions` como registro operacional auditável (que é o que `0001:11-12` e `0002_rls.sql:80-85` já declaram), retenção executada por job, e log de acesso. Preserva corregedoria, perícia e o "resumo da última hora" do Pilar 3. **(b)** cifrada com chave gerenciada pelo servidor + log de acesso: protege contra dump de banco e preserva auditoria mediada. **(c)** E2EE: o servidor fica opaco, mas isso mata busca, auditoria, ordem judicial e o resumo on-device de quem entrou no grupo no meio da hora. Furar essa decisão depois é pior que decidir errado agora.
-- **7. Você tem dois aparelhos Android (minSdk 31) e dois fones Bluetooth com HFP para a bancada?** (sim / não). Sem eles, a Fase 3 não tem critério de aceite verificável: não há como provar que dois aparelhos se ouvem, que o piso é arbitrado pelo servidor, nem que a transcrição chega idêntica aos dois. É o único item de hardware que a equipe controla — os óculos só existem no dia 18/09.
-- **8. Store-and-forward de fala com rede caída — manter na narrativa?** (sim / não). Hoje `ArquivoDeFalasDiferidas` (`TransmissaoDiferida.kt:49`) só tem chamador em teste, grava **Opus em claro** num `File` puro com o `transmissaoId` no nome do arquivo, sem `EncryptedFile` nem Keystore — o que colide com a regra dura do `AGENTS.md`. Se **sim**, precisa entrar na Fase 3 com cifra em repouso (1,5 sessão). Se **não**, sai da UI (`RadioViewModel.kt:412` mostra `ENFILEIRADA` sem fila alguma) e do documento, e a decisão fica registrada.
-- **9. Trilha histórica de posição — guardar ou não?** (guardar com retenção de N horas / não guardar). "Hey Claryon, envie um resumo da última hora" **exige** trilha; sem ela o Pilar 3 responde só sobre o rádio, e o Pilar 2 é "última posição conhecida", não rastreamento. Guardar cria um dado sensível novo (deslocamento de agente ao longo do turno) que precisa de base legal e prazo escritos no documento. Se guardar, qual retenção: 8 h (um turno), 24 h, ou 7 dias?
-- **10. `agents.ativo` e revogação institucional — entra agora?** (sim / não). Meia sessão. Hoje não existe forma de desligar um agente: toda política de linha, todo RPC e o controle de piso passam por `private.current_agent_id()` (`0002_rls.sql:37-45`), então **uma coluna** conferida ali derruba o agente de tudo numa transação. Um produto de segurança pública sem revogação é difícil de defender nos 20 pontos de Considerações éticas, e é o item de melhor relação risco/esforço depois de matar `locate.ts`.
+## Decisões ainda em aberto
+
+- **1. Motor e modelo da Etapa B (Fase 4).** Duas opções, e a diferença é grande: **(a)**
+  llama.cpp com um GGUF de licença permissiva (Qwen3 1.7B é Apache-2.0), pagando o custo
+  confirmado de renomear alvos para não colidir com os `libggml*.so` do whisper; **(b)**
+  LiteRT-LM com um modelo multimodal, que atende a segunda metade do pedido (foto e vídeo)
+  sem trocar de família depois. A pesquisa indica que o artefato Maven do LiteRT-LM existe,
+  mas isso **não foi confirmado por doc oficial nesta sessão** — e a Regra Zero manda parar
+  e perguntar antes de qualquer linha em `build.gradle.kts`. Decisão pede meia sessão de
+  confirmação, não opinião.
+- **2. Origem do corpus do RAG.** (material aberto e de fabricante / POP de corporação
+  parceira / outro). É o item que trava a Fase 4 inteira e não é resolvível por engenharia.
+- **3. Verificação de locutor por embedding — permitido ou proibido?**
+  `SpeakerEmbeddingExtractor` e `SpeakerEmbeddingManager` existem no AAR (verificado: as
+  classes estão em `com/k2fsa/sherpa/onnx/`) e resolveriam de verdade o "silêncio **da voz
+  do agente**". Mas produzem um embedding biométrico de voz, e `AGENTS.md` proíbe "base
+  biométrica. Nenhuma versão, nenhuma flag." A proibição está escrita pensando em face.
+  Decidir explicitamente é melhor que deixar ambíguo — e enquanto não decidir, o fecho por
+  silêncio continua detectando ausência de fala, não ausência da fala do agente.
+- **4. Criptografia ponta a ponta do áudio — escopo até 18/09.** **(a) recomendado** — canal
+  privado por JWT + assinatura Ed25519 por emissor em cada anúncio, E2EE completo declarado
+  como roadmap. **(b)** E2EE completo com chave de grupo por época: 3 sessões, risco de
+  split-brain, e sem assinatura por emissor a cifra não impede a forja. **(c)** só canal
+  privado, E2EE inteiro como roadmap.
+- **5. Transcrição no servidor — cifrada ou em claro?** **(a)** em claro, com `transmissions`
+  como registro operacional auditável, retenção executada e log de acesso — preserva
+  corregedoria, perícia e o resumo por voz. **(b)** cifrada com chave do servidor. **(c)**
+  E2EE, que mata busca, auditoria e ordem judicial. Furar essa decisão depois é pior que
+  decidir errado agora.
+- **6. Prazo da camada de corregedoria.** O prazo pertence ao prazo de apuração disciplinar
+  da corporação contratante, não ao produto. Enquanto ele não existir, fica como constante
+  única numa migração, alterável em uma linha — e o documento diz isso em vez de inventar um
+  número.
+- **7. Store-and-forward de fala com rede caída — manter na narrativa?** (sim / não). Hoje
+  `ArquivoDeFalasDiferidas` só tem chamador em teste e grava **Opus em claro** num `File`
+  puro, com o `transmissaoId` no nome do arquivo, sem `EncryptedFile` nem Keystore — colide
+  com regra dura. Se **sim**, entra na Fase 3 com cifra em repouso (1,5 sessão). Se **não**,
+  sai da UI e do documento, e a decisão fica registrada.
+- **8. Quando chega o segundo aparelho?** Não é decisão de engenharia, mas determina se o
+  aceite de áudio da Fase 3 fecha com hardware ou fica pendente até 18/09. Se a resposta for
+  "não sei", o plano segue como está: sessão headless prova protocolo, e o áudio entre dois
+  aparelhos vira o primeiro item do onboarding no dia.
+
+---
+
+**Encerradas por decisão do usuário e removidas desta lista:** template da Etapa 5 (entrega
+em 22/08, escrito depois do MVP) · trilha do edital (Produtividade) · IA local ou em nuvem
+(local, on-device) · gatilho por voz para transmitir (aprovado, com o fluxo da Fase 2) ·
+trilha histórica de posição (guardar, em duas camadas) · revogação institucional via
+`agents.ativo` (entra, Fase 3) · credencial exposta (sem pendência).
