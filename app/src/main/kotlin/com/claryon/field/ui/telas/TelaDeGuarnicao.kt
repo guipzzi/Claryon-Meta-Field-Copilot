@@ -69,8 +69,19 @@ data class FalaNoGrupo(
     val prioridade: Int?,
     val entrega: Entrega,
 ) {
-    /** Entregue ≠ enfileirado. O agente precisa saber a diferença. */
-    enum class Entrega { ENVIADA, ENFILEIRADA, RECEBIDA }
+    /**
+     * Entregue ≠ perdido. O agente precisa saber a diferença — e a diferença
+     * precisa ser verdadeira.
+     *
+     * `NAO_SAIU` chamava-se `ENFILEIRADA` e a tela escrevia "na fila". **Não havia
+     * fila.** `ArquivoDeFalasDiferidas` existe, tem 187 linhas e onze testes, e
+     * **zero chamadores** — a fala transmitida sem rede simplesmente se perde. Um
+     * rótulo dizendo "na fila" fazia o agente acreditar que a mensagem sairia
+     * depois, e ele seguiria a ocorrência contando com um apoio que nunca foi
+     * pedido. Renomear é o conserto honesto enquanto a fila não existe; quando ela
+     * existir, o estado volta a se chamar enfileirada porque aí será verdade.
+     */
+    enum class Entrega { ENVIADA, NAO_SAIU, RECEBIDA }
 }
 
 /** Um par no grupo, para a régua de presença do topo. */
@@ -288,7 +299,9 @@ private fun RegistroDeTrafego(item: ItemDeTrafego) {
                         // prioridade. Uma terceira gramática cromática faria as
                         // três perderem sentido.
                         Etiqueta(
-                            if (it == RotuloDeEntrega.ENVIADA) "enviada" else "na fila",
+                            // "não saiu" e não "na fila": não há fila. Ver o
+                            // KDoc de `FalaNoGrupo.Entrega`.
+                            if (it == RotuloDeEntrega.ENVIADA) "enviada" else "não saiu",
                             cor = Cores.TintaFraca,
                         )
                     }

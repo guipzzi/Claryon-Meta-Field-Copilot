@@ -37,7 +37,7 @@ enum class TokenDeCalha { TRACO, TRACO_FORTE, P1, P2, P3 }
 enum class TokenDeTinta { TINTA, TINTA_MEDIA, TINTA_FRACA }
 
 /** O que se escreve sob a fala própria. Recebida não tem. */
-enum class RotuloDeEntrega { ENVIADA, NA_FILA }
+enum class RotuloDeEntrega { ENVIADA, NAO_SAIU }
 
 /** Um registro pronto para desenhar. */
 data class ItemDeTrafego(
@@ -64,7 +64,7 @@ data class ItemDeTrafego(
             append(if (fala.propria) "Você" else fala.indicativo)
             if (fala.hora != HORA_DESCONHECIDA) append(", ").append(fala.hora)
             append(". ").append(fala.texto)
-            if (rotuloDeEntrega == RotuloDeEntrega.NA_FILA) append(". Ainda na fila")
+            if (rotuloDeEntrega == RotuloDeEntrega.NAO_SAIU) append(". Não saiu")
         }
 }
 
@@ -141,7 +141,7 @@ fun montarTrafego(falas: List<FalaNoGrupo>): List<ItemDeTrafego> {
                 // agente afirmaria algo sobre um aparelho que não é este.
                 !fala.propria -> null
                 fala.entrega == FalaNoGrupo.Entrega.ENVIADA -> RotuloDeEntrega.ENVIADA
-                fala.entrega == FalaNoGrupo.Entrega.ENFILEIRADA -> RotuloDeEntrega.NA_FILA
+                fala.entrega == FalaNoGrupo.Entrega.NAO_SAIU -> RotuloDeEntrega.NAO_SAIU
                 else -> null
             },
         )

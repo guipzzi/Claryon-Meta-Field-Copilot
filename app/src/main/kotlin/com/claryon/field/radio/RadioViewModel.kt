@@ -402,15 +402,19 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
      *
      * `conectado()` é lido **agora**, e não presumido: a rede pode ter caído
      * durante a fala, e afirmar "enviada" logo depois de transmitir é o pior
-     * instante para errar. Enfileirada não é enviada — dizer só "enviada" faria o
-     * agente contar com uma transmissão que ninguém ouviu.
+     * instante para errar.
+     *
+     * Sem rede a fala **não saiu e não está guardada em lugar nenhum** — não há
+     * fila (`ArquivoDeFalasDiferidas` não tem chamador). O rótulo diz isso, e não
+     * "na fila", porque "na fila" faria o agente seguir a ocorrência contando com
+     * um apoio que nunca foi pedido.
      */
     private fun inserirFalaPropria() {
         val id = "$PREFIXO_LOCAL${System.currentTimeMillis()}"
         val entrega = if (transporteAtual?.conectado() == true) {
             FalaNoGrupo.Entrega.ENVIADA
         } else {
-            FalaNoGrupo.Entrega.ENFILEIRADA
+            FalaNoGrupo.Entrega.NAO_SAIU
         }
         _falas.value = _falas.value + FalaNoGrupo(
             id = id,

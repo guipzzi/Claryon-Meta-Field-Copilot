@@ -739,3 +739,28 @@ em 22/08, escrito depois do MVP) · trilha do edital (Produtividade) · IA local
 (local, on-device) · gatilho por voz para transmitir (aprovado, com o fluxo da Fase 2) ·
 trilha histórica de posição (guardar, em duas camadas) · revogação institucional via
 `agents.ativo` (entra, Fase 3) · credencial exposta (sem pendência).
+
+---
+
+## Decisões tomadas em 2026-08-16 (encerradas)
+
+| # | Decisão | O que muda |
+|---|---|---|
+| **E2EE** | **Opção (a)**: canal privado por JWT + **assinatura Ed25519 por emissor**. E2EE completo fica declarado como roadmap | O ataque real hoje é **personificação**, não escuta: o indicativo é string livre e ninguém verifica. Chave de grupo prova pertencimento, **não autoria** |
+| **Transcrição no servidor** | **Em claro**, com acesso por RLS e log de auditoria | Cifrada ponta a ponta, corregedoria e perícia deixariam de conseguir ler — e o valor probatório é requisito, não acessório |
+| **"Voz do agente"** | **Não é verificação de locutor.** Não usar `SpeakerEmbeddingExtractor` | O requisito é detectar que **quem veste os óculos** está falando — proximidade, não identidade. Resolve-se por nível e beamforming (campo próximo a ~5 cm contra fontes a metros: 20–30 dB). Nenhum embedding biométrico é produzido, e a regra dura não é tocada |
+| **Rótulo "na fila"** | **Removido.** Vira "não saiu" | `ArquivoDeFalasDiferidas` tem 187 linhas, 11 testes e **zero chamadores**: não há fila. "Na fila" fazia o agente seguir a ocorrência contando com um apoio que nunca foi pedido |
+| **Segundo aparelho** | Chega em breve; o plano **não se limita** a um | O aceite de áudio da Fase 3 continua desmembrado — protocolo por sessão headless, áudio entre aparelhos quando houver |
+| **Retenção da corregedoria** | **Pendente** por decisão | Fica como constante única numa migração até a corporação definir o prazo de apuração |
+
+### A regra que estas decisões consolidam
+
+> **O app e o código não podem mentir nem inventar.** Rótulo sem lastro, motivo fixo que
+> já não é verdade, e documentação que afirma capacidade inexistente são a mesma falha —
+> e num produto sem display, onde o agente não tem como conferir, ela é operacional e não
+> cosmética.
+
+Duas correções aplicadas hoje sob esta regra: o rótulo de entrega (acima) e o relatório de
+prontidão, que dizia *"recepção de posições ainda não disponível no transporte"* como string
+fixa — falso desde que o mapa passou a funcionar, dando falso negativo em 100% das aberturas
+sobre a capacidade que funciona.

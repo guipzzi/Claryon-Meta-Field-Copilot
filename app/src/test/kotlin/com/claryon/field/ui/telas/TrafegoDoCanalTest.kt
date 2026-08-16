@@ -125,11 +125,11 @@ class TrafegoDoCanalTest {
     }
 
     @Test
-    fun enfileiradaDizNaFila() {
+    fun semRedeDizQueNaoSaiu_porqueNaoHaFila() {
         val i = montarTrafego(
-            listOf(fala(propria = true, entrega = FalaNoGrupo.Entrega.ENFILEIRADA)),
+            listOf(fala(propria = true, entrega = FalaNoGrupo.Entrega.NAO_SAIU)),
         ).single()
-        assertEquals(RotuloDeEntrega.NA_FILA, i.rotuloDeEntrega)
+        assertEquals(RotuloDeEntrega.NAO_SAIU, i.rotuloDeEntrega)
     }
 
     // ── Gramática cromática (critério 20) ─────────────────────────────────────
@@ -181,11 +181,11 @@ class TrafegoDoCanalTest {
     }
 
     @Test
-    fun leituraEmVozDizQueAindaEstaNaFila() {
+    fun leituraEmVozDizQueNaoSaiu() {
         val i = montarTrafego(
-            listOf(fala(propria = true, entrega = FalaNoGrupo.Entrega.ENFILEIRADA)),
+            listOf(fala(propria = true, entrega = FalaNoGrupo.Entrega.NAO_SAIU)),
         ).single()
-        assertTrue(i.leituraEmVoz.endsWith("Ainda na fila"))
+        assertTrue(i.leituraEmVoz.endsWith("Não saiu"))
     }
 
     @Test

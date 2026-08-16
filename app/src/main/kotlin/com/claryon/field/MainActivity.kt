@@ -216,7 +216,15 @@ private fun capacidadesDe(
         Capacidade(
             nome = "Mapa da guarnição",
             viva = mapaAssinado,
-            motivo = "Recepção de posições dos pares ainda não disponível no transporte.",
+            // Motivo derivado do estado, não string fixa. A anterior dizia
+            // "recepção ainda não disponível no transporte" e era falsa desde que
+            // o mapa passou a funcionar — o relatório de prontidão dava falso
+            // negativo em 100% das aberturas, sobre a capacidade que funciona.
+            motivo = if (mapaAssinado) {
+                "Recebendo posições da guarnição."
+            } else {
+                "Abra o mapa para começar a receber posições."
+            },
         ),
     )
 }
