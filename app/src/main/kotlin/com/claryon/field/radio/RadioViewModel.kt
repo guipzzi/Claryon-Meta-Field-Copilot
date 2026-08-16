@@ -21,6 +21,9 @@ import com.claryon.net.TransporteAoVivo
 import com.claryon.net.TransporteRealtime
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -109,7 +112,24 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
     val falas: StateFlow<List<FalaNoGrupo>> = _falas.asStateFlow()
 
     private val _pares = MutableStateFlow<List<ParPresente>>(emptyList())
-    val pares: StateFlow<List<ParPresente>> = _pares.asStateFlow()
+
+    /** Quem detém o piso agora. Alimenta `ParPresente.falando`. */
+    private val _quemFala = MutableStateFlow<String?>(null)
+
+
+    /**
+     * A régua de presença, com `falando` **combinado na exposição**.
+     *
+     * A lista crua vem da recarga de 10 s; quem detém o piso muda em milissegundos.
+     * Gravar `falando` dentro de `_pares` faria o indicador ficar até dez segundos
+     * atrasado — mostrando "falando" depois que a pessoa calou, que é pior que não
+     * mostrar. `combine` mantém cada fonte na sua cadência e junta as duas na
+     * leitura.
+     */
+    val pares: StateFlow<List<ParPresente>> =
+        combine(_pares, _quemFala) { lista, quem ->
+            lista.map { it.copy(falando = it.indicativo == quem) }
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     /** `true` enquanto transmitimos. É o que acende a moldura da tela inteira. */
     val noAr: StateFlow<Boolean> get() = _noAr
@@ -175,6 +195,7 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
                 // Os earcons do rádio saem do mudo. Ver `saidaDoRadio`.
                 emitir = { u -> saidaDoRadio.emitir(u) },
                 duracaoDoEarconMs = { e -> duracaoDoEarcon(e) },
+                aoMudarQuemFala = { quem -> _quemFala.value = quem },
             )
             novo.entrarEmModoAtivo(r)
             radio = novo
@@ -210,6 +231,11 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
      */
     private suspend fun carregarCanal(canal: String, historico: HistoricoDoCanal) {
         historico.falas(canal).onSuccess { lista ->
+            // As inserções otimistas que o servidor ainda não ecoou sobrevivem à
+            // recarga. Sem isto, a fala própria apareceria e sumiria a cada dez
+            // segundos até o servidor devolvê-la — e o agente veria a própria
+            // transmissão piscar, que é pior que não mostrá-la.
+            val locaisPendentes = _falas.value.filter { it.id.startsWith(PREFIXO_LOCAL) }
             _falas.value = lista.map { f ->
                 FalaNoGrupo(
                     id = f.id,
@@ -223,7 +249,7 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
                     prioridade = f.prioridade.takeIf { f.tipo == "alerta" },
                     entrega = FalaNoGrupo.Entrega.RECEBIDA,
                 )
-            }
+            } + locaisPendentes
         }
 
         historico.membros(canal).onSuccess { lista ->
@@ -236,11 +262,16 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
                         // presença fica `true` quando o processo morre sem avisar,
                         // e um agente que sumiu apareceria disponível.
                         online = m.idadeDaPosicaoS?.let { it <= LIMIAR_DE_PRESENCA_S } == true,
+                        // Sempre `false` aqui de propósito: quem preenche é o
+                        // `combine` em `pares`. Ver o KDoc lá.
                         falando = false,
                     )
                 }
         }
     }
+
+    /** Hora local para a fala que este aparelho acabou de emitir. */
+    private fun horaAgora(): String = HORA.format(java.util.Date())
 
     private fun horaDe(iso: String): String = runCatching {
         HORA.format(java.util.Date.from(java.time.OffsetDateTime.parse(iso).toInstant()))
@@ -341,6 +372,21 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
         cronometro = null
         _noAr.value = false
         radio?.aoSoltar()
+
+        // **Inserção otimista, e é ela que faz o balão da direita dizer se saiu.**
+        //
+        // Antes, `Entrega.ENVIADA` e `ENFILEIRADA` não tinham produtor nenhum:
+        // `carregarCanal` gravava `RECEBIDA` fixo em toda fala, inclusive na
+        // própria, então o ramo da UI que mostrava "na fila" era código morto. O
+        // agente não tinha como saber se a transmissão saiu — num rádio, essa é a
+        // única pergunta que importa depois de falar.
+        //
+        // O texto entra vazio de propósito. A transcrição da fala própria ainda
+        // não existe neste caminho (o único STT vive no ciclo de voz), e escrever
+        // um placeholder tipo "(sua transmissão)" seria a interface inventando
+        // conteúdo. O balão aparece com hora e estado — que é o que se sabe — e a
+        // recarga do canal substitui pelo texto real quando ele existir.
+        inserirFalaPropria()
         // Não presume `Pronto`: a rede pode ter caído durante a fala, e afirmar
         // prontidão logo depois de transmitir é o pior instante para errar.
         _estado.value = if (transporteAtual?.conectado() == true) {
@@ -348,6 +394,33 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
         } else {
             EstadoDoPtt.Indisponivel("Sem dados. O canal depende da rede.")
         }
+    }
+
+    /**
+     * Põe a própria fala no thread, com o estado de entrega que o transporte
+     * sustenta neste instante.
+     *
+     * `conectado()` é lido **agora**, e não presumido: a rede pode ter caído
+     * durante a fala, e afirmar "enviada" logo depois de transmitir é o pior
+     * instante para errar. Enfileirada não é enviada — dizer só "enviada" faria o
+     * agente contar com uma transmissão que ninguém ouviu.
+     */
+    private fun inserirFalaPropria() {
+        val id = "$PREFIXO_LOCAL${System.currentTimeMillis()}"
+        val entrega = if (transporteAtual?.conectado() == true) {
+            FalaNoGrupo.Entrega.ENVIADA
+        } else {
+            FalaNoGrupo.Entrega.ENFILEIRADA
+        }
+        _falas.value = _falas.value + FalaNoGrupo(
+            id = id,
+            indicativo = indicativoProprio,
+            hora = horaAgora(),
+            texto = "",
+            propria = true,
+            prioridade = null,
+            entrega = entrega,
+        )
     }
 
     private fun canalAtual(): String =
@@ -368,6 +441,12 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private companion object {
+        /**
+         * Marca a fala inserida por este aparelho e ainda não ecoada pelo
+         * servidor. É por este prefixo que a recarga sabe o que preservar.
+         */
+        const val PREFIXO_LOCAL = "local-"
+
         const val TALK_GROUP_PADRAO = "demo"
 
         /**

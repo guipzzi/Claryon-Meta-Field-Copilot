@@ -75,6 +75,15 @@ class RadioTatico(
     private val reproduzir: suspend (pcm: ShortArray, taxaHz: Int) -> Unit,
     private val emitir: (Utterance) -> Unit,
     private val duracaoDoEarconMs: (Earcon) -> Long,
+    /**
+     * Quem está transmitindo agora, ou `null` quando o canal silencia.
+     *
+     * A régua de presença mostrava `falando = false` fixo — o Receptor sabia da
+     * transmissão em curso e a informação morria aqui dentro. Num canal
+     * meio-duplex, saber que alguém está com o piso é o que impede o agente de
+     * apertar o PTT e ser recusado.
+     */
+    private val aoMudarQuemFala: (String?) -> Unit = {},
     private val agoraMs: () -> Long = { System.currentTimeMillis() },
     private val sampleRateHz: Int = 8_000,
 ) {
@@ -277,6 +286,7 @@ class RadioTatico(
                 // Abre a janela de supressão ANTES do primeiro áudio: a voz que
                 // vai tocar não pode entrar na nossa resposta.
                 supressor.abrir(agoraMs())
+                aoMudarQuemFala(evento.anuncio.autorIndicativo)
                 if (evento.anuncio.prioridade == PrioridadeTransmissao.P1_EMERGENCIA) {
                     sinalizar(Earcon.PRIORITARIA, Priority.EMERGENCIA)
                 }
@@ -287,6 +297,7 @@ class RadioTatico(
             is EventoRecepcao.Terminou -> {
                 // Fecha a janela; a margem do supressor cobre a cauda.
                 supressor.fechar(agoraMs())
+                aoMudarQuemFala(null)
                 Log.i(TAG, "recebida ${evento.transmissaoId}: ${evento.quadros} quadros, ${evento.perdidos} perdidos")
             }
 

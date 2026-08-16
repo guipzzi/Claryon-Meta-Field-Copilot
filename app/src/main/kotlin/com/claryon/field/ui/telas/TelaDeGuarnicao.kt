@@ -28,6 +28,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.claryon.field.ui.componentes.BarraDePtt
 import com.claryon.field.ui.componentes.EstadoDoPtt
@@ -188,11 +190,20 @@ private fun ReguaDePresenca(canal: String, pares: List<ParPresente>) {
 private fun HistoricoDeFalas(falas: List<FalaNoGrupo>) {
     val estadoLista = rememberLazyListState()
 
-    // Rola para o fim quando chega fala nova. `falas.size` como chave, e não a
-    // lista inteira: mudar o estado de entrega de uma fala já visível não deve
-    // arrastar a tela debaixo do dedo de quem está lendo o histórico.
-    LaunchedEffect(falas.size) {
-        if (falas.isNotEmpty()) estadoLista.animateScrollToItem(falas.lastIndex)
+    // `remember` sobre a lista: a recarga de 10 s devolve, na maior parte das
+    // voltas, exatamente a mesma coisa. Sem isto o thread inteiro seria remontado
+    // seis vezes por minuto sem nada ter mudado.
+    val itens = remember(falas) { montarTrafego(falas) }
+
+    // Rolar sempre arranca a leitura da mão de quem subiu para procurar o que
+    // perdeu — e é exatamente isso que se faz no histórico de um rádio. Rolar
+    // nunca esconde o que acabou de chegar. A decisão está em `deveRolarParaOFim`,
+    // que é pura e tem teste; aqui só se pergunta a ela.
+    LaunchedEffect(itens.size) {
+        val ultimoVisivel = estadoLista.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+        if (deveRolarParaOFim(ultimoVisivel, itens.lastIndex)) {
+            estadoLista.animateScrollToItem(itens.lastIndex.coerceAtLeast(0))
+        }
     }
 
     LazyColumn(
@@ -200,65 +211,173 @@ private fun HistoricoDeFalas(falas: List<FalaNoGrupo>) {
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(vertical = Espaco.Curto),
     ) {
-        items(falas, key = { it.id }) { fala -> LinhaDeFala(fala) }
+        items(itens, key = { it.fala.id }) { item ->
+            item.faixaHoraria?.let { SeparadorDeHora(it) }
+            RegistroDeTrafego(item)
+        }
     }
 }
 
 /**
- * Uma linha do histórico.
+ * Separador de faixa horária.
  *
- * Não há bolha de conversa, e isso é deliberado: bolha alinhada à direita para o
- * "eu" é gramática de aplicativo social. Aqui todas as falas são do mesmo tipo —
- * tráfego de rádio — e a distinção que importa não é quem falou, é **o que foi
- * dito e quando**. A própria fala se identifica por um fio à esquerda, discreto.
+ * Um fio com a hora no meio — a mesma peça que qualquer log usa. Existe porque o
+ * carimbo por linha responde "quando foi esta fala" mas não responde "quanto tempo
+ * se passou", e num turno de oito horas essa é a pergunta.
  */
 @Composable
-private fun LinhaDeFala(fala: FalaNoGrupo) {
-    var visivel by remember { mutableStateOf(false) }
-    LaunchedEffect(fala.id) { visivel = true }
-
-    AnimatedVisibility(
-        visible = visivel,
-        enter = fadeIn(tween(220)) + slideInVertically(tween(220)) { it / 3 },
+private fun SeparadorDeHora(rotulo: String) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = Espaco.Padrao, vertical = Espaco.Medio),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(Modifier.fillMaxWidth().padding(vertical = Espaco.Curto)) {
-            // Faixa de prioridade quando é alerta; fio neutro quando é a própria
-            // fala; nada quando é conversa recebida.
-            when {
-                fala.prioridade != null -> FaixaDePrioridade(
-                    fala.prioridade,
-                    Modifier.fillMaxHeightDaLinha(),
-                )
-                fala.propria -> Box(
-                    Modifier.width(2.dp).fillMaxHeightDaLinha().background(Cores.TracoForte),
-                )
-                else -> Box(Modifier.width(2.dp))
-            }
-
-            Column(Modifier.padding(start = Espaco.Medio, end = Espaco.Padrao)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    TextoIndicativo(
-                        fala.indicativo,
-                        cor = if (fala.propria) Cores.TintaMedia else Cores.Tinta,
-                    )
-                    Box(Modifier.width(Espaco.Curto))
-                    TextoDado(fala.hora, cor = Cores.TintaFraca)
-                    if (fala.entrega == FalaNoGrupo.Entrega.ENFILEIRADA) {
-                        Box(Modifier.width(Espaco.Curto))
-                        // Enfileirada não é enviada. Dizer só "enviada" faria o
-                        // agente contar com uma transmissão que ninguém ouviu.
-                        Etiqueta("na fila", cor = Cores.P2)
-                    }
-                }
-                Box(Modifier.height(Espaco.Micro))
-                TextoCorpo(
-                    fala.texto,
-                    cor = if (fala.propria) Cores.TintaMedia else Cores.Tinta,
-                )
-            }
-        }
+        Box(Modifier.weight(1f).height(1.dp).background(Cores.Traco))
+        Box(Modifier.width(Espaco.Medio))
+        Etiqueta(rotulo, cor = Cores.TintaFraca)
+        Box(Modifier.width(Espaco.Medio))
+        Box(Modifier.weight(1f).height(1.dp).background(Cores.Traco))
     }
 }
+
+/**
+ * Um registro do canal.
+ *
+ * **Lateralidade sem virar aplicativo social.** O que faz um balão parecer social
+ * são três coisas separáveis: canto arredondado, rabinho e o "eu" pintado de cor
+ * viva. Nenhuma é necessária para o lado, e nenhuma está aqui — o bloco é
+ * retângulo, raio zero, elevação zero. O lado vem da geometria: alinhamento mais
+ * uma margem vazia de 16% do lado oposto.
+ *
+ * Alerta classificado não recebe lado nenhum: ocupa a linha inteira, como num
+ * terminal de despacho. É essa segunda forma que impede a tela de virar bate-papo.
+ */
+@Composable
+private fun RegistroDeTrafego(item: ItemDeTrafego) {
+    val ehRegistro = item.forma == FormaDoRegistro.REGISTRO_DE_CANAL
+    val aDireita = item.forma == FormaDoRegistro.PROPRIO
+
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Espaco.Medio, vertical = Espaco.Micro)
+            .semantics(mergeDescendants = true) { contentDescription = item.leituraEmVoz },
+    ) {
+        // A margem reservada É o sinal de lado. Quem "limpar" este Box achando que
+        // é resíduo mata a lateralidade sem produzir erro de compilação.
+        if (aDireita) Box(Modifier.weight(MARGEM_DO_LADO_OPOSTO))
+
+        Column(
+            Modifier
+                .weight(if (ehRegistro) 1f else 1f - MARGEM_DO_LADO_OPOSTO)
+                .background(if (aDireita) Cores.Painel else Cores.Elevado),
+        ) {
+            if (ehRegistro) {
+                BandaDeClassificacao(item.fala.prioridade ?: 3)
+            }
+            Row(Modifier.padding(horizontal = Espaco.Medio, vertical = Espaco.Curto)) {
+                CalhaDoRegistro(item.calha)
+                Box(Modifier.width(Espaco.Medio))
+                Column(Modifier.weight(1f)) {
+                    CabecalhoDoRegistro(item)
+                    Box(Modifier.height(Espaco.Micro))
+                    TextoCorpo(item.fala.texto, cor = tinta(item.tintaDoTexto))
+                    item.rotuloDeEntrega?.let {
+                        Box(Modifier.height(Espaco.Micro))
+                        // `Cores.TintaFraca` e não `P2`: cor já significa
+                        // prioridade neste painel, e estado de entrega não é
+                        // prioridade. Uma terceira gramática cromática faria as
+                        // três perderem sentido.
+                        Etiqueta(
+                            if (it == RotuloDeEntrega.ENVIADA) "enviada" else "na fila",
+                            cor = Cores.TintaFraca,
+                        )
+                    }
+                }
+            }
+        }
+
+        if (!aDireita && !ehRegistro) Box(Modifier.weight(MARGEM_DO_LADO_OPOSTO))
+    }
+}
+
+/** Indicativo e hora. O indicativo some em sequência do mesmo par; a hora, nunca. */
+@Composable
+private fun CabecalhoDoRegistro(item: ItemDeTrafego) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        if (item.mostraIndicativo) {
+            TextoIndicativo(
+                item.fala.indicativo,
+                cor = if (item.forma == FormaDoRegistro.PROPRIO) Cores.TintaMedia else Cores.Tinta,
+            )
+            Box(Modifier.width(Espaco.Curto))
+        }
+        // A hora fica em TODAS as linhas, inclusive em continuação: é ela que faz
+        // o histórico servir de log, e log sem hora é conversa.
+        TextoDado(item.fala.hora, cor = Cores.TintaFraca)
+    }
+}
+
+/**
+ * Banda de classificação do alerta.
+ *
+ * Três canais em paralelo — cor, largura e **rótulo escrito**. Hoje P2 e P3 diferem
+ * por 1 px de calha, ou seja diferem só por cor: um agente daltônico, ou qualquer
+ * um sob sol forte, não distingue. O rótulo é o canal que não depende de visão de
+ * cor nem de contraste.
+ *
+ * O texto sai em `Cores.Tinta` e não na cor da prioridade: P3 sobre `Elevado` rende
+ * 4,28:1, abaixo do mínimo de 4,5:1 para texto pequeno. A cor fica na banda e na
+ * calha, que são elemento não-textual e respondem a 3:1.
+ */
+@Composable
+private fun BandaDeClassificacao(prioridade: Int) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(corDaPrioridade(prioridade).copy(alpha = 0.14f))
+            .padding(horizontal = Espaco.Medio, vertical = Espaco.Micro),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.width(3.dp).height(10.dp).background(corDaPrioridade(prioridade)))
+        Box(Modifier.width(Espaco.Curto))
+        Etiqueta(rotuloDePrioridade(prioridade), cor = Cores.Tinta)
+    }
+}
+
+/** Calha vertical. Reforço do lado, não o sinal — ver o KDoc de `RegistroDeTrafego`. */
+@Composable
+private fun CalhaDoRegistro(token: TokenDeCalha) {
+    val largura = when (token) {
+        TokenDeCalha.P1 -> 4.dp
+        TokenDeCalha.P2 -> 3.dp
+        TokenDeCalha.P3 -> 2.dp
+        else -> 2.dp
+    }
+    val cor = when (token) {
+        TokenDeCalha.P1 -> Cores.P1
+        TokenDeCalha.P2 -> Cores.P2
+        TokenDeCalha.P3 -> Cores.P3
+        TokenDeCalha.TRACO -> Cores.Traco
+        TokenDeCalha.TRACO_FORTE -> Cores.TracoForte
+    }
+    Box(Modifier.width(largura).fillMaxHeightDaLinha().background(cor))
+}
+
+private fun corDaPrioridade(p: Int) = when (p) {
+    1 -> Cores.P1
+    2 -> Cores.P2
+    else -> Cores.P3
+}
+
+@Composable
+private fun tinta(token: TokenDeTinta) = when (token) {
+    TokenDeTinta.TINTA -> Cores.Tinta
+    TokenDeTinta.TINTA_MEDIA -> Cores.TintaMedia
+    TokenDeTinta.TINTA_FRACA -> Cores.TintaFraca
+}
+
+/** 16% de margem vazia do lado oposto. É o que carrega o lado. */
+private const val MARGEM_DO_LADO_OPOSTO = 0.16f
 
 /**
  * Altura da linha para as faixas laterais.
