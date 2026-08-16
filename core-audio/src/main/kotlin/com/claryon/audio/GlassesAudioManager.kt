@@ -16,6 +16,18 @@ import kotlinx.coroutines.flow.Flow
  *
  * Contrato fixado no M0; implementação no M3.
  */
+/**
+ * Um `AudioTrack` vivo, alimentado quadro a quadro. Feche sempre — o track
+ * segura recurso nativo e a rota de saída.
+ */
+interface FluxoDeReproducao {
+    /** Escreve um quadro. Bloqueia enquanto o buffer estiver cheio: é o relógio. */
+    suspend fun escrever(pcm: ShortArray): Result<Unit>
+
+    /** Drena o que falta e libera. Idempotente. */
+    fun fechar()
+}
+
 interface GlassesAudioManager {
 
     /**
@@ -48,8 +60,33 @@ interface GlassesAudioManager {
      */
     fun microfonePcm(route: GlassesAudioRoute): Flow<ShortArray>
 
-    /** Reproduz PCM no alto-falante open-ear (earcons e TTS). */
+    /**
+     * Reproduz um bloco fechado — earcon ou frase de TTS.
+     *
+     * Constrói e libera um `AudioTrack` por chamada, o que é correto para som
+     * pontual e **errado para fluxo contínuo**. Para receber rádio use
+     * [abrirFluxoDeReproducao].
+     */
     suspend fun reproduzir(pcm: ShortArray, sampleRateHz: Int): Result<Unit>
+
+    /**
+     * Abre um `AudioTrack` de longa duração para a fala que está CHEGANDO.
+     *
+     * Existe porque a recepção de PTT construía, tocava, drenava com
+     * `delay(dur + 50)` e liberava um `AudioTrack` **por quadro de 20 ms** — 50
+     * por segundo, cada um com 50 ms de cauda, em corrotinas concorrentes sem
+     * ordem entre si. O resultado é latência de partida variável, underrun a cada
+     * quadro e inversão ocasional de ordem quando o `build()` de um demora mais
+     * que o do seguinte.
+     *
+     * O fluxo resolve os três: um track só, `write` sequencial que bloqueia
+     * naturalmente enquanto o buffer enche (é ele o relógio, não um `delay`
+     * calculado), e ordem garantida por ser um consumidor único.
+     *
+     * A taxa é parâmetro e não constante porque só se conhece no **primeiro
+     * quadro decodificado** — `CodecDeVoz.taxaDeSaidaHz` é 0 até lá.
+     */
+    fun abrirFluxoDeReproducao(sampleRateHz: Int): FluxoDeReproducao
 
     /** Encerra o roteamento e devolve o áudio do sistema ao estado normal. */
     fun liberar()

@@ -5,6 +5,8 @@ import com.claryon.agent.ActionOutcome
 import com.claryon.agent.FalhaOperacional
 import com.claryon.agent.Utterance
 import com.claryon.agent.utteranceFor
+import com.claryon.audio.FluxoDeReproducao
+import kotlinx.coroutines.channels.Channel
 import com.claryon.audio.GlassesAudioRoute
 import com.claryon.common.Earcon
 import com.claryon.common.Priority
@@ -73,6 +75,27 @@ class RadioTatico(
     private val piso: ClienteDePiso,
     private val pcmDoMicrofone: (GlassesAudioRoute) -> Flow<ShortArray>,
     private val reproduzir: suspend (pcm: ShortArray, taxaHz: Int) -> Unit,
+    /**
+     * Abre o `AudioTrack` de longa duração da recepção.
+     *
+     * Antes, cada quadro de 20 ms virava `escopo.launch { reproduzir(...) }`, e
+     * `reproduzir` construía e liberava um track inteiro — 50 por segundo, em
+     * corrotinas concorrentes sem ordem entre si. A fala chegava com estalo a
+     * cada quadro e, quando o `build()` de um demorava mais que o do seguinte,
+     * fora de ordem.
+     */
+    private val abrirFluxoDeSaida: (taxaHz: Int) -> FluxoDeReproducao,
+    /**
+     * Grava a transmissão no histórico do canal.
+     *
+     * Separado do caminho de áudio de propósito: a fala já foi ouvida quando isto
+     * roda, então falha aqui é perda de **registro**, não de comunicação. Por isso
+     * é `(…) -> Unit` e não devolve resultado ao PTT — derrubar a transmissão por
+     * causa do histórico seria trocar o essencial pelo acessório.
+     */
+    private val registrarNoHistorico: (
+        transmissaoId: String, prioridade: Int, duracaoMs: Long,
+    ) -> Unit = { _, _, _ -> },
     private val emitir: (Utterance) -> Unit,
     private val duracaoDoEarconMs: (Earcon) -> Long,
     /**
@@ -95,6 +118,29 @@ class RadioTatico(
     private val receptor = Receptor(transporte, codec, escopo)
 
     private var alimentacao: Job? = null
+
+    /** Prioridade da transmissão em curso — o evento de fim não a carrega. */
+    private var prioridadeCorrente: Int = 2
+
+    /** `AudioTrack` vivo da recepção, e o único consumidor que escreve nele. */
+    private var fluxoDeSaida: FluxoDeReproducao? = null
+    private var consumidorDeSaida: Job? = null
+    private val filaDeSaida = Channel<ShortArray>(Channel.UNLIMITED)
+
+    /**
+     * Fecha o track da recepção.
+     *
+     * Chamado no fim da fala **e** ao sair do modo ativo: uma transmissão que
+     * termina por queda de rede nunca emite `Terminou`, e sem este segundo
+     * caminho o track ficaria vivo segurando a rota de saída até o processo
+     * morrer.
+     */
+    private fun fecharFluxoDeSaida() {
+        consumidorDeSaida?.cancel()
+        consumidorDeSaida = null
+        fluxoDeSaida?.fechar()
+        fluxoDeSaida = null
+    }
     private var transmissao: Job? = null
 
     /** `true` enquanto o agente segura o PTT. */
@@ -181,6 +227,7 @@ class RadioTatico(
     }
 
     fun sairDeModoAtivo() {
+        fecharFluxoDeSaida()
         alimentacao?.cancel()
         alimentacao = null
         transmissao?.cancel()
@@ -209,6 +256,11 @@ class RadioTatico(
         }
 
         val transmissaoId = UUID.randomUUID().toString()
+        prioridadeCorrente = when (prioridade) {
+            PrioridadeTransmissao.P1_EMERGENCIA -> 1
+            PrioridadeTransmissao.P2_APOIO -> 2
+            else -> 3
+        }
         val sessao = SessaoPtt(
             talkGroupId = talkGroupId,
             agenteId = agenteId,
@@ -275,8 +327,16 @@ class RadioTatico(
             is EventoPtt.QuadrosNaoEntregues ->
                 Log.w(TAG, "${evento.quantidade} quadros não entregues")
 
-            is EventoPtt.Encerrada ->
+            is EventoPtt.Encerrada -> {
                 Log.i(TAG, "transmissão ${evento.transmissaoId}: ${evento.quadros} quadros em ${evento.duracaoMs} ms")
+                // O produtor que faltava: sem esta linha `transmissions` nunca
+                // recebia INSERT e o fio do canal era permanentemente vazio.
+                registrarNoHistorico(
+                    evento.transmissaoId,
+                    prioridadeCorrente,
+                    evento.duracaoMs,
+                )
+            }
         }
     }
 
@@ -292,12 +352,29 @@ class RadioTatico(
                 }
             }
 
-            is EventoRecepcao.Audio -> escopo.launch { reproduzir(evento.pcm, evento.taxaHz) }
+            is EventoRecepcao.Audio -> {
+                // Abertura preguiçosa: a taxa só se conhece no primeiro quadro
+                // decodificado — `CodecDeVoz.taxaDeSaidaHz` é 0 antes disso, e um
+                // track aberto em `entrarEmModoAtivo` nasceria com taxa errada.
+                val fluxo = fluxoDeSaida ?: abrirFluxoDeSaida(evento.taxaHz).also { fluxoDeSaida = it }
+                // Fila de um consumidor só: a ordem da fala é a ordem de chegada,
+                // e ela se perde no instante em que dois `launch` disputam o
+                // mesmo track.
+                escopo.launch { filaDeSaida.send(evento.pcm) }
+                if (consumidorDeSaida == null) {
+                    consumidorDeSaida = escopo.launch {
+                        semDerrubarOProcesso("reprodução da recepção") {
+                            for (bloco in filaDeSaida) fluxo.escrever(bloco)
+                        }
+                    }
+                }
+            }
 
             is EventoRecepcao.Terminou -> {
                 // Fecha a janela; a margem do supressor cobre a cauda.
                 supressor.fechar(agoraMs())
                 aoMudarQuemFala(null)
+                fecharFluxoDeSaida()
                 Log.i(TAG, "recebida ${evento.transmissaoId}: ${evento.quadros} quadros, ${evento.perdidos} perdidos")
             }
 

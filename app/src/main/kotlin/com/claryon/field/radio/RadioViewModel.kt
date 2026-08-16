@@ -16,6 +16,7 @@ import com.claryon.net.ClienteDePisoLocal
 import com.claryon.net.CodecDeVoz
 import com.claryon.net.ConfigOpus
 import com.claryon.net.HistoricoDoCanal
+import com.claryon.net.RegistroDeTransmissao
 import com.claryon.net.ConfigRealtime
 import com.claryon.net.MediaCodecOpus
 import com.claryon.net.TransporteAoVivo
@@ -141,6 +142,7 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
     private var cronometro: Job? = null
     private var vigiaDeRede: Job? = null
     private var transporteAtual: TransporteAoVivo? = null
+    private var registro: RegistroDeTransmissao? = null
     private var inicioDaFalaMs = 0L
 
     private val redeConfigurada =
@@ -200,6 +202,22 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
                 piso = ClienteDePisoLocal(),
                 pcmDoMicrofone = { rotaValida -> audio.microfonePcm(rotaValida) },
                 reproduzir = { pcm, taxa -> audio.reproduzir(pcm, taxa) },
+                abrirFluxoDeSaida = { taxa -> audio.abrirFluxoDeReproducao(taxa) },
+                registrarNoHistorico = { id, prio, dur ->
+                    viewModelScope.launch {
+                        registro?.registrar(
+                            transmissaoId = id,
+                            talkGroupId = canal,
+                            tipo = "fala",
+                            prioridade = prio,
+                            duracaoMs = dur,
+                            // Sem transcrição ainda: o STT do PTT é a Fase 3. O
+                            // campo fica nulo — que significa "não transcrito" —
+                            // em vez de string vazia, que significaria "silêncio".
+                            transcricao = null,
+                        )
+                    }
+                },
                 // Os earcons do rádio saem do mudo. Ver `saidaDoRadio`.
                 emitir = { u -> saidaDoRadio.emitir(u) },
                 duracaoDoEarconMs = { e -> duracaoDoEarcon(e) },
@@ -211,6 +229,14 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
             indicativoProprio = indicativo
             nomeDoCanalAtual = nomeDoCanal
             vigiaDeRede = viewModelScope.launch { vigiarRede(nomeDoCanal, transporte) }
+
+            registro = RegistroDeTransmissao(
+                config = ConfigRealtime(
+                    projetoUrl = BuildConfig.SUPABASE_URL.trimEnd('/'),
+                    apiKey = BuildConfig.SUPABASE_ANON_KEY,
+                ),
+                tokenDeSessao = tokenDeSessao,
+            )
 
             val historico = HistoricoDoCanal(
                 config = ConfigRealtime(

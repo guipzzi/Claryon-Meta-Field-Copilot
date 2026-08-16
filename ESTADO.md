@@ -1,4 +1,4 @@
-# Onde estamos — 2026-08-16 · `00a8d0d`+ (Fase 0 parcial)
+# Onde estamos — 2026-08-16 · `b93fc9a`+ (Fase 0 fechada, com uma pendência externa)
 
 Fonte única de "estado da conversa". **Reescrito ao fim de cada sessão, nunca acrescentado.**
 Teto duro: **60 linhas**. O que não couber é história e vai para `DECISIONS.md`. Aqui só
@@ -29,7 +29,12 @@ entra o que muda a próxima decisão: o que funciona, o que está quebrado, o qu
    padrão e `RadioViewModel` não sobrescreve, enquanto a captura entrega 16 kHz. A voz
    transmitida sai **uma oitava abaixo, com o dobro da duração**. Meia sessão de conserto,
    e é a maior alavanca do projeto.
-0b. **As três Edge Functions não têm um único chamador em Kotlin.** `grep "functions/v1"
+0b. **As Edge Functions NUNCA FORAM DEPLOYADAS** — `POST /functions/v1/transmit` devolve
+   **HTTP 404** enquanto o REST responde 200. O chamador em Kotlin passou a existir
+   (`RegistroDeTransmissao`, ligado em `RadioTatico`), mas o destino não existe no servidor.
+   **Não consigo fazer o deploy daqui:** não há CLI do Supabase na máquina e a Management API
+   recusa o endpoint de funções (403). É a única pendência da Fase 0 que não é código.
+   ~~Antes: as três Edge Functions não tinham um único chamador em Kotlin.~~ `grep "functions/v1"
    --include=*.kt` devolve zero. Logo `transmissions` nunca recebe INSERT e
    `HistoricoDoCanal.falas()` devolve lista vazia **sempre** — o fio do canal que acabou de
    ser construído mostra só as inserções otimistas locais, que somem em 10 s na recarga.

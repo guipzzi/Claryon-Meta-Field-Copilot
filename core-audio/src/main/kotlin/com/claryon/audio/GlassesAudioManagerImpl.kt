@@ -243,6 +243,83 @@ class GlassesAudioManagerImpl(
             }
         }
 
+    override fun abrirFluxoDeReproducao(sampleRateHz: Int): FluxoDeReproducao =
+        FluxoDeReproducaoImpl(sampleRateHz)
+
+    /**
+     * Um `AudioTrack` em `MODE_STREAM`, vivo enquanto a fala chega.
+     *
+     * `MODE_STREAM` e não `MODE_STATIC`: o estático exige conhecer o áudio
+     * inteiro antes de tocar, e aqui ele chega em quadros de 20 ms pela rede.
+     *
+     * O buffer é quatro vezes o mínimo do sistema. Menor que isso e cada hesitação
+     * da rede vira underrun audível; muito maior e a latência boca-a-ouvido cresce
+     * sem ganho, que é o oposto do ponto de um rádio.
+     */
+    private inner class FluxoDeReproducaoImpl(private val sampleRateHz: Int) : FluxoDeReproducao {
+
+        private val minBuf = AudioTrack.getMinBufferSize(
+            sampleRateHz,
+            AudioFormat.CHANNEL_OUT_MONO,
+            AudioFormat.ENCODING_PCM_16BIT,
+        )
+
+        private val track: AudioTrack = AudioTrack.Builder()
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    // USAGE_VOICE_COMMUNICATION mantém a saída no SCO. Sem isso o
+                    // sistema pode escolher A2DP e a fala sai pelo caminho errado.
+                    .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build(),
+            )
+            .setAudioFormat(
+                AudioFormat.Builder()
+                    .setSampleRate(sampleRateHz)
+                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .build(),
+            )
+            .setTransferMode(AudioTrack.MODE_STREAM)
+            .setBufferSizeInBytes(maxOf(minBuf, minBuf * 4))
+            .build()
+
+        @Volatile private var aberto = true
+
+        init {
+            runCatching { track.play() }
+        }
+
+        override suspend fun escrever(pcm: ShortArray): Result<Unit> =
+            withContext(Dispatchers.IO) {
+                if (!aberto || pcm.isEmpty()) return@withContext Result.success(Unit)
+                var offset = 0
+                while (offset < pcm.size) {
+                    // `write` bloqueante: ele é o relógio da reprodução. A versão
+                    // anterior calculava um `delay` a partir do tamanho do quadro,
+                    // o que erra sempre que o dispositivo consome em ritmo
+                    // diferente do previsto — e ele consome.
+                    val n = track.write(pcm, offset, pcm.size - offset)
+                    if (n < 0) {
+                        return@withContext Result.failure(
+                            ClaryonError.Audio("audio.write_failed", "AudioTrack.write erro $n"),
+                        )
+                    }
+                    offset += n
+                }
+                Result.success(Unit)
+            }
+
+        override fun fechar() {
+            if (!aberto) return
+            aberto = false
+            // `stop()` e não `pause()`: stop drena o que já foi escrito antes de
+            // parar, e é isso que impede o corte da última sílaba.
+            runCatching { track.stop() }
+            runCatching { track.release() }
+        }
+    }
+
     /**
      * Desfaz o roteamento quando o **último** usuário solta (ver [iniciar]).
      * Chamadas extras são no-op — nunca derrubam a rota de quem ainda captura.

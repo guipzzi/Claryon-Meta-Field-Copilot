@@ -1188,3 +1188,24 @@ aparelho tem" é exatamente o que se defende numa auditoria.
   `fala.anuncio` no nome de qualquer indicativo. **Cifrar o payload não conserta isso** —
   chave de grupo prova pertencimento, não autoria. Join autenticado por JWT mais anúncio
   assinado conserta. Registrado como pré-condição de qualquer trabalho de E2EE.
+
+- **2026-08-16 — As Edge Functions nunca foram deployadas, e isso explica o fio do canal vazio.**
+  A auditoria de 16/08 achou que `transmissions` nunca recebia INSERT porque não havia chamador
+  em Kotlin. O chamador era metade do problema. Com `RegistroDeTransmissao` ligado e as duas
+  transmissões de teste completando (30 quadros cada, `EventoPtt.Encerrada` disparado), o
+  servidor continuou com apenas as linhas do seed. `curl -X POST .../functions/v1/transmit`
+  devolve **HTTP 404**; `GET /rest/v1/agents` devolve 200 com a mesma chave. A função não
+  existe no projeto.
+
+  Isso reordena o entendimento do Pilar 1: o fan-out de destinatários, a idempotência por
+  `transmission_id` e o `allSettled` que `transmit.ts` implementa **nunca rodaram**. São 130
+  linhas de TypeScript testadas por leitura e nunca executadas — a mesma classe de defeito que
+  o projeto já achou seis vezes no Kotlin, agora do lado do servidor.
+
+  A escrita direta por PostgREST **não** é alternativa: `0002_rls.sql:77-78` tem
+  `transmissions_no_direct_insert ... with check (false)`, deliberado — a escrita passa pela
+  função porque é lá que a identidade sai do JWT e o fan-out acontece.
+
+  Deploy requer CLI do Supabase (ausente nesta máquina) ou o endpoint de funções da Management
+  API, que recusou com 403. Fica como pendência **externa ao código**, e é ela que separa o
+  chat de "estrutura pronta" de "funciona em produção".
