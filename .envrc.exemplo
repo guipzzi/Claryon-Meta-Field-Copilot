@@ -1,0 +1,21 @@
+# Ambiente do projeto. Copie para `.envrc` (ignorado pelo git) e carregue com
+# `source .envrc`, ou deixe o direnv fazer isso.
+#
+# O CLI do Supabase precisa de UMA destas duas coisas para funcionar:
+#   (a) `~/.supabase/profile`, criado pelo `supabase login` interativo, OU
+#   (b) esta variável.
+#
+# Num shell SEM TTY — script, CI, agente — o (a) não existe mesmo depois de um
+# login bem-sucedido, e o CLI trava **sem emitir uma única linha**, tentando abrir
+# um prompt que ninguém vai responder. `--debug` mostra a causa:
+#   NotFound: FileSystem.readFile (/Users/…/.supabase/profile)
+#
+# Com a variável, o CLI nem procura o perfil. É o mesmo caminho que a Supabase
+# documenta para CI, não um contorno.
+export SUPABASE_ACCESS_TOKEN="$(grep '^supabase_access_token' local.properties | cut -d= -f2 | tr -d ' ')"
+
+# Toolchain do projeto. O Gradle 8.11.1 recusa o JDK do Android Studio (25.x) com
+# uma mensagem inútil: "* What went wrong: 25.0.2".
+export JAVA_HOME=/opt/homebrew/opt/openjdk@17
+export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools
+export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:/opt/homebrew/bin:$PATH"

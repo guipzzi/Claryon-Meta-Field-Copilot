@@ -1209,3 +1209,31 @@ aparelho tem" é exatamente o que se defende numa auditoria.
   Deploy requer CLI do Supabase (ausente nesta máquina) ou o endpoint de funções da Management
   API, que recusou com 403. Fica como pendência **externa ao código**, e é ela que separa o
   chat de "estrutura pronta" de "funciona em produção".
+
+- **2026-08-16 — O CLI do Supabase não estava quebrado; faltava `SUPABASE_ACCESS_TOKEN`.**
+  Depois de dois deploys bem-sucedidos, `supabase functions deploy` passou a travar **sem
+  emitir uma única linha** — nem o aviso de Docker que imprimia antes. Diagnostiquei como
+  "CLI instável", escrevi um script próprio contra a Management API e segui em frente. Era
+  diagnóstico preguiçoso: `--debug` responde em uma frase.
+
+  ```
+  NotFound: FileSystem.readFile (/Users/…/.supabase/profile)
+  ```
+
+  O CLI 2.x procura `~/.supabase/profile`, criado apenas pelo `supabase login`
+  **interativo**. Num shell sem TTY o arquivo não existe mesmo após um login
+  bem-sucedido — o diretório tinha só `telemetry.json` e `traces/` — e o CLI tenta abrir um
+  prompt que ninguém responde. Ele trava em silêncio em vez de dizer isso.
+
+  `SUPABASE_ACCESS_TOKEN` faz o CLI nem procurar o perfil, e é o caminho que a própria
+  Supabase documenta para CI. **Docker não tem nada a ver:** só é exigido por
+  `functions serve`, que roda as funções localmente.
+
+  O script `servidor/deploy_funcao.py` foi apagado. Ferramenta padrão configurada é melhor
+  que ferramenta própria com a mesma função — o script era 130 linhas para contornar uma
+  variável de ambiente que faltava, e cada linha dele era manutenção futura.
+
+  Fica registrado o que ele ensinou e continua verdade: a **Management API recusa requisição
+  sem `User-Agent`**, com `403` e corpo `error code: 1010`. Isso é Cloudflare, não Supabase, e
+  não tem relação com escopo do token. Foi essa leitura errada — "sem permissão" — que me fez
+  empurrar o deploy para o usuário em vez de fazê-lo.

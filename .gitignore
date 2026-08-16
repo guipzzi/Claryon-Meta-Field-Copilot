@@ -50,3 +50,6 @@ core-voice/libs/*.aar
 # o conteúdo neutro vive em AGENTS.md e ESTADO.md, versionados, e o CLAUDE.md só
 # os importa. O que resta nele é regra de fluxo de trabalho, que a próxima máquina
 # e a próxima pessoa precisam receber.
+
+# Ambiente local (contém token). O modelo versionado é .envrc.exemplo.
+.envrc
