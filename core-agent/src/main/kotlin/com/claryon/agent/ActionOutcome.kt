@@ -88,6 +88,17 @@ enum class Restricao { SEM_RESTRICAO, ADMINISTRATIVA, FURTO_ROUBO }
 enum class FalhaOperacional(val causaCurta: String) {
     SEM_ROTA_DE_AUDIO("Sem rota."),
     COFRE_INDISPONIVEL("Cofre falhou."),
+
+    /**
+     * Disco no piso de reserva: o cofre parou de gravar **de propósito**.
+     *
+     * Tem código próprio, e não `COFRE_INDISPONIVEL`, porque a recuperação é
+     * diferente e o agente precisa saber qual é. "Cofre falhou" manda procurar
+     * defeito; "disco cheio" manda liberar espaço. Antes, esta condição não
+     * produzia som nenhum: o cofre falhava cinquenta vezes por segundo e o
+     * retorno era descartado.
+     */
+    SEM_ESPACO("Disco cheio."),
     GRAVACAO_JA_ATIVA("Já gravando."),
     SEM_GRAVACAO_ATIVA("Nada gravando."),
     PLACA_NAO_LIDA("Placa ilegível."),

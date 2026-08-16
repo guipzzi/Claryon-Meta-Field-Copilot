@@ -39,6 +39,28 @@ data class Coordenada(
     val rumoGraus: Float? = null,
 )
 
+/**
+ * O que o cofre fez com um bloco de evidência.
+ *
+ * Existe porque o `Boolean` anterior não distinguia "não há gravação aberta" —
+ * situação normal — de "o disco encheu e a evidência está se perdendo agora". E o
+ * `Boolean` era **descartado** pelo único chamador, o que fazia as duas
+ * desaparecerem juntas em silêncio. Regra dura do produto: falha nunca é silêncio.
+ */
+enum class AnexoDeEvidencia {
+    /** Bloco aceito (na janela ou já selado). */
+    ACEITO,
+
+    /** Não há gravação aberta. Não é falha — o pipeline pode estar só rodando. */
+    SEM_GRAVACAO,
+
+    /** Disco no piso de reserva. Áudio está sendo perdido **agora**. */
+    SEM_ESPACO,
+
+    /** Qualquer outra falha do cofre. */
+    FALHOU,
+}
+
 /** Identidade operacional do portador — preenche o template da mensagem tática. */
 data class Identidade(
     val agentId: String,
@@ -72,6 +94,16 @@ class ClaryonIntentExecutor(
     private val identidade: Identidade,
     private val agora: () -> Long,
     private val aoTrocarModo: suspend (ModoOperacao) -> Unit,
+    /**
+     * Taxa do microfone que vai alimentar o cofre — vem do `GlassesAudioManager`
+     * que realmente captura, e entra no manifesto.
+     *
+     * **Sem valor padrão de propósito.** O padrão anterior era 16 kHz nos dois
+     * lados: casava por coincidência, e um manager construído com outra taxa faria
+     * o manifesto declarar uma taxa que o áudio não tem — o perito receberia PCM
+     * que toca na velocidade errada, sem nada no arquivo denunciando o erro.
+     */
+    private val taxaDeAmostragemHz: () -> Int,
     /**
      * Onde estou. `null` = sem correção de GPS **ou** sem permissão — a distinção
      * é feita por [permissaoDeLocal], porque as duas causas exigem recuperações
@@ -262,6 +294,7 @@ class ClaryonIntentExecutor(
             agentId = identidade.agentId,
             unitId = identidade.unitId,
             startedAtEpochMillis = agora(),
+            sampleRateHz = taxaDeAmostragemHz(),
         )
         return when (val r = cofre.beginRecording(ctx)) {
             is Result.Success -> {
@@ -324,9 +357,19 @@ class ClaryonIntentExecutor(
      * é I/O curto em arquivo local, e a alternativa é evidência que um advogado
      * derruba.
      */
-    suspend fun anexarEvidencia(chunk: ByteArray): Boolean = mutex.withLock {
-        val handle = gravacaoAtual ?: return@withLock false
-        cofre.append(handle, chunk) is Result.Success
+    suspend fun anexarEvidencia(chunk: ByteArray): AnexoDeEvidencia = mutex.withLock {
+        val handle = gravacaoAtual ?: return@withLock AnexoDeEvidencia.SEM_GRAVACAO
+        when (val r = cofre.append(handle, chunk)) {
+            is Result.Success -> AnexoDeEvidencia.ACEITO
+            is Result.Failure ->
+                // O código vem do cofre; a distinção existe porque disco cheio e
+                // cofre quebrado pedem coisas diferentes do agente.
+                if (r.error.code == CODIGO_SEM_ESPACO) {
+                    AnexoDeEvidencia.SEM_ESPACO
+                } else {
+                    AnexoDeEvidencia.FALHOU
+                }
+        }
     }
 
     /** `true` se há gravação aberta (para o painel e para o encerramento do app). */
@@ -335,6 +378,9 @@ class ClaryonIntentExecutor(
     private companion object {
         /** Limite do campo de situação no template aprovado. */
         const val SITUACAO_MAX = 120
+
+        /** Espelha `ClaryonError.Evidence("EVID_SEM_ESPACO", …)` do cofre. */
+        const val CODIGO_SEM_ESPACO = "EVID_SEM_ESPACO"
 
         /**
          * Três tentativas de fechar o cofre antes de liberar o handle. Uma só

@@ -16,6 +16,8 @@ import com.claryon.audio.RotaDeAudioPerdidaException
 import com.claryon.common.Result
 import com.claryon.evidence.EncryptedEvidenceVault
 import com.claryon.field.BuildConfig
+import com.claryon.agent.Intent
+import com.claryon.field.agent.AnexoDeEvidencia
 import com.claryon.field.agent.ClaryonIntentExecutor
 import android.content.pm.PackageManager
 import com.claryon.agent.BuscaDePar
@@ -476,6 +478,10 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
         agora = { System.currentTimeMillis() },
         // Modo Ocorrência liga o Modo Tático da fila: informativo é suprimido.
         aoTrocarModo = { modo -> saida.modoTatico(modo == ModoOperacao.OCORRENCIA) },
+        // A taxa vem do dono único da rota — o mesmo objeto que abre o
+        // `AudioRecord` que alimenta o cofre. Repetir o literal aqui recriaria a
+        // coincidência que este parâmetro existe para eliminar.
+        taxaDeAmostragemHz = { audio.taxaDeAmostragemHz },
 
         minhaPosicao = { local.ultimaPosicao() },
         permissaoDeLocal = { local.temPermissao() },
@@ -592,8 +598,28 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
             }
             try {
                 audio.microfonePcm(prova).collect { chunk ->
-                    executor.anexarEvidencia(chunk.paraBytesLE())
+                    // O retorno de `anexarEvidencia` era **descartado**. Com o
+                    // disco cheio, o cofre falhava cinquenta vezes por segundo, o
+                    // áudio ia embora, e o agente seguia acreditando que estava
+                    // gravando — falha silenciosa, que é a que o produto proíbe.
+                    val r = executor.anexarEvidencia(chunk.paraBytesLE())
+                    if (r == AnexoDeEvidencia.SEM_ESPACO || r == AnexoDeEvidencia.FALHOU) {
+                        // `collect` é `crossinline`: não há retorno não-local. Sair
+                        // por exceção é o que encerra o fluxo de verdade — insistir
+                        // só desgasta a flash e prolonga a mentira.
+                        throw CofreRecusouException(r)
+                    }
                 }
+            } catch (e: CofreRecusouException) {
+                Log.e(TAG, "cofre recusou bloco de evidência: ${e.motivo}")
+                val falha = when (e.motivo) {
+                    AnexoDeEvidencia.SEM_ESPACO -> FalhaOperacional.SEM_ESPACO
+                    else -> FalhaOperacional.COFRE_INDISPONIVEL
+                }
+                // Fecha o cofre para que o manifesto registre onde a gravação parou.
+                // Um manifesto aberto para sempre é uma custódia que ninguém fecha.
+                executor.execute(Intent.EncerrarGravacao)
+                saida.emitir(utteranceFor(ActionOutcome.Falhou(falha)))
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -607,6 +633,9 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
     }
+
+    /** Sai do `collect` quando o cofre para de aceitar. Nunca escapa deste arquivo. */
+    private class CofreRecusouException(val motivo: AnexoDeEvidencia) : Exception()
 
     /** PCM 16-bit para bytes little-endian, como o cofre armazena. */
     private fun ShortArray.paraBytesLE(): ByteArray {

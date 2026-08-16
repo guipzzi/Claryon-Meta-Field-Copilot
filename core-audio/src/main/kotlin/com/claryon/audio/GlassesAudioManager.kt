@@ -19,6 +19,18 @@ import kotlinx.coroutines.flow.Flow
 interface GlassesAudioManager {
 
     /**
+     * Taxa em que [microfonePcm] entrega amostras.
+     *
+     * Está no contrato porque **PCM sem taxa declarada é inaudível**: quem
+     * persiste o áudio (cofre de evidência) precisa gravar a taxa junto, e quem o
+     * reproduz precisa da mesma. Antes, esse número vivia só no `AudioRecord`
+     * desta implementação e o cofre o repetia por coincidência de valores
+     * padrão — bastava construir o manager com outra taxa para o manifesto passar
+     * a declarar uma taxa que o áudio não tem.
+     */
+    val taxaDeAmostragemHz: Int
+
+    /**
      * Configura o roteamento SCO. Trata `setCommunicationDevice() == false`.
      *
      * Devolve a [GlassesAudioRoute] — a **prova** de que a rota subiu. É o único

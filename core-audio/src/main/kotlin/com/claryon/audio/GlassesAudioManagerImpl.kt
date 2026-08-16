@@ -43,6 +43,9 @@ class GlassesAudioManagerImpl(
     private val allowFallbackToDefault: Boolean = false,
 ) : GlassesAudioManager {
 
+    /** Expõe ao cofre e ao codec a taxa real desta instância. Ver o contrato. */
+    override val taxaDeAmostragemHz: Int get() = sampleRateHz
+
     private val audioManager =
         context.applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
