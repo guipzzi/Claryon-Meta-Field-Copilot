@@ -61,8 +61,11 @@ class WhisperCppStt(private val fonte: ModelSource) : SttEngine {
             mutex.withLock {
             val ctx = context ?: fonte.abrir().also { context = it }
             // HFP entrega 8 kHz; o Whisper espera 16 kHz → reamostra se preciso.
+            // `resample` e não `resampleLinear`: o caminho HFP sobe (8 → 16) e
+            // segue idêntico, mas na bancada uma fonte a 44,1/48 kHz DESCE — e aí
+            // interpolação crua injetaria alias no que o modelo vai transcrever.
             val pcm16k =
-                if (sampleRateHz != TARGET_HZ) PcmResampler.resampleLinear(pcm, sampleRateHz, TARGET_HZ) else pcm
+                if (sampleRateHz != TARGET_HZ) PcmResampler.resample(pcm, sampleRateHz, TARGET_HZ) else pcm
             // Whisper espera PCM float normalizado em [-1, 1], mono, 16 kHz.
             val floats = FloatArray(pcm16k.size) { pcm16k[it] / 32768.0f }
             val texto = ctx.transcribeData(floats, printTimestamp = false).trim()

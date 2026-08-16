@@ -7,6 +7,9 @@ import com.claryon.sound.PrioritySoundQueue
 import com.claryon.sound.Sound
 import com.claryon.voice.PcmAudio
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlin.coroutines.CoroutineContext
 
 /**
  * **Única porta de saída do produto.** Recebe [Utterance] — que só existe a
@@ -29,7 +32,30 @@ class VoiceOutput(
     scope: CoroutineScope,
     private val sintetizar: suspend (String) -> PcmAudio?,
     private val reproduzir: suspend (pcm: ShortArray, sampleRateHz: Int) -> Unit,
+    /**
+     * Onde o filtro de reamostragem roda. Padrão fora da Main.
+     *
+     * É parâmetro e não `Dispatchers.Default` fixo porque um dispatcher fixo
+     * escapa do escalonador de teste: `withContext(Dispatchers.Default)` salta
+     * para um pool real, e o teste que dirige a fila com `UnconfinedTestDispatcher`
+     * nunca vê a corrotina terminar. Descobri isso quebrando dois testes com a
+     * primeira versão desta correção.
+     */
+    private val dispatcherDeAudio: CoroutineContext = Dispatchers.Default,
 ) {
+
+    init {
+        // [TAXA_SAIDA_HZ] é o barramento inteiro, e os earcons NÃO passam por
+        // [naTaxaDeSaida] — nascem já nessa taxa (ramo `Sound.Tone` abaixo).
+        // Mexer numa constante sem a outra não daria erro de compilação: os oito
+        // earcons simplesmente tocariam acelerados e desafinados (a 22.050 Hz,
+        // PRIORITARIA sairia em ~1.654 Hz no lugar de 1.200), o que num produto
+        // sem display corrompe o vocabulário inteiro de sinais. Falhar na
+        // construção é infinitamente melhor que descobrir isso em campo.
+        require(TAXA_SAIDA_HZ == EarconSynthesizer.SAMPLE_RATE_HZ) {
+            "barramento a $TAXA_SAIDA_HZ Hz e earcons a ${EarconSynthesizer.SAMPLE_RATE_HZ} Hz"
+        }
+    }
 
     private val fila = PrioritySoundQueue(
         scope = scope,
@@ -65,15 +91,38 @@ class VoiceOutput(
 
     fun limpar() = fila.clear()
 
-    private fun naTaxaDeSaida(audio: PcmAudio): ShortArray =
+    /**
+     * O Piper sintetiza a 22.050 Hz e o barramento é 16.000: isto **desce**, e
+     * descer sem anti-aliasing dobra 8–11 kHz para dentro da banda de voz. Por
+     * isso [PcmResampler.resample] e não `resampleLinear` — a diferença é
+     * inaudível num teste de tamanho de array e escancarada no alto-falante.
+     */
+    private suspend fun naTaxaDeSaida(audio: PcmAudio): ShortArray =
         if (audio.sampleRateHz == TAXA_SAIDA_HZ) {
             audio.samples
         } else {
-            PcmResampler.resampleLinear(audio.samples, audio.sampleRateHz, TAXA_SAIDA_HZ)
+            // **Fora da Main, e não é preciosismo.** O `render` da fila roda no
+            // escopo que ela recebe, e o único construtor que sintetiza fala passa
+            // `viewModelScope` — cujo dispatcher é a Main. Um FIR de 63 tapes
+            // sobre uma frase inteira ali travaria o quadro exatamente quando o
+            // agente espera resposta. `WhisperCppStt` já aprendeu isso e faz o
+            // mesmo, pelo mesmo motivo.
+            withContext(dispatcherDeAudio) {
+                PcmResampler.resample(audio.samples, audio.sampleRateHz, TAXA_SAIDA_HZ)
+            }
         }
 
     companion object {
-        /** Mesma taxa dos earcons — ver [EarconSynthesizer]. */
+        /**
+         * Mesma taxa dos earcons — ver [EarconSynthesizer]; o `init` acima trava
+         * o par.
+         *
+         * Não sobe para 22.050 (taxa nativa do Piper) por decisão: o elo até os
+         * óculos é HFP 8 kHz mono por doc oficial do DAT, então subir aqui não
+         * eliminaria reamostragem — só a transferiria para o resampler do
+         * AudioFlinger, cujo filtro **não auditamos**, e obrigaria a fila a
+         * carregar taxa por item (`PrioritySoundQueue.play` recebe só amostras).
+         */
         const val TAXA_SAIDA_HZ = 16_000
     }
 }

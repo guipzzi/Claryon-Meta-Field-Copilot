@@ -22,6 +22,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.activity.compose.LocalActivity
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -81,7 +82,11 @@ fun DiagnosticsScreen(
             // O caminho de volta do registro perdido. Sem este botão o agente vê
             // "UNAVAILABLE" e não tem o que fazer — e foi medido que parear um
             // aparelho não restaura o registro sozinho.
-            val activity = LocalContext.current as? Activity
+            // `LocalActivity` e nao cast do `LocalContext`: o cast falha em
+            // silencio sob ContextWrapper (o que acontece em tema custom e em
+            // preview), e o lint reprovava o build por isso — enquanto o
+            // ESTADO.md afirmava build verde.
+            val activity = LocalActivity.current
             Button(
                 onClick = { activity?.let(vm::registrar) },
                 enabled = activity != null,

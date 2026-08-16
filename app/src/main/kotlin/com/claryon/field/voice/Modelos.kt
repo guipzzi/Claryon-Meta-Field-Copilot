@@ -50,6 +50,41 @@ object Modelos {
     const val PIPER_MODELO = "pt_BR-faber-medium.onnx"
 
     /**
+     * Velocidade da fala do copiloto. **Menor que 1 = mais lenta.**
+     *
+     * ⚠️ **Semântica NÃO confirmada em artefato deste repositório.** O `javap`
+     * confirma que `OfflineTts.generate(String, Int, Float)` existe e recebe o
+     * float, mas não diz o que ele significa — o sentido acima vem da fonte
+     * upstream do sherpa-onnx, que não está aqui. A Regra Zero manda declarar
+     * isso em vez de escrever "confirmado". **Confira de ouvido no primeiro teste
+     * com fone:** se a fala acelerar em vez de desacelerar, o sentido é inverso e
+     * a constante vira `1.1f`.
+     *
+     * Por que 10% mais lenta, e não mais rápida "para soar urgente":
+     *  - O elo até os óculos é HFP 8 kHz mono (doc oficial do DAT). Acima de
+     *    4 kHz não chega nada — sem as pistas espectrais das fricativas, a
+     *    discriminação recai sobre **duração** e transições de formante, que são
+     *    justamente o que a pressa destrói.
+     *  - O agente ouve por alto-falante open-ear, na rua, com vento, trânsito e
+     *    tráfego de rádio por cima.
+     *  - Números saem dígito a dígito (§Design de áudio). É o conteúdo que mais
+     *    sofre com pressa e o que mais custa errar.
+     *  - A urgência já viaja no earcon, enfileirado **antes** da frase
+     *    (`VoiceOutput.emitir`). Acelerar a fala duplicaria um sinal existente e
+     *    degradaria os dois.
+     *  - **Custa latência, e o custo é real.** `generate` é síntese em lote: só
+     *    retorna com o áudio inteiro pronto, então falar 10% mais devagar atrasa
+     *    o **início** da resposta, não só o fim. Com o teto de 7 palavras o
+     *    acréscimo fica em ~0,2 s sobre a meta de 2,0 s — cabe, mas é gasto, não
+     *    de graça. O jeito de não pagar seria `generateWithCallback`, que existe
+     *    no mesmo AAR e não é usado (`PiperTts.kt:79`): fica registrado como a
+     *    melhoria que torna esta escolha grátis.
+     *
+     * Abaixo de 0,9 o VITS começa a arrastar as vogais e soa artificial.
+     */
+    const val VELOCIDADE_DE_CAMPO = 0.9f
+
+    /**
      * TTS neural pronto para uso, ou `null` se o modelo não está empacotado
      * (aí o chamador cai no [com.claryon.voice.AndroidTts]).
      *
@@ -85,6 +120,10 @@ object Modelos {
             modelDir = PIPER_ASSET_DIR,
             modelName = PIPER_MODELO,
             dataDir = espeak.absolutePath,
+            // O parâmetro existia e já era repassado ao motor (`PiperTts:79`);
+            // faltava alguém em produção passar valor. Sem esta linha, o único
+            // ponto de construção do produto rodava no padrão neutro.
+            speed = VELOCIDADE_DE_CAMPO,
         )
     }
 
