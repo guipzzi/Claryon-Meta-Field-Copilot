@@ -14,6 +14,7 @@ import com.claryon.field.ui.telas.FalaNoGrupo
 import com.claryon.field.ui.telas.ParPresente
 import com.claryon.net.ClienteDePisoLocal
 import com.claryon.net.CodecDeVoz
+import com.claryon.net.ConfigOpus
 import com.claryon.net.HistoricoDoCanal
 import com.claryon.net.ConfigRealtime
 import com.claryon.net.MediaCodecOpus
@@ -189,6 +190,13 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
                 indicativo = indicativo,
                 transporte = transporte,
                 codec = codec(),
+                // **Derivada do gerente, não constante.** `RadioTatico` tinha
+                // `sampleRateHz = 8_000` como padrão e ninguém sobrescrevia,
+                // enquanto a captura entrega 16 kHz. A voz transmitida saía uma
+                // oitava abaixo com o dobro da duração — o produto não era
+                // demonstrável. Passar a taxa REAL da fonte faz o compilador
+                // sustentar o acordo: se o gerente mudar, isto muda junto.
+                sampleRateHz = audio.taxaDeAmostragemHz,
                 piso = ClienteDePisoLocal(),
                 pcmDoMicrofone = { rotaValida -> audio.microfonePcm(rotaValida) },
                 reproduzir = { pcm, taxa -> audio.reproduzir(pcm, taxa) },
@@ -432,7 +440,21 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
 
     // ── Peças auxiliares ──────────────────────────────────────────────────────
 
-    private fun codec(): CodecDeVoz = MediaCodecOpus()
+    /**
+     * Opus na taxa em que o microfone de fato entrega.
+     *
+     * `ConfigOpus` tem `sampleRateHz = 8_000` como padrão, e usá-lo contra uma
+     * fonte de 16 kHz produzia dois defeitos somados: a fala saía grave e lenta, e
+     * `amostrasPorQuadro = taxa/50` partia cada bloco de 20 ms reais em dois
+     * "quadros", **dobrando a taxa de pacotes na rede**.
+     *
+     * 16 kHz aqui é *contêiner*, não banda larga: o elo HFP até os óculos é 8 kHz
+     * mono por doc oficial do DAT, então acima de 4 kHz não chega informação nova.
+     * O ganho é correção de tom e duração, não fidelidade — e é isso que estava
+     * quebrado.
+     */
+    private fun codec(): CodecDeVoz =
+        MediaCodecOpus(ConfigOpus(sampleRateHz = audio.taxaDeAmostragemHz))
 
     private fun duracaoDoEarcon(earcon: Earcon): Long = when (earcon) {
         Earcon.GRAVANDO -> 2_000L

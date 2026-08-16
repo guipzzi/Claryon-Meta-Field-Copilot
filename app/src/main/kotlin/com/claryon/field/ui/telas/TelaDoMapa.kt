@@ -242,8 +242,8 @@ private fun BotaoRecentrar(aoTocar: () -> Unit, modifier: Modifier = Modifier) {
             .drawBehind {
                 val c = Offset(size.width / 2f, size.height / 2f)
                 val r = size.minDimension / 2f - 14f
-                drawCircle(color = Cores.NoAr, radius = r, center = c, style = Stroke(width = 2f))
-                drawCircle(color = Cores.NoAr, radius = 2.5f, center = c)
+                drawCircle(color = Cores.Tinta, radius = r, center = c, style = Stroke(width = 2f))
+                drawCircle(color = Cores.Tinta, radius = 2.5f, center = c)
                 // Quatro riscos cardeais: é a mira de "centralizar em mim" que a
                 // Uber e o Waze usam, e o agente já lê sem aprender.
                 listOf(
@@ -252,7 +252,7 @@ private fun BotaoRecentrar(aoTocar: () -> Unit, modifier: Modifier = Modifier) {
                     Offset(c.x - r - 5f, c.y) to Offset(c.x - r + 1f, c.y),
                     Offset(c.x + r - 1f, c.y) to Offset(c.x + r + 5f, c.y),
                 ).forEach { (a, b) ->
-                    drawLine(color = Cores.NoAr, start = a, end = b, strokeWidth = 2f)
+                    drawLine(color = Cores.Tinta, start = a, end = b, strokeWidth = 2f)
                 }
             },
     )

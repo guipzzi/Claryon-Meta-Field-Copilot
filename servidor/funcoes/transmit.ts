@@ -12,6 +12,43 @@
 
 import { createClient } from 'jsr:@supabase/supabase-js@2'
 
+// ── Identidade: do JWT, nunca do corpo ────────────────────────────────────────
+//
+// Estas funções recebiam o agente como PARÂMETRO — `author_agent_id` aqui,
+// `agent_id` no ack, `solicitante_id` no locate (apagado). Com o corpo mandando
+// quem é o autor, qualquer portador do APK escrevia transmissão no nome de
+// qualquer agente, confirmava leitura no nome de qualquer agente, e — no locate —
+// trilaterava a posição de qualquer par, reabrindo na borda o que a migração 0006
+// fechou no banco.
+//
+// É a regra dura do projeto: "função de servidor que receba como parâmetro a
+// identidade de quem pergunta" é proibida. A identidade sai do JWT do chamador e
+// é resolvida contra `agents.auth_user_id` — o MESMO caminho que
+// `private.current_agent_id()` usa no banco, para não existirem duas verdades
+// sobre quem é o agente.
+//
+// NÃO se usa `user_metadata`: no Supabase Auth ele é editável pelo próprio
+// usuário. Derivar identidade de lá seria trocar um buraco por outro com nome
+// melhor.
+async function agenteDoJwt(req: Request): Promise<string | null> {
+  const authorization = req.headers.get('Authorization')
+  if (!authorization) return null
+
+  const comoUsuario = createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_ANON_KEY')!,
+    { global: { headers: { Authorization: authorization } } },
+  )
+
+  const { data: { user }, error } = await comoUsuario.auth.getUser()
+  if (error || !user) return null
+
+  const { data } = await comoUsuario
+    .from('agents').select('id').eq('auth_user_id', user.id).maybeSingle()
+  return data?.id ?? null
+}
+
+
 // Raios por prioridade, configuráveis por unidade — densidade urbana e rural
 // exigem valores diferentes.
 const RAIO_POR_PRIORIDADE: Record<number, number> = {
@@ -26,8 +63,14 @@ Deno.serve(async (req) => {
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
   )
 
+  const author_agent_id = await agenteDoJwt(req)
+  if (!author_agent_id) {
+    return Response.json({ erro: 'nao_autenticado' }, { status: 401 })
+  }
+
   const body = await req.json()
-  const { id, author_agent_id, talk_group_id, tipo, prioridade, origem, duracao_ms } = body
+  // `author_agent_id` NÃO sai daqui — ver `agenteDoJwt`.
+  const { id, talk_group_id, tipo, prioridade, origem, duracao_ms } = body
 
   // 1) Idempotência.
   const { data: existente } = await supabase

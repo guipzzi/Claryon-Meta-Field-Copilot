@@ -666,11 +666,24 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
      * (whisper se o modelo estiver em filesDir; senão degrada) → roteador →
      * resposta → TTS → reprodução. É o [VoiceCycle] com os engines reais.
      */
+    /**
+     * `true` enquanto o ciclo está ouvindo ou pensando.
+     *
+     * Derivado do ciclo e não do toque: um estado que muda no toque diria
+     * "ouvindo" mesmo quando a captura falhou ao abrir — que é exatamente o
+     * instante em que o agente precisa saber a verdade.
+     */
+    private val _copilotoOcupado = MutableStateFlow(false)
+    val copilotoOcupado: StateFlow<Boolean> = _copilotoOcupado.asStateFlow()
+
     fun cicloDeVoz() {
         // Fora da Main: o VAD calcula RMS de 50 janelas/s e o STT carrega um
         // modelo de ~75 MB. Na Main isso congela a UI e arrisca ANR justamente
         // na janela em que a meta é responder em ≤ 2,0 s.
+        if (_copilotoOcupado.value) return
         viewModelScope.launch(Dispatchers.Default) {
+            _copilotoOcupado.value = true
+            try {
             // Duas capturas simultâneas abririam dois AudioRecord na mesma fonte
             // de comunicação — a segunda falha ao inicializar ou rouba o fluxo da
             // primeira, e o que se perde é evidência. O caminho definitivo é uma
@@ -747,6 +760,13 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
                     saida.emitir(utteranceFor(ActionOutcome.NaoEntendi))
                     "ciclo: sem fala detectada (8 s)"
                 }
+            }
+            } finally {
+                // `finally` e nao no fim do corpo: os cinco `return@launch` de
+                // recusa saltam daqui, e sem isto o botao ficaria travado em
+                // "OUVINDO..." para sempre no primeiro caminho de falha —
+                // exatamente o caso em que o agente mais precisa tentar de novo.
+                _copilotoOcupado.value = false
             }
         }
     }

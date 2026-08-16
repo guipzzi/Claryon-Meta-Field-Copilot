@@ -116,6 +116,7 @@ private fun Operacao(
     val falas by radio.falas.collectAsState()
     val pares by radio.pares.collectAsState()
     val noAr by radio.noAr.collectAsState()
+    val copilotoOcupado by diag.copilotoOcupado.collectAsState()
     val estadoMapa by diag.estadoDoMapa.collectAsState()
     val registro by diag.registration.collectAsState()
 
@@ -159,6 +160,11 @@ private fun Operacao(
                 estadoDoPtt = estadoPtt,
                 aoPressionarPtt = radio::aoPressionar,
                 aoSoltarPtt = radio::aoSoltar,
+                // O ciclo de voz ganha porta de entrada. Estava pronto, testado e
+                // inalcançável desde o commit d888970: o único chamador vivia numa
+                // tela que não é composta.
+                aoAbrirCopiloto = diag::cicloDeVoz,
+                copilotoOcupado = copilotoOcupado,
                 modifier = modifier,
             )
 

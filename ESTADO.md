@@ -1,4 +1,4 @@
-# Onde estamos — 2026-08-16 · `e181789`+
+# Onde estamos — 2026-08-16 · `00a8d0d`+ (Fase 0 parcial)
 
 Fonte única de "estado da conversa". **Reescrito ao fim de cada sessão, nunca acrescentado.**
 Teto duro: **60 linhas**. O que não couber é história e vai para `DECISIONS.md`. Aqui só
@@ -23,7 +23,9 @@ entra o que muda a próxima decisão: o que funciona, o que está quebrado, o qu
 
 ## O que está quebrado, e nós sabemos
 
-0. **O PTT NÃO É DEMONSTRÁVEL HOJE.** `RadioTatico.kt:88` tem `sampleRateHz = 8_000` como
+0. ~~PTT não demonstrável~~ **RESOLVIDO** — `RadioViewModel` passa
+   `sampleRateHz = audio.taxaDeAmostragemHz` e `ConfigOpus` deriva da mesma fonte. Travado
+   por `TaxaDeAmostragemTest`. ~~O PTT NÃO ERA DEMONSTRÁVEL.~~ `RadioTatico.kt:88` tem `sampleRateHz = 8_000` como
    padrão e `RadioViewModel` não sobrescreve, enquanto a captura entrega 16 kHz. A voz
    transmitida sai **uma oitava abaixo, com o dobro da duração**. Meia sessão de conserto,
    e é a maior alavanca do projeto.
@@ -34,7 +36,10 @@ entra o que muda a próxima decisão: o que funciona, o que está quebrado, o qu
    A superfície visível do Pilar 1 está vazia em produção.
 0c. `AgrupadorDeQuadros` **não existe no repositório**, apesar de `Transmissao.kt:28` afirmar
    que existe. São 50 mensagens/s de ~300 B para 30 B de voz.
-1. **O ciclo de voz não tem porta de entrada.** `DiagnosticsScreen` é a única tela que chama
+1. ~~Ciclo de voz sem porta de entrada~~ **RESOLVIDO** — botão "Perguntar ao copiloto" em
+   `TelaDeGuarnicao`, ligado a `diag::cicloDeVoz`. Verificado no emulador: o botão vira
+   "OUVINDO…", o ciclo roda e o `finally` devolve o botão. **Era o defeito mais caro do
+   projeto.** ~~Antes:~~ `DiagnosticsScreen` é a única tela que chama
    `runCommand`/`falarComando`/`cicloDeVoz`, e o nome só aparece uma vez no projeto: na
    própria definição (`ui/DiagnosticsScreen.kt:48`). C2, C3 e C4 estão mortos por voz; o app
    entregue é 100% toque, que é o oposto da premissa do produto.

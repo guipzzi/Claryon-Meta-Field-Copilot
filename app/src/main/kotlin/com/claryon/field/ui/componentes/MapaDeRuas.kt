@@ -55,6 +55,10 @@ import org.maplibre.android.maps.Style
  * `MapView` lança no construtor se a inicialização não tiver acontecido, e o
  * `remember` que a constrói roda durante a composição, antes de qualquer efeito.
  *
+ * O símbolo do portador usa `Cores.Vivo`, não `NoAr`: âmbar significa "você está
+ * no ar", e estar no mapa não é estar transmitindo. Cor de uso único perde o uso
+ * assim que aparece em dois lugares.
+ *
  * **Assinaturas conferidas por `javap` no AAR real** (`android-sdk-11.11.0.aar`,
  * `classes.jar`), não de memória — Regra Zero vale para toda dependência, não só
  * para o DAT.
@@ -417,7 +421,7 @@ private fun setaDoPortador(rumoGraus: Float?, giroDaTela: Double): Bitmap {
 
     // Halo de precisão: sugere "por aqui", não "exatamente aqui".
     c.drawCircle(centro, centro, 26f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Cores.NoAr.toArgb()
+        color = Cores.Vivo.toArgb()
         alpha = 38
     })
     // Anel escuro por baixo do disco: sobre rua clara, branco em branco some.
@@ -429,7 +433,7 @@ private fun setaDoPortador(rumoGraus: Float?, giroDaTela: Double): Bitmap {
     })
 
     if (rumoGraus != null && rumoGraus.isFinite()) {
-        val tinta = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Cores.NoAr.toArgb() }
+        val tinta = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Cores.Vivo.toArgb() }
         c.save()
         // **Zero, não `rumoGraus`.** Quem gira agora é a câmera: com a tela já
         // orientada pelo deslocamento, a seta desenhada no rumo giraria duas
@@ -452,7 +456,7 @@ private fun setaDoPortador(rumoGraus: Float?, giroDaTela: Double): Bitmap {
     } else {
         // Sem rumo: disco cheio. Diz "estou aqui" e cala sobre a direção.
         c.drawCircle(centro, centro, 6f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Cores.NoAr.toArgb()
+            color = Cores.Vivo.toArgb()
         })
     }
     return bmp

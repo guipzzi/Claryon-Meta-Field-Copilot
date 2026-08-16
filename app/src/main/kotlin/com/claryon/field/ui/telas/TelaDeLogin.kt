@@ -200,7 +200,7 @@ private fun Marca() {
                 )
                 val x = size.width * posicao
                 drawLine(
-                    color = Cores.NoAr.copy(alpha = 0.5f),
+                    color = Cores.TracoForte,
                     start = Offset(x - 40f, y),
                     end = Offset(x, y),
                     strokeWidth = 2f,
@@ -237,7 +237,7 @@ private fun CampoTatico(
                 unfocusedBorderColor = Cores.Traco,
                 focusedTextColor = Cores.Tinta,
                 unfocusedTextColor = Cores.Tinta,
-                cursorColor = Cores.NoAr,
+                cursorColor = Cores.Tinta,
                 focusedContainerColor = Cores.Painel,
                 unfocusedContainerColor = Cores.Painel,
                 disabledContainerColor = Cores.Painel,

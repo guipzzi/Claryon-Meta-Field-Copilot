@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import android.util.Log
+import androidx.core.content.ContextCompat
 import androidx.core.app.NotificationCompat
 import com.claryon.agent.ModoOperacao
 import com.claryon.agent.PowerPolicy
@@ -77,6 +78,13 @@ class CopilotService : Service() {
         // o operador decidir; o modo é uma escolha explícita, não um padrão.
         if (intent == null) {
             Log.w(TAG, "Serviço recriado pelo sistema sem intent — encerrando (não reabre o microfone)")
+            // `startForeground` ANTES de `stopSelf`, e não é cerimônia: quando o
+            // sistema entrega um `onStartCommand` originado de
+            // `startForegroundService`, ele exige a notificação dentro de ~5 s ou
+            // mata o processo com `ForegroundServiceDidNotStartInTimeException`.
+            // Sair sem promover é um caminho de encerramento que derruba o app —
+            // e derruba justamente na recriação, quando ninguém está olhando.
+            entrarEmPrimeiroPlano(ModoOperacao.STANDBY)
             stopSelf()
             return START_NOT_STICKY
         }
@@ -86,6 +94,8 @@ class CopilotService : Service() {
             ?: ModoOperacao.ATIVO
 
         if (modo == ModoOperacao.STANDBY && intent.action == ACAO_PARAR) {
+            // Mesma razão do bloco acima: promover e só então encerrar.
+            entrarEmPrimeiroPlano(ModoOperacao.STANDBY)
             stopSelf()
             return START_NOT_STICKY
         }
@@ -212,7 +222,12 @@ class CopilotService : Service() {
             val i = Intent(context, CopilotService::class.java)
                 .setAction(ACAO_PARAR)
                 .putExtra(EXTRA_MODO, ModoOperacao.STANDBY.name)
-            context.startService(i)
+            // `startForegroundService` e não `startService`: a partir do Android 8
+            // um serviço em primeiro plano só pode ser iniciado por este caminho
+            // quando o app está em background, e `parar()` é chamado exatamente
+            // dali. `startService` lançaria `IllegalStateException` — o pedido de
+            // PARAR derrubando o app.
+            ContextCompat.startForegroundService(context, i)
         }
 
         /**

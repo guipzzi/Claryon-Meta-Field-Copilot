@@ -4,6 +4,8 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.slideInVertically
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -104,6 +106,23 @@ fun TelaDeGuarnicao(
     estadoDoPtt: EstadoDoPtt,
     aoPressionarPtt: () -> Unit,
     aoSoltarPtt: () -> Unit,
+    /**
+     * Abre o ciclo de voz do copiloto: captura → VAD → Whisper → roteador →
+     * executor → resposta falada.
+     *
+     * **Este parâmetro é a correção do defeito mais caro do projeto.** O ciclo
+     * inteiro estava pronto, testado e **inalcançável**: o único chamador de
+     * `cicloDeVoz` vivia em `DiagnosticsScreen`, que não é composta em lugar
+     * nenhum. C2, C3 e C4 eram indemonstráveis por voz — num produto cuja
+     * premissa é operação por voz.
+     *
+     * O botão não é o desenho final; o final é "Hey Claryon". É o caminho
+     * alcançável que prova que a capacidade existe, e ele vem antes porque
+     * "construir, testar e não ligar" já aconteceu seis vezes aqui.
+     */
+    aoAbrirCopiloto: () -> Unit,
+    /** `true` enquanto o ciclo está ouvindo ou pensando. Trava o botão. */
+    copilotoOcupado: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier.fillMaxSize()) {
@@ -122,6 +141,7 @@ fun TelaDeGuarnicao(
             }
         }
 
+        BotaoDoCopiloto(aoAbrirCopiloto, copilotoOcupado)
         BarraDePtt(estadoDoPtt, aoPressionarPtt, aoSoltarPtt)
     }
 }
@@ -180,7 +200,11 @@ private fun ReguaDePresenca(canal: String, pares: List<ParPresente>) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     PontoDeEstado(
                         cor = when {
-                            p.falando -> Cores.NoAr
+                            // `Vivo` e nao `NoAr`: ambar significa "VOCE esta no
+                            // ar". Um par transmitindo e presenca ativa, nao voce
+                            // comprometendo o canal — e se as duas coisas usarem a
+                            // mesma cor, a que importa deixa de saltar.
+                            p.falando -> Cores.Vivo
                             p.online -> Cores.Vivo
                             else -> Cores.TintaFraca
                         },
@@ -226,6 +250,44 @@ private fun HistoricoDeFalas(falas: List<FalaNoGrupo>) {
             item.faixaHoraria?.let { SeparadorDeHora(it) }
             RegistroDeTrafego(item)
         }
+    }
+}
+
+/**
+ * O botão do copiloto.
+ *
+ * Fica **acima** da barra de PTT e visivelmente menor, e a hierarquia é
+ * deliberada: falar com a guarnição é a ação de maior consequência da tela, e o
+ * polegar tem de encontrar o PTT sem olhar. O copiloto é consulta — importante,
+ * mas nunca urgente do mesmo jeito.
+ *
+ * Sem cor própria. Cor já significa prioridade e transmissão neste painel, e uma
+ * terceira gramática cromática faria as três perderem sentido. O que distingue o
+ * botão é a superfície, como no bloco de fala.
+ */
+@Composable
+private fun BotaoDoCopiloto(aoTocar: () -> Unit, ocupado: Boolean) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(Cores.Painel)
+            .clickable(
+                enabled = !ocupado,
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = aoTocar,
+            )
+            .padding(horizontal = Espaco.Padrao, vertical = Espaco.Medio),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Etiqueta(
+            if (ocupado) "OUVINDO…" else "PERGUNTAR AO COPILOTO",
+            cor = if (ocupado) Cores.Vivo else Cores.TintaMedia,
+        )
+        // O estado vem do ciclo, não do toque: um rótulo que muda no toque diria
+        // "ouvindo" mesmo quando a captura falhou ao abrir.
+        Etiqueta(if (ocupado) "" else "voz", cor = Cores.TintaFraca)
     }
 }
 
