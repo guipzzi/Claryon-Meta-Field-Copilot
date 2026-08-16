@@ -26,7 +26,7 @@ import org.json.JSONObject
  *
  * **A identidade não vai no corpo.** `author_agent_id` sai do JWT dentro da
  * função, contra `agents.auth_user_id`. Mandá-la daqui foi o defeito que permitia
- * escrever transmissão no nome de qualquer agente — ver `servidor/funcoes/transmit.ts`.
+ * escrever transmissão no nome de qualquer agente — ver `supabase/functions/transmit/index.ts`.
  */
 class RegistroDeTransmissao(
     private val config: ConfigRealtime,

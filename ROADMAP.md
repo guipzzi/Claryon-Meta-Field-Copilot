@@ -94,7 +94,7 @@ sessão sobre um app que já funciona; não é entrega e não dita prioridade.
   --include=*.kt` devolve zero, logo `transmissions` nunca recebe INSERT e
   `HistoricoDoCanal.falas()` devolve lista vazia **sempre**: o fio do canal mostra só
   inserções otimistas que somem na recarga — esforço: 1 sessão — depende: nada.
-- [SEG] Deletar `servidor/funcoes/locate.ts` e derivar identidade do JWT em `transmit.ts`
+- [SEG] Deletar `supabase/functions/locate (apagada)` e derivar identidade do JWT em `transmit.ts`
   e `ack.ts`. `locate.ts:21-23` aceita `solicitante_id` do corpo e chama
   `private.posicao_relativa` com `service_role`, reabrindo na borda a trilateração que a
   migração 0006 fechou no banco — violação direta de regra dura do `AGENTS.md` — esforço:
@@ -126,7 +126,7 @@ reproduzida em tom e duração corretos — verificável por espectrograma compa
 e saída, com o pico de F0 dentro de 5% do original. (b) Um toque no botão "Copiloto"
 produz resposta falada sem outro toque. (c) O fio do canal exibe a fala vinda de
 `transmissions` **depois de recarregar a tela** — prova de que a Edge Function foi
-chamada. (d) `grep -r "locate" servidor/funcoes/` não devolve arquivo. (e) `grep -rn
+chamada. (d) `grep -r "locate" supabase/functions/` não devolve arquivo. (e) `grep -rn
 "Cores.NoAr" app/src/main` só aparece em código de transmissão. (f) Documento e deck
 enviados até 22/08, cada afirmação de capacidade correspondendo a um caminho alcançável.
 
@@ -589,7 +589,7 @@ falham lá.
   em `:215`. Duas linhas, e o aparelho do dia é de OEM que a equipe não escolhe.
 - **`locate.ts` aceitando `solicitante_id` do corpo** e chamando `private.posicao_relativa`
   com `service_role`. Anula na borda a garantia que a migração 0006 construiu no banco.
-  Meia sessão para apagar; a nota inteira se a banca abrir `servidor/funcoes/`.
+  Meia sessão para apagar; a nota inteira se a banca abrir `supabase/functions/`.
 - **Indicativo como string livre não verificada** no protocolo. Personificação é possível
   hoje, e `RadioTatico` confia cegamente em `autorIndicativo` e `prioridade` para disparar o
   earcon que toma o canal.

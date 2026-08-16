@@ -1,0 +1,16 @@
+# Configuração mínima do CLI do Supabase.
+#
+# Existe só para o `supabase functions deploy` encontrar o projeto e o layout.
+# As migrações continuam sendo aplicadas por `servidor/executar_sql.py`, que usa
+# a Management API e não depende do CLI — quem já tem aquele caminho funcionando
+# não precisa trocar.
+project_id = "dzrhfghbldwvycysnzpb"
+
+[functions.transmit]
+# Sem verificação de JWT pelo gateway: a função faz a verificação ELA MESMA, em
+# `agenteDoJwt`, resolvendo `auth.getUser()` contra `agents.auth_user_id`. Deixar
+# o gateway barrar antes esconderia o 401 tipado que o cliente espera.
+verify_jwt = false
+
+[functions.ack]
+verify_jwt = false
