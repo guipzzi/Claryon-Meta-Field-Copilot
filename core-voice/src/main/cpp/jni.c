@@ -163,7 +163,8 @@ Java_com_whispercpp_whisper_WhisperLib_00024Companion_freeContext(
 
 JNIEXPORT void JNICALL
 Java_com_whispercpp_whisper_WhisperLib_00024Companion_fullTranscribe(
-        JNIEnv *env, jobject thiz, jlong context_ptr, jint num_threads, jfloatArray audio_data) {
+        JNIEnv *env, jobject thiz, jlong context_ptr, jint num_threads, jint audio_ctx,
+        jfloatArray audio_data) {
     UNUSED(thiz);
     struct whisper_context *context = (struct whisper_context *) context_ptr;
     jfloat *audio_data_arr = (*env)->GetFloatArrayElements(env, audio_data, NULL);
@@ -189,9 +190,63 @@ Java_com_whispercpp_whisper_WhisperLib_00024Companion_fullTranscribe(
     // de a corporação ser brasileira, o que torna a dúvida desnecessária.
     params.language = "pt";
     params.n_threads = num_threads;
+
+    // **A janela do encoder, encurtada para o tamanho da fala.**
+    //
+    // O Whisper processa SEMPRE 30 segundos: `whisper.cpp:3203` preenche o
+    // restante com zeros ("pad 30 seconds of zeros at the end of audio"), e o
+    // encoder roda sobre `n_audio_ctx = 1500` posições (`whisper.cpp:592`)
+    // independentemente de a fala ter 2 s ou 30. Um comando de dois segundos
+    // pagava a inferência inteira de trinta.
+    //
+    // `params.audio_ctx` sobrescreve isso; o máximo permitido é o do modelo e o
+    // próprio whisper recusa valor maior (`whisper.cpp:6983-6987`). Zero = padrão.
+    //
+    // Medido no emulador antes desta mudança: 18 000 a 48 000 ms de STT para 2 s
+    // de fala, contra uma meta de 2 000 ms para o ciclo TODO.
+    //
+    // Quem calcula o valor é o lado Kotlin, que sabe a duração — ver
+    // `LibWhisper.transcribeData`. Aqui só se repassa, e zero preserva o
+    // comportamento anterior para qualquer chamador que não queira opinar.
+    if (audio_ctx > 0) {
+        params.audio_ctx = audio_ctx;
+    }
     params.offset_ms = 0;
     params.no_context = true;
-    params.single_segment = false;
+
+    // **Enunciado único, e não é só desempenho.**
+    //
+    // Fala de rádio é uma frase curta, não um discurso. Deixar o whisper abrir
+    // vários segmentos num comando de dois segundos gasta decodificação e abre a
+    // porta para o laço de repetição — a alucinação clássica dele em áudio curto.
+    params.single_segment = true;
+
+    // **O léxico do domínio como viés, e o header confirma o campo.**
+    //
+    // `initial_prompt` (`whisper.h:527`) enfileira tokens no decoder e enviesa a
+    // probabilidade de palavra. Não é lista de palavras obrigatórias — é prior.
+    //
+    // Por que isto importa AQUI: medido no aparelho, "guarnição" virou "nissan",
+    // "agora nisso são" e "agora a inição". Quando as pistas espectrais de /s/ e
+    // /ɐ̃w/ não chegam pelo HFP de 8 kHz, o modelo decide por probabilidade — e é
+    // exatamente onde ter "guarnição" no prior pode ganhar de "nissan".
+    //
+    // **`no_context = true` NÃO anula isto.** Em `whisper.cpp:6937-6940` o
+    // `prompt_past.clear()` roda ANTES do bloco 6961-6979 que empilha o prompt:
+    // a ordem é limpa-depois-empilha. Verificado na fonte, não suposto — era a
+    // dúvida óbvia e ela tem resposta.
+    //
+    // Curto de propósito: os tokens do prompt entram no KV cache e são
+    // recomputados a cada iteração (há um `// TODO: do not recompute the prompt`
+    // em `whisper.cpp:7123`). Uma dezena de palavras, as que o domínio exige.
+    params.initial_prompt =
+        "Central, guarnicao, ocorrencia, viatura, deslocamento, apoio, Sargento, Claryon.";
+
+    // Tokens de não-fala suprimidos. O campo é `suppress_nst` (`whisper.h:538`) —
+    // o nome `suppress_non_speech_tokens` NÃO existe neste vendorizado e não
+    // compila. Em viatura com sirene e vento, o decoder tende a produzir "(música)"
+    // e "♪", que estão justamente nessa lista.
+    params.suppress_nst = true;
 
     whisper_reset_timings(context);
 

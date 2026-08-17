@@ -24,8 +24,26 @@ import kotlinx.coroutines.withContext
  */
 object Modelos {
 
-    const val WHISPER_ASSET = "models/ggml-tiny.bin"
-    const val WHISPER_ARQUIVO = "ggml-tiny.bin"
+    /**
+     * **`base-q5_1` e não `tiny`, e a troca é almoço grátis.**
+     *
+     * Medido, não estimado: 59 707 625 B contra 77 691 713 B do `tiny` — o APK
+     * **encolhe 17,2 MiB**. E a WER em português cai de **20,1 para 13,0** em
+     * FLEURS `pt_br` (Tabela 13 do paper do Whisper, arXiv:2212.04356), −35%
+     * relativo, com CommonVoice 9 e MLS concordando na direção e na magnitude.
+     *
+     * Menor e melhor ao mesmo tempo, porque o `tiny` estava em fp16 e este está
+     * quantizado em q5_1. Não havia argumento para manter o `tiny`.
+     *
+     * Licença MIT nas duas camadas: pesos `openai/whisper` e o repositório de
+     * distribuição `ggerganov/whisper.cpp`. *Tamanho conferido byte a byte no
+     * download em 2026-08-17.*
+     *
+     * O que a troca NÃO resolve: o front-end continua sendo 80 mel bins até 8 kHz
+     * treinado em banda cheia, então áudio HFP segue fora do domínio de treino.
+     */
+    const val WHISPER_ASSET = "models/ggml-base-q5_1.bin"
+    const val WHISPER_ARQUIVO = "ggml-base-q5_1.bin"
 
     /** Diretório do Piper dentro de `assets/` (o TTS carrega a pasta inteira). */
     const val PIPER_ASSET_DIR = "models/vits-piper-pt_BR-faber-medium-int8"

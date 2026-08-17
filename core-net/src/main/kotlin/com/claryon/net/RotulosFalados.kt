@@ -101,16 +101,37 @@ class RotulosFalados(
     companion object {
         /**
          * Normaliza para a forma em que o léxico é comparado: minúsculas, sem
-         * acento, espaços colapsados.
+         * acento, **sem pontuação**, espaços colapsados.
          *
          * A mesma função tem de ser usada nos DOIS lados — no que vem do STT e no
          * que veio do servidor. Normalizar só um lado é como não normalizar: a
          * comparação falha em silêncio e o agente conclui que o produto não
          * entende português.
+         *
+         * ## A pontuação não estava aqui, e isso quebrava a feature inteira
+         *
+         * Medido no aparelho em 2026-08-17: o agente disse *"Claryon, mudar para
+         * guarnição quatro"* e o Whisper devolveu **"...guarnição 4."** — com ponto
+         * final, que é o que todo decodificador de STT produz no fim de frase. Sem
+         * remover pontuação, `"guarnicao 4."` nunca casa `"guarnicao 4"`, e a troca
+         * de grupo por voz recusava **toda** troca com "Não conheço essa
+         * guarnição". Nenhum teste de unidade pegava: todos alimentavam rótulos
+         * limpos, escritos à mão.
+         *
+         * Achado pelo `VerificadorDoGatilhoTest`, que é exatamente a diferença
+         * entre testar cada elo e testar a corrente.
+         *
+         * **Dígito NÃO é colapsado**, de propósito: o léxico do servidor grava
+         * `'guarnicao 3'` (migração `0011:93`) e o Whisper também produz dígito, então
+         * os dois lados convergem. Traduzir "três" ↔ "3" aqui seria inventar uma
+         * equivalência que o cadastro não pediu — e "três" versus "treze" é a
+         * diferença entre duas viaturas.
          */
         fun normalizar(texto: String): String =
             java.text.Normalizer.normalize(texto.lowercase().trim(), java.text.Normalizer.Form.NFD)
                 .replace(Regex("\\p{Mn}+"), "")
+                .replace(Regex("[\\p{Punct}…“”‘’—–]+"), " ")
                 .replace(Regex("\\s+"), " ")
+                .trim()
     }
 }

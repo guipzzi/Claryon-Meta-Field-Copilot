@@ -8,6 +8,19 @@ import java.io.File
 import java.io.InputStream
 import java.util.concurrent.Executors
 
+// ── Dimensionamento da janela do encoder ─────────────────────────────────────
+// Derivados de `whisper.h` e `whisper.cpp` no artefato vendorizado, não de
+// memória. Ver o KDoc de `WhisperContext.audioCtxPara`.
+
+/** `WHISPER_HOP_LENGTH` (160, `whisper.h:35`) × stride 2 das convoluções. */
+private const val AMOSTRAS_POR_POSICAO = 320
+
+/** `GGML_PAD(n_audio_ctx, 256)` (`whisper.cpp:2487`): abaixo disto não se ganha. */
+private const val AUDIO_CTX_MINIMO = 256
+
+/** `n_audio_ctx` do modelo (`whisper.cpp:592`). Acima disto o whisper retorna -5. */
+private const val AUDIO_CTX_MAXIMO = 1500
+
 private const val LOG_TAG = "LibWhisper"
 
 class WhisperContext private constructor(private var ptr: Long) {
@@ -16,11 +29,47 @@ class WhisperContext private constructor(private var ptr: Long) {
         Executors.newSingleThreadExecutor().asCoroutineDispatcher()
     )
 
+    /**
+     * **A janela do encoder, dimensionada pela fala em vez de por trinta segundos.**
+     *
+     * O Whisper preenche a entrada com zeros até 30 s (`whisper.cpp:3203`) e o
+     * encoder roda sobre `n_audio_ctx = 1500` posições (`whisper.cpp:592`) —
+     * mesmo para um comando de dois segundos. Medido no emulador: **18 000 a
+     * 48 000 ms** de STT para 2,1 s de fala, contra a meta de 2 000 ms do ciclo
+     * inteiro.
+     *
+     * A conta sai das constantes do artefato, não de memória: `WHISPER_HOP_LENGTH`
+     * é 160 (`whisper.h:35`) e as convoluções do encoder têm stride 2, logo
+     * **uma posição de contexto = 320 amostras**. Confere com o padrão:
+     * 30 s × 16 kHz ÷ 320 = 1500. *Derivado de `whisper.h` e `whisper.cpp` em
+     * 2026-08-17.*
+     *
+     * ## Os dois limites, e por que existem
+     *
+     * **Piso de 256:** `whisper.cpp:2487` faz `GGML_PAD(n_audio_ctx, 256)`, então
+     * qualquer valor abaixo de 256 é arredondado para cima na alocação e não compra
+     * nada. 256 posições = ~5,1 s, que cobre qualquer comando do produto com folga.
+     *
+     * **Teto de 1500:** é o do modelo, e o próprio whisper recusa valor maior
+     * (`whisper.cpp:6983-6987`, retorna -5). Áudio mais longo que 30 s é fatiado
+     * pelo whisper de qualquer forma.
+     *
+     * A margem de 10% existe porque o espectrograma acrescenta *reflective pad* no
+     * fim (`whisper.cpp:3203`) e cortar exatamente no último quadro de fala
+     * arriscaria truncar a última sílaba — que em português é onde vive a flexão.
+     */
+    private fun audioCtxPara(amostras: Int): Int {
+        val posicoes = (amostras + AMOSTRAS_POR_POSICAO - 1) / AMOSTRAS_POR_POSICAO
+        val comMargem = (posicoes * 11) / 10
+        return comMargem.coerceIn(AUDIO_CTX_MINIMO, AUDIO_CTX_MAXIMO)
+    }
+
     suspend fun transcribeData(data: FloatArray, printTimestamp: Boolean = true): String = withContext(scope.coroutineContext) {
         require(ptr != 0L)
         val numThreads = WhisperCpuConfig.preferredThreadCount
-        Log.d(LOG_TAG, "Selecting $numThreads threads")
-        WhisperLib.fullTranscribe(ptr, numThreads, data)
+        val audioCtx = audioCtxPara(data.size)
+        Log.d(LOG_TAG, "Selecting $numThreads threads, audio_ctx=$audioCtx")
+        WhisperLib.fullTranscribe(ptr, numThreads, audioCtx, data)
         val textCount = WhisperLib.getTextSegmentCount(ptr)
         return@withContext buildString {
             for (i in 0 until textCount) {
@@ -134,7 +183,12 @@ private class WhisperLib {
         external fun initContextFromAsset(assetManager: AssetManager, assetPath: String): Long
         external fun initContext(modelPath: String): Long
         external fun freeContext(contextPtr: Long)
-        external fun fullTranscribe(contextPtr: Long, numThreads: Int, audioData: FloatArray)
+        external fun fullTranscribe(
+            contextPtr: Long,
+            numThreads: Int,
+            audioCtx: Int,
+            audioData: FloatArray,
+        )
         external fun getTextSegmentCount(contextPtr: Long): Int
         external fun getTextSegment(contextPtr: Long, index: Int): String
         external fun getTextSegmentT0(contextPtr: Long, index: Int): Long
