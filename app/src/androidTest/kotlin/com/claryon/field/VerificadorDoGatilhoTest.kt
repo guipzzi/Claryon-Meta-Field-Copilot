@@ -80,18 +80,21 @@ class VerificadorDoGatilhoTest {
         return audio?.let { reamostrar(it.samples, it.sampleRateHz, taxa) }
     }
 
-    private fun reamostrar(entrada: ShortArray, de: Int, para: Int): ShortArray {
-        if (de == para) return entrada
-        val saida = ShortArray((entrada.size.toLong() * para / de).toInt())
-        for (i in saida.indices) {
-            val pos = i.toDouble() * de / para
-            val a = pos.toInt().coerceIn(0, entrada.size - 1)
-            val b = (a + 1).coerceAtMost(entrada.size - 1)
-            val f = pos - a
-            saida[i] = (entrada[a] * (1 - f) + entrada[b] * f).toInt().toShort()
-        }
-        return saida
-    }
+    /**
+     * **`PcmResampler.resample` e NÃO uma interpolação linear escrita à mão.**
+     *
+     * Esta função era um reamostrador linear meu, repetido em seis benches — e
+     * linear é um filtro anti-aliasing péssimo. O Piper sintetiza a 22 050 Hz e o
+     * barramento é 16 000: descer sem filtro **dobra 8–11 kHz para dentro da banda
+     * de voz**, exatamente onde vivem as fricativas que distinguem consoantes.
+     *
+     * O projeto já tinha resolvido isso em `801df29` ("Anti-aliasing na voz"), com
+     * um FIR de 63 tapes e janela de Hamming antes do decimador — e o KDoc do
+     * próprio `PcmResampler` avisa que `resampleLinear` não filtra. Eu reintroduzi
+     * o defeito na bancada e passei a medir o meu aliasing em vez do ASR.
+     */
+    private fun reamostrar(entrada: ShortArray, de: Int, para: Int): ShortArray =
+        com.claryon.common.PcmResampler.resample(entrada, de, para)
 
     /**
      * Quadros de 320 amostras, como a captura real entrega, com silêncio em volta.
