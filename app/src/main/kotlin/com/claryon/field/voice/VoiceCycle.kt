@@ -70,9 +70,18 @@ class VoiceCycle(
         val cicloId = novoCicloId()
         val segmento = vad.segment(pcmInput()).first() // 1ª janela fechada pelo VAD
 
-        // Este é o zero de todas as metas de latência do ciclo: o instante em
-        // que o agente PAROU de falar. Tudo depois disso é espera dele.
-        telemetria.mark(cicloId, Telemetry.Stage.VAD_WINDOW_CLOSED, agoraMs())
+        // **O zero de todas as metas de latência do ciclo — descontado.**
+        //
+        // O que se sabe aqui é que a JANELA fechou; o agente parou de falar um
+        // hangover antes disso (600 ms no detector por energia). Cravar o zero no
+        // fechamento produziria um número consistentemente otimista em ~600 ms, e
+        // internamente coerente — nenhum teste acusaria, e o relatório mostraria
+        // uma meta batida que na régua do agente não foi.
+        telemetria.mark(
+            cicloId,
+            Telemetry.Stage.VAD_WINDOW_CLOSED,
+            agoraMs() - segmento.silencioFinalMs,
+        )
 
         // Earcon IMEDIATO, antes do STT: confirma escuta enquanto a ação corre.
         emitir(Utterance.Sinalizar(Earcon.OUVI_VOCE, Priority.RESPOSTA))

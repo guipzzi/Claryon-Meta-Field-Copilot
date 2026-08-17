@@ -229,10 +229,12 @@ Os 500 ms não são escolha de conforto. **Verificado por mim no artefato**
 `KeywordSpotterKt.class`): os presets referenciados por `getKwsModelConfig` são
 `sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01` e
 `sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01`, e **os dois** carregam
-`encoder/decoder/joiner-epoch-12-avg-2-chunk-16-left-64.onnx`. A doc do sherpa atribui
-320 ms de latência algorítmica ao chunk-16 contra 160 ms ao chunk-8 — **número que ainda
-não reconferi na fonte nesta sessão e que precisa de confirmação antes de virar linha de
-spec**. Se ele se confirmar, um alvo de 300 ms é impossível por construção com estes
+`encoder/decoder/joiner-epoch-12-avg-2-chunk-16-left-64.onnx`. O número de 320 ms de latência algorítmica para o
+chunk-16 **foi procurado no artefato em 17/08 e NÃO EXISTE lá**: ele não deriva do nome do
+arquivo e o AAR não o contém. Segue NÃO VERIFICADO, e não pode virar linha de spec.
+E mesmo confirmado ele não responderia a pergunta certa — 320 ms seria só o enchimento de
+chunk; o relógio da meta ainda paga buffer do SCO/HFP, fbank, e o compute de encoder+joiner
+no aparelho. O que a meta precisa é de **medição**, não de documentação. Se ele se confirmar, um alvo de 300 ms é impossível por construção com estes
 artefatos, e descer dele exige um modelo chunk-8 que os presets do AAR não trazem.
 
 **Correção de fato na spec, antes de qualquer diff.** `specs/gatilho-por-voz.spec.md`
@@ -265,14 +267,16 @@ caminho real — ainda que com recall desconhecido em pt-BR.
 - [P3] KWS como adiantamento do earcon, atrás de flag, com o preset inglês e a grafia
   fonética de "Claryon". Último item da fase porque é o único que sai sem quebrar nada —
   esforço: 1 sessão — depende: verificador funcionando.
-- [P1] Seleção de talk group por voz, em três diffs: migração `0012` com coluna
+- [P1] Seleção de talk group por voz, em três diffs: migração `0011` com coluna
   `rotulo_falado text` única por `unit_id` em `talk_groups` (nunca derivar o número por
   substring de `nome` — `'GTA-3 Alfa'` casaria "3" por acidente); carga do mapa
   `{rotulo_falado → id}` no login, que a RLS já limita ao que o agente pode ver; e
   `RadioTatico.trocarDeGrupo(id)` reconectando o transporte **sem tocar em `AudioDoAgente`**
   — esforço: 2 sessões — depende: verificador.
-- [P1] Matar o canal fixo: `CANAL_DEMO` e `NOME_DO_CANAL` em `MainActivity.kt:236-237` e o
-  fallback morto `TALK_GROUP_PADRAO = "demo"` em `RadioViewModel.kt:450` — esforço: 0,3
+- [P1] Matar o canal fixo: `CANAL_DEMO` e `NOME_DO_CANAL` em `MainActivity` e o
+  fallback `TALK_GROUP_PADRAO` em `RadioViewModel` — **mais** `TALK_GROUP_DEMO` em
+  `MapaViewModel`, um terceiro literal gêmeo que a auditoria achou: hoje o mapa e o rádio
+  apontam para o mesmo UUID por digitação, não por referência — esforço: 0,3
   sessão — depende: seleção por voz.
 - [P3] Recusa honesta e audível: falar um grupo a que o agente não pertence responde "você
   não é da guarnição 3", não silêncio. Descarte silencioso é para gatilho não reconhecido;
@@ -281,10 +285,11 @@ caminho real — ainda que com recall desconhecido em pt-BR.
   fala, não ausência da fala do agente* — o isolamento depende do beamforming dos óculos.
   Parada por toque continua existindo e é a única que não depende do microfone — esforço:
   0,5 sessão — depende: VAD.
-- [P1] Teto de 30 s avaliado **fora** do `collect` de quadros. Hoje ele é avaliado dentro,
-  então uma fonte que para de emitir mantém o canal tomado indefinidamente — e subir de 12
-  para 30 s dobra a janela de dano sem consertar a causa — esforço: 0,5 sessão — depende:
-  nada.
+- [P1] ~~Teto de 30 s avaliado **fora** do `collect`~~ **FEITO em 17/08.** `withTimeout`
+  descontando o já decorrido, para o teto continuar sendo "30 s desde o toque" e não "30 s
+  de áudio ao vivo". O dano real era pior que o descrito: sem o evento `LimiteDeDuracao`,
+  `GatilhoPtt.pressionadoEm` ficava setado e **todo toque seguinte era recusado** — o PTT do
+  agente morria até a tela fechar. Travado por `fonteQueParaDeEmitir_naoSeguraOCanalParaSempre`.
 - [P3] `WakeWordDetector` implementado de fato e `PowerPolicy` religada, tornando o modo
   **Standby** alcançável (item 5 do `ESTADO.md`) — esforço: 1 sessão — depende: KWS ou VAD.
 - [P3] Gazetteer de logradouros em produção: `configurarGazetteer` só é chamado em teste —

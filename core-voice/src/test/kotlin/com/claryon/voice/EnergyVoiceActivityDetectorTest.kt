@@ -36,6 +36,35 @@ class EnergyVoiceActivityDetectorTest {
     }
 
     @Test
+    fun oSegmento_declaraQuantoDoFimEhHangover() = runBlocking {
+        // **Sem este campo, a meta "fim da fala → earcon ≤ 500 ms" mede a partir
+        // do lugar errado.** O consumidor só fica sabendo do segmento quando a
+        // janela FECHA, e a janela fecha um hangover inteiro depois de o agente
+        // ter parado de falar. Cravar o zero no fechamento dá um número
+        // otimista pelo tamanho do hangover — e internamente coerente, então
+        // nenhum teste acusaria.
+        val frames = buildList {
+            repeat(8) { add(tone(320)) }
+            repeat(6) { add(silence(320)) } // 1920 amostras = 120 ms de silêncio
+        }
+        val segmentos = vad.segment(flowOf(*frames.toTypedArray())).toList()
+
+        assertEquals(1, segmentos.size)
+        assertTrue(
+            "o segmento tem de declarar o silêncio final (veio ${segmentos[0].silencioFinalMs} ms)",
+            segmentos[0].silencioFinalMs >= 60,
+        )
+        // O silêncio declarado tem de caber dentro do próprio segmento — senão o
+        // consumidor descontaria mais do que existe e o zero iria para antes da
+        // fala começar.
+        val duracaoTotalMs = segmentos[0].pcm.size * 1000 / segmentos[0].sampleRateHz
+        assertTrue(
+            "silêncio declarado (${segmentos[0].silencioFinalMs}) > duração ($duracaoTotalMs)",
+            segmentos[0].silencioFinalMs <= duracaoTotalMs,
+        )
+    }
+
+    @Test
     fun silencioPuroNaoEmiteNada() = runBlocking {
         val frames = List(10) { silence(320) }
         val segmentos = vad.segment(flowOf(*frames.toTypedArray())).toList()

@@ -43,7 +43,16 @@ class EnergyVoiceActivityDetector(
         suspend fun fechar() {
             val speechSamples = acc.size - trailingSilence
             if (speechSamples >= minSpeechSamples) {
-                emit(SpeechSegment(acc.toShortArray(), sampleRateHz))
+                // Informa QUANTO do fim é hangover. Sem isso o consumidor crava o
+                // "fim da fala" no fechamento da janela, que acontece um hangover
+                // inteiro depois — e a meta de 500 ms sai otimista em 600 ms.
+                emit(
+                    SpeechSegment(
+                        pcm = acc.toShortArray(),
+                        sampleRateHz = sampleRateHz,
+                        silencioFinalMs = trailingSilence * 1000 / sampleRateHz,
+                    ),
+                )
             }
             acc.clear()
             inSpeech = false
@@ -71,7 +80,13 @@ class EnergyVoiceActivityDetector(
 
         // Fluxo terminou com fala aberta → emite o que houver.
         if (inSpeech && acc.size - trailingSilence >= minSpeechSamples) {
-            emit(SpeechSegment(acc.toShortArray(), sampleRateHz))
+            emit(
+                SpeechSegment(
+                    pcm = acc.toShortArray(),
+                    sampleRateHz = sampleRateHz,
+                    silencioFinalMs = trailingSilence * 1000 / sampleRateHz,
+                ),
+            )
         }
     }
 

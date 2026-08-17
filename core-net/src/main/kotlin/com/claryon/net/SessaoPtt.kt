@@ -4,9 +4,11 @@ import com.claryon.common.Result
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 
 /** O que o emissor precisa saber enquanto fala. */
@@ -180,26 +182,55 @@ class SessaoPtt(
             }
             preRoll.limpar()
 
-            // 2) Ao vivo.
-            pcmAoVivo.collect { bloco ->
-                if (!currentCoroutineContext().isActive) return@collect
+            // 2) Ao vivo, com o teto contado POR RELÓGIO, não por chegada de áudio.
+            //
+            // **O teto não pode depender de o fluxo emitir.** Ele vivia dentro do
+            // `collect`, o que o tornava refém da fonte: com o microfone parado —
+            // HFP caído, `AudioRecord` travado, fonte suspensa — a condição nunca
+            // voltava a ser avaliada e o canal ficava **tomado indefinidamente**,
+            // com a guarnição em silêncio esperando um agente que já não
+            // transmite. Subir o teto de 12 para 30 s dobraria a janela desse
+            // dano sem tocar na causa.
+            //
+            // `withTimeout` e não um vigia que faz *polling*: é **um** temporizador
+            // em vez de um laço que acorda quatro vezes por segundo pelo turno
+            // inteiro, e termina sozinho. Um laço com `delay` infinito também
+            // seria intestável — `advanceUntilIdle` nunca fica ocioso com ele
+            // pendente, que foi como a primeira versão disto quebrou três testes.
+            //
+            // A renovação do piso **continua dentro** do `collect`, e isso é
+            // deliberado: renovar existe para não perder a palavra ENQUANTO se
+            // fala. Sem áudio chegando não há o que preservar, e o teto acima já
+            // encerra.
+            // **Desconta o que já passou.** `withTimeout(duracaoMaximaMs)` cru
+            // começaria a contar aqui — depois da concessão de canal e do
+            // pré-roll — e o teto viraria "30 s de áudio ao vivo" em vez de
+            // "30 s desde o toque". Mudança silenciosa de significado do aceite,
+            // e para o lado errado: quanto mais lenta a rede, mais tempo de
+            // captação o agente ganharia.
+            withTimeout((duracaoMaximaMs - (agoraMs() - inicio)).coerceAtLeast(1L)) {
+                pcmAoVivo.collect { bloco ->
+                    if (!currentCoroutineContext().isActive) return@collect
 
-                // Teto de duração: impede que um botão preso vire captação
-                // contínua — a regra que separa PTT de escuta ambiente.
-                if (agoraMs() - inicio >= duracaoMaximaMs) throw LimiteDeDuracaoAtingido()
+                    if (agoraMs() - ultimaRenovacao >= renovarACadaMs) {
+                        ultimaRenovacao = agoraMs()
+                        // Perder o canal no meio da fala é informação operacional:
+                        // o agente precisa parar de falar para o vazio.
+                        if (!piso.renovar(concessao)) throw CanalTomado()
+                    }
 
-                if (agoraMs() - ultimaRenovacao >= renovarACadaMs) {
-                    ultimaRenovacao = agoraMs()
-                    // Perder o canal no meio da fala é informação operacional:
-                    // o agente precisa parar de falar para o vazio.
-                    if (!piso.renovar(concessao)) throw CanalTomado()
-                }
-
-                for (quadro in fatiar(bloco)) {
-                    naoEntregues += enviar(transmissaoId, { sequencia++ }, quadro)
-                    marcarPrimeiroQuadroSePreciso()
+                    for (quadro in fatiar(bloco)) {
+                        naoEntregues += enviar(transmissaoId, { sequencia++ }, quadro)
+                        marcarPrimeiroQuadroSePreciso()
+                    }
                 }
             }
+        } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+            // O teto de `withTimeout`. Distinto de `LimiteDeDuracaoAtingido`, que
+            // ficou como o tipo interno — os dois viram o mesmo evento para quem
+            // ouve, porque para o agente é o mesmo fato: a transmissão acabou por
+            // tempo, não por ele ter soltado.
+            aoEvento(EventoPtt.LimiteDeDuracao)
         } catch (e: LimiteDeDuracaoAtingido) {
             aoEvento(EventoPtt.LimiteDeDuracao)
         } catch (e: CanalTomado) {
@@ -307,6 +338,7 @@ class SessaoPtt(
 
         /** Teto para o encerramento — um socket morto não pode travar o PTT. */
         const val ENCERRAMENTO_MS = 2_000L
+
 
         /**
          * Mensagens de fato postas no socket. Com o agrupamento, é ~1/3 de

@@ -2,6 +2,7 @@ package com.claryon.net
 
 import com.claryon.common.ClaryonError
 import com.claryon.common.Result
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.flow
@@ -304,11 +305,65 @@ class SessaoPttTest {
             relogio = { t }, duracaoMaximaMs = 200,
         ).transmitir(
             "tx1", PrioridadeTransmissao.P2_APOIO, "Alfa",
-            flow { repeat(100) { t += 20; emit(ShortArray(amostrasPorQuadro) { 3000 }) } },
+            // **`delay(20)` e não só `t += 20`.** O relógio de domínio (`agoraMs`)
+            // e o do escalonador de teste são DOIS relógios, e antes só o
+            // primeiro avançava: a fonte emitia 100 blocos instantaneamente em
+            // tempo virtual, e o teto — que agora é `withTimeout`, medido pelo
+            // escalonador — nunca disparava.
+            //
+            // Adiantar os dois juntos é também a simulação mais fiel: um
+            // microfone real leva 20 ms de tempo real por bloco de 20 ms. O
+            // teste antigo comprimia isso e, ao comprimir, deixava de exercitar
+            // exatamente o mecanismo que dá nome a ele.
+            flow {
+                repeat(100) {
+                    delay(20)
+                    t += 20
+                    emit(ShortArray(amostrasPorQuadro) { 3000 })
+                }
+            },
         ) { eventos.add(it) }
 
         assertTrue("deveria cortar no teto", eventos.any { it is EventoPtt.LimiteDeDuracao })
         assertTrue("não pode transmitir os 100 blocos", transporte.quadros.size < 30)
+    }
+
+    @Test
+    fun fonteQueParaDeEmitir_naoSeguraOCanalParaSempre() = runTest {
+        // **O defeito que o teto por relógio conserta.** Antes ele era avaliado
+        // DENTRO do `collect`: com a fonte parada — HFP caído, `AudioRecord`
+        // travado — a condição nunca voltava a ser testada e o canal ficava
+        // tomado indefinidamente, com a guarnição inteira em silêncio esperando
+        // um agente que já não transmite.
+        //
+        // Aqui a fonte emite dois blocos e **nunca mais**: o `MutableSharedFlow`
+        // não completa. Sem o `withTimeout`, `transmitir` não retornaria nunca.
+        val log = mutableListOf<String>()
+        val transporte = TransporteFake(log = log)
+        val piso = concede(log)
+        val mudo = MutableSharedFlow<ShortArray>(replay = 0, extraBufferCapacity = 8)
+        val eventos = mutableListOf<EventoPtt>()
+
+        val job = launch {
+            sessao(preRollCom(0), CodecFake(), transporte, piso, duracaoMaximaMs = 500)
+                .transmitir("tx1", PrioridadeTransmissao.P2_APOIO, "Alfa", mudo) {
+                    eventos.add(it)
+                }
+        }
+        advanceUntilIdle()
+        mudo.emit(ShortArray(amostrasPorQuadro) { 3000 })
+        mudo.emit(ShortArray(amostrasPorQuadro) { 3000 })
+        advanceUntilIdle() // avança além do teto de 500 ms
+        job.join()
+
+        assertTrue(
+            "a transmissão tem de encerrar por teto mesmo sem áudio chegando",
+            eventos.any { it is EventoPtt.LimiteDeDuracao },
+        )
+        assertTrue(
+            "e tem de devolver o canal — senão a guarnição fica muda",
+            piso.liberado,
+        )
     }
 
     // ── Emergência toma o canal ───────────────────────────────────────────────

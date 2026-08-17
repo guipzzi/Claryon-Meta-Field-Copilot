@@ -29,14 +29,30 @@ A versão de 2026-08-15 propunha **dois estágios falados** ("Hey Claryon", jane
 4 s, "na escuta") casados por *keyword spotting* contra léxico fechado. Três fatos
 apurados desde então derrubam aquele desenho:
 
-1. **Não existe modelo de KWS em português neste projeto.** O único preset que o
-   AAR conhece é chinês — `KeywordSpotterKt.getKwsModelConfig` referencia
-   `sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01` (verificado por `javap -c`
-   em `core-voice/libs/sherpa-onnx-1.13.5.aar`). Um KWS fora do idioma não pode ser
-   a **única** prova de intenção de transmitir.
-2. **O único motor de fala em português já embarcado é o whisper-tiny**, e ele está
+1. **Não existe modelo de KWS em português neste projeto — e nem há de onde tirar
+   um.** `KeywordSpotterKt.getKwsModelConfig` conhece **dois** presets, não um:
+   `sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01` (chinês) e
+   `sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01` (inglês). O `tableswitch`
+   do bytecode fecha a contagem — `getKwsModelConfig(2)` devolve `null` — e os 16
+   `.so` do AAR não escondem um terceiro (`strings` devolve zero). *Verificado por
+   `javap -c` em `core-voice/libs/sherpa-onnx-1.13.5.aar`, sha256
+   `6419cd8b…a82b`, em 2026-08-17.*
+
+   **O que fecha a porta de vez:** KWS exige transducer **online** (streaming), e
+   `OnlineRecognizerKt` tem 39 presets, **nenhum** em português. Os dois presets pt
+   que existem no AAR (`stt_pt_fastconformer`) são **offline** — não servem de KWS
+   por construção. Não existe "pegar emprestado um modelo pt do próprio AAR": as
+   saídas reais são embarcar KWS em inglês com grafia fonética, ou treinar pt-BR.
+
+   Um KWS fora do idioma não pode ser a **única** prova de intenção de transmitir.
+2. **O único motor de fala em português já EMBARCADO é o whisper-tiny**, e ele está
    fixado em pt (`core-voice/src/main/cpp/jni.c:190`, `params.language = "pt"`).
    É ele quem tem de verificar, não o KWS.
+
+   "Embarcado", e não "existente": o AAR conhece outros caminhos pt para ASR
+   **offline** (dois `stt_pt_fastconformer`, mais omnilingual/qwen3/whisper
+   multilíngues). Nenhum foi medido e nenhum está no APK — mas a frase antiga
+   induzia a conclusão de que não havia alternativa, e há.
 3. **A janela de 4 s entre estágios cria um modo de falha próprio** — "disse o
    estágio 1, o estágio 2 chegou tarde" — e obriga fala antinatural. O que os dois
    estágios protegiam era *confirmação independente*; isso se obtém melhor com dois
@@ -262,12 +278,20 @@ tabela é observável antes de isso mudar.
 
 ### Riscos aceitos
 
-1. **O pré-filtro de bateria (E4) pode não existir em português.** O único preset
-   de KWS que o AAR conhece é chinês. Se a taxa de invocação do verificador ficar
-   acima do alvo, as saídas são, nesta ordem: subir o piso de duração do item 5;
-   embarcar um KWS em inglês e escrever "claryon" no inventário de tokens dele
-   (recall não medido); treinar um KWS pt-BR (fora do prazo). **Não há caminho em
-   que a ausência de E4 quebre a correção** — ela só custa bateria.
+1. **O pré-filtro de bateria (E4) não existe em português, e não há terceira via.**
+   Os dois presets de KWS do AAR são chinês e inglês, e não há preset **streaming**
+   em pt para pegar emprestado (ver o item 1 acima). Se a taxa de invocação do
+   verificador ficar acima do alvo, as saídas são, nesta ordem: subir o piso de
+   duração do item 5; embarcar o KWS em inglês e escrever "claryon" na grafia
+   fonética dele (recall não medido); treinar um KWS pt-BR (fora do prazo).
+   **Não há caminho em que a ausência de E4 quebre a correção** — ela só custa
+   bateria.
+
+   *Nota de artefato:* `KeywordSpotter` aceita caminho de arquivo arbitrário — o
+   preset é conveniência, não lista branca (o construtor ramifica para
+   `newFromFile(KeywordSpotterConfig)` quando o `AssetManager` é nulo). Que o
+   nativo aceite qualquer zipformer2-transducer de KWS é **inferência**, não está
+   no artefato.
 2. **A verificação depende do whisper-tiny em pt.** `Transcript.confidence` é
    sempre `null` neste projeto (`WhisperCppStt.kt:84`), então não há limiar de
    confiança a ajustar: a decisão é casamento exato de texto normalizado contra

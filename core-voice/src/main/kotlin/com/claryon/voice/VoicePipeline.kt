@@ -24,13 +24,36 @@ data class PcmAudio(val samples: ShortArray, val sampleRateHz: Int) {
 /** Evento de wake word: a palavra "Claryon" foi detectada. */
 data class WakeEvent(val timestampMillis: Long, val score: Float)
 
-/** Segmento de fala delimitado pelo VAD (janela fechada ⇒ pronto para o STT). */
-data class SpeechSegment(val pcm: ShortArray, val sampleRateHz: Int) {
+/**
+ * Segmento de fala delimitado pelo VAD (janela fechada ⇒ pronto para o STT).
+ *
+ * @property silencioFinalMs quanto do fim de [pcm] é o **hangover** — o silêncio
+ *   que o detector esperou antes de decidir que a fala acabou.
+ *
+ *   Existe porque sem ele a meta "fim da fala → earcon ≤ 500 ms" mede a partir do
+ *   lugar errado. O consumidor só sabe do segmento quando a janela **fecha**, e a
+ *   janela fecha um hangover inteiro (600 ms, no detector por energia) depois de o
+ *   agente ter parado de falar. Cravar o zero no fechamento produz um número
+ *   otimista em ~600 ms — e nenhum teste acusa, porque o relatório fica
+ *   internamente coerente.
+ *
+ *   Com este campo o consumidor **desconta**: o instante do fim real da fala é
+ *   `fechamento − silencioFinalMs`. É a diferença entre medir o produto e medir o
+ *   próprio instrumento.
+ */
+data class SpeechSegment(
+    val pcm: ShortArray,
+    val sampleRateHz: Int,
+    val silencioFinalMs: Int = 0,
+) {
     override fun equals(other: Any?): Boolean =
         this === other || (other is SpeechSegment &&
-            sampleRateHz == other.sampleRateHz && pcm.contentEquals(other.pcm))
+            sampleRateHz == other.sampleRateHz &&
+            silencioFinalMs == other.silencioFinalMs &&
+            pcm.contentEquals(other.pcm))
 
-    override fun hashCode(): Int = 31 * pcm.contentHashCode() + sampleRateHz
+    override fun hashCode(): Int =
+        31 * (31 * pcm.contentHashCode() + sampleRateHz) + silencioFinalMs
 }
 
 /**

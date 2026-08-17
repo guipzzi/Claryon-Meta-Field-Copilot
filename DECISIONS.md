@@ -1459,3 +1459,58 @@ nos quatro. Três delas eu tinha atribuído a limite de ambiente sem investigar.
   o que **revoga as permissões e apaga a sessão do cofre** — as três primeiras rodadas de
   medição saíram vazias e eu quase reportei como regressão da renomeação. Reinstalação limpa
   estado; conferir a tela antes de acusar o próprio diff.
+
+## 2026-08-17 — Abertura da Fase 2: o que a verificação no artefato mudou
+
+A regra do projeto manda spec antes de diff, e a Fase 2 tinha três afirmações marcadas como
+não confirmadas. Rodei uma verificação com um agente por pergunta, cada resposta passando por
+um cético que reexecutava os comandos. Sete perguntas, e o resultado mudou o plano:
+
+- **São DOIS presets de KWS, não um — e a spec estava errada.** `wenetspeech` (chinês) e
+  `gigaspeech` (inglês); o `tableswitch` do bytecode fecha a contagem, e os 16 `.so` não
+  escondem um terceiro. **Achado que fecha a porta de vez:** KWS exige transducer *online*, e
+  `OnlineRecognizerKt` tem 39 presets, **nenhum** em português. Os dois presets pt do AAR
+  (`stt_pt_fastconformer`) são *offline* — não servem por construção. Não existe "pegar
+  emprestado um modelo pt do próprio AAR"; as saídas são inglês com grafia fonética, ou
+  treinar pt-BR.
+
+- **Os 320 ms do chunk-16 não existem no artefato.** Procurados, não achados: o número não
+  deriva do nome do arquivo e o AAR não o contém. Segue NÃO VERIFICADO e sai do ROADMAP como
+  fato. E mesmo confirmado não responderia a pergunta certa — seria só o enchimento de chunk,
+  sem o buffer do SCO, o fbank e o compute no aparelho. A meta de 500 ms precisa de medição,
+  não de documentação.
+
+- **O Silero VAD tem duas travas duras que a spec ainda não tinha.** O nativo exige janelas de
+  **512 amostras** e o rádio produz 320 (20 ms a 16 kHz): é preciso um re-quadrador, e o VAD
+  passa a decidir a cada 32 ms. E a **unidade** de `min/maxSpeechDuration` continua NÃO
+  VERIFICADA — se for milissegundos, um `12.0f` escrito de boa-fé vira 12 ms e a janela fecha
+  no meio da frase. `setConfig` é só `putfield`, não recria o objeto nativo, então "duas
+  instâncias" deixou de ser preferência e virou imposição do artefato.
+
+- **O achado mais grave era da Fase 1, não da 2: a meta do earcon media a partir do lugar
+  errado.** `VoiceCycle` cravava o zero no *fechamento* da janela, e a janela fecha um
+  hangover inteiro (600 ms) depois de o agente parar de falar. O número que iríamos apresentar
+  era otimista em ~600 ms — e internamente coerente, então nenhum teste acusaria. `SpeechSegment`
+  passou a carregar `silencioFinalMs` e o ciclo desconta. Travado por teste.
+
+- **Meu próprio conserto do teto mudou o significado do aceite, e eu não tinha notado.**
+  `withTimeout(duracaoMaximaMs)` cru começa a contar depois da concessão de canal e do
+  pré-roll: o teto virava "30 s de áudio ao vivo" em vez de "30 s desde o toque", e para o
+  lado errado — quanto mais lenta a rede, mais captação o agente ganharia. Corrigido
+  descontando o decorrido.
+
+  O dano do defeito original também era **pior** do que o ROADMAP descrevia: não é só o canal
+  preso (a trava de piso cai sozinha em 30 s por TTL). Sem o evento `LimiteDeDuracao`,
+  `gatilho.cancelar()` nunca rodava, `GatilhoPtt.pressionadoEm` ficava setado e **todo toque
+  seguinte era recusado com `JaTransmitindo`** — o PTT do agente morria até a tela fechar.
+
+- **`pedir_piso` não existe; a função é `pedir_canal`** (`0005:50`). Nome de função de
+  servidor afirmado de cabeça é exatamente o que a Regra Zero proíbe, e estava herdado no
+  plano. Junto veio uma sexta peça que faltava no escopo: `ClienteDePisoRemoto` **nunca é
+  instanciado** — `RadioViewModel:189` usa `ClienteDePisoLocal`. Sem trocar, a seleção de
+  grupo por voz herdaria uma autorização de membership que só existe no papel, porque a
+  validação de `0005:78-82` nunca seria alcançada.
+
+- **Correção de método, não de fato:** três citações do ROADMAP apontavam linhas que derivaram
+  (`MainActivity.kt:236-237`, `RadioViewModel.kt:450`, migração `0012`). Especificação deve
+  citar **símbolo**, não linha — linha envelhece a cada commit.
