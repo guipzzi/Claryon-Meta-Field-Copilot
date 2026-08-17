@@ -19,8 +19,8 @@ couber é história e vai para `DECISIONS.md`. Aqui só o que muda a próxima de
 - **VAD por rede neural** (Silero, 629 KB) no lugar do limiar de energia. Verificado no
   emulador: silêncio → 0 segmentos; senoide **alta** modulada (que o RMS aceitaria) → 0;
   fala pt-BR real do Piper (3 099 ms) → 1 segmento de 3 042 ms.
-- **Ida e volta em português no aparelho:** Piper sintetiza, Whisper transcreve, sem rede.
-  O `tiny` erra palavra rara ("guarnição" → "agora nisso são"), acerta o resto.
+- **Ida e volta em português no aparelho:** Piper sintetiza, Whisper transcreve, sem rede —
+  o `tiny` erra palavra rara ("guarnição" → "agora nisso são") e acerta o resto.
 - Posição: `consultar_posicao` tira o solicitante do JWT e `private.posicao_relativa` está
   revogada de `authenticated`. Garantia do servidor, não do cliente.
 - Migração `0011` aplicada: `rotulo_falado` + `public.meus_rotulos_falados()`, léxico
@@ -56,6 +56,5 @@ Plano completo em [`ROADMAP.md`](ROADMAP.md). O caminho crítico:
 4. **KWS como antecipação de earcon**, atrás de flag.
 5. **Entregáveis da Etapa 5 — prazo 22/08.**
 
-**Pendências que não se resolvem sozinhas:** `security-crypto` em `1.1.0-alpha06` ·
-`MockDeviceKitStreamTest` roda isolado · conferir se o documento submetido menciona
-WhatsApp (§14.1 do edital veda alteração de escopo).
+**Pendências:** `security-crypto` em `1.1.0-alpha06` · `MockDeviceKitStreamTest` roda
+isolado · conferir se o documento submetido menciona WhatsApp (§14.1 veda mudar escopo).
