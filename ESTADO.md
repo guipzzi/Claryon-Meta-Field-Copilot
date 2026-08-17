@@ -34,10 +34,12 @@
    `initial_prompt` e com `ΣN = 52` o IC95% é **[10,1%; 32,3%]**; precisa de `ΣN ≈ 500`. O
    prompt estava **sem acento** — corrigido. **A premissa do APK estava errada:** 372 MiB não
    excede o limite do Play (AAB admite 500 MB); decisão: cortar só o x86_64 do release.
-4. **A palavra de ativação foi MEDIDA: `Aurora` 3/3 contra `Claryon` 0/3** (controle). O
-   traço discriminativo **não pode estar na consoante inicial** — as três que falharam
-   tiveram o *onset* corrompido; as duas que passaram começam por vogal. Falta o número que
-   decide: **falso positivo**. O portão não existe: `grep -ri claryon` em `src/main` = zero.
+4. **`Aurora` REPROVADA nos dois eixos, em simulação de HFP.** Recall em banda estreita
+   **50%** (meta 90) — ela colapsa em **"agora"**, quase homófona e muito mais frequente —
+   e **1 disparo em 8** de falso positivo ("a aurora boreal" → posição 1, o decodificador
+   comeu o artigo). **A banda decide a ordem:** em banda cheia deu 3/3. Foi por medir em
+   banda cheia que a análise de 14/08 aprovou "Claryon". Saída proposta: **par de palavras**
+   improvável em coocorrência. O portão não existe: `grep -ri claryon` em `src/main` = zero.
 5. **Resposta falada: 2144 ms contra 2000.** A decomposição estava errada: ≥290 ms é o
    earcon `ACAO_EXECUTADA` tocando **serialmente** antes da síntese; a rota contribui zero;
    `generateWithCallback` daria 0 ms (`max_num_sentences = 1`); os "332 ms de rede" não eram.

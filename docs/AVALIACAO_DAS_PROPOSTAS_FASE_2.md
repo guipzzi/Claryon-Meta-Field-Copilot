@@ -141,12 +141,41 @@ inicial**, promovendo a palavra à primeira posição. Aceitar a ativação nas 
 primeiras posições — que era a mitigação proposta para o modo de falha do Whisper
 de ignorar as primeiras palavras — **agrava** este risco.
 
-**A tensão está agora demonstrada, e é estrutural:**
+### E o recall em BANDA ESTREITA reprova pelo outro lado
+
+A segunda simulação — 28 enunciados distintos, todos passados por 16 → 8 → 16 kHz,
+que é o que o HFP entrega:
+
+```
+exigindo na 1ª palavra ....... 50,0 %  (14/28)
+aceitando nas 3 primeiras .... 57,1 %  (16/28)
+meta do aceite ............... 90 %
+```
+
+As falhas dizem por quê:
+
+```
+"Agora pedirá apoio."          "agora é modo ativo."
+"Aura-hora. Consultar placa."  "Aurorondista, guarnição 3."
+```
+
+**`Aurora` colapsa em "agora".** Em pt-BR são quase homófonas — /awˈɾɔɾɐ/ contra
+/aˈgɔɾɐ/ — e "agora" é uma das palavras mais frequentes da fala falada. O modelo de
+linguagem escolhe a frequente, exatamente como fez com "Honda" → "onda".
+
+**A banda estreita é a variável decisiva, e isso é o achado que generaliza.** Em
+banda cheia `Aurora` deu **3/3**; em banda estreita, **50%**. A ordem das candidatas
+muda com a banda — e foi por isso que a análise de 14/08 aprovou "Claryon" e errou:
+ela foi feita em banda cheia. **Nenhuma medição de palavra de ativação vale se não
+for em 8 kHz.**
+
+**A tensão está agora demonstrada nos dois eixos, e é estrutural:**
 
 | Propriedade | `Claryon` | `Aurora` |
 |---|---|---|
 | tokeniza como unidade | ✘ (não existe no vocabulário) | ✔ (um token, id 40663) |
-| sobrevive à transcrição | 0/3 | 3/3 |
+| sobrevive em banda **cheia** | 0/3 | 3/3 |
+| sobrevive em banda **estreita** | não medido | **✘ — 50%** |
 | **rara na fala espontânea** | ✔ | **✘ — 1/8** |
 
 Palavra inventada não é transcrita; palavra real é transcrita **e aparece sozinha**.
