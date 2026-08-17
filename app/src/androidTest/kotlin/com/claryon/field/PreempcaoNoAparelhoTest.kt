@@ -72,22 +72,25 @@ class PreempcaoNoAparelhoTest {
         val telemetria = TelemetriaDoCicloDeVoz()
         val audio = AudioDoAgente.de(ctx)
         val meuEscopo = CoroutineScope(Dispatchers.Main.immediate + Job()).also { escopo = it }
+        val rota = com.claryon.field.audio.RotaSustentada(audio, meuEscopo)
 
         val saida = VoiceOutput(
             scope = meuEscopo,
             sintetizar = { falaLonga() },
             reproduzir = { pcm, sr ->
-                // Rota real do aparelho, AudioTrack real. `iniciar()` pode
-                // falhar sem fone: o teste ainda vale, porque o que se mede é o
-                // cancelamento da corrotina de reprodução, não o som.
-                when (audio.iniciar()) {
-                    is com.claryon.common.Result.Success -> try {
-                        audio.reproduzir(pcm, sr)
-                    } finally {
-                        audio.liberar()
-                    }
-                    is com.claryon.common.Result.Failure -> delay(2_000) // sem rota: simula a duração
-                }
+                // **A mesma `RotaSustentada` que produção usa.** Antes o teste
+                // fazia `iniciar`/`liberar` por emissão, e media 286 ms —
+                // dos quais 204 ms eram o desmonte da rota SCO acontecendo
+                // DEPOIS do som já ter parado. O número era verdadeiro e o
+                // caminho era o defeito: a rota caía entre a fala cortada e o
+                // earcon de P1, que então esperava a remontagem para soar.
+                //
+                // Medir um caminho que produção não percorre mais certificaria
+                // uma arquitetura que não existe.
+                val tocou = rota.emUso { audio.reproduzir(pcm, sr) }
+                // Sem rota (emulador sem fone): simula a duração, porque o que
+                // se mede é o cancelamento da corrotina, não o som.
+                if (tocou == null) delay(2_000)
             },
             aoInterromperPorEmergencia = { atraso -> telemetria.registrarPreempcao(atraso) },
         )

@@ -102,6 +102,13 @@ object SaidaUnica {
      */
     val supressor = SupressorDeSaidaPropria()
 
+    /**
+     * Dona da rota de saída, criada junto com a fila. Ver [RotaSustentada]: ela
+     * segura **um** usuário do `GlassesAudioManagerImpl` durante a rajada de fala,
+     * em vez de subir e derrubar a rota a cada emissão.
+     */
+    private var rota: RotaSustentada? = null
+
     private val mutexDoTts = Mutex()
     private var piper: PiperTts? = null
     private var piperResolvido = false
@@ -119,6 +126,10 @@ object SaidaUnica {
             instancia ?: run {
                 val app = context.applicationContext as Application
                 val audio = AudioDoAgente.de(app)
+                // A rota sobrevive ao intervalo entre emissões encadeadas. Ver
+                // `RotaSustentada`: era 204 ms de remontagem entre o earcon e a
+                // frase, e o P1 de emergência era quem mais pagava.
+                rota = RotaSustentada(audio, escopo)
                 val fallback = AndroidTts(app)
                 VoiceOutput(
                     scope = escopo,
@@ -152,17 +163,11 @@ object SaidaUnica {
             val duracaoMs = pcm.size * 1000L / sampleRateHz
             supressor.registrar(System.currentTimeMillis(), duracaoMs)
         }
-        when (audio.iniciar()) {
-            is Result.Success -> try {
-                audio.reproduzir(pcm, sampleRateHz)
-            } finally {
-                audio.liberar()
-            }
-            // Falha nunca é silêncio — mas aqui o canal de aviso É o som, então só
-            // resta registrar. Quem chamou já sabe pelo próprio estado da UI.
-            is Result.Failure ->
-                Log.w(TAG, "sem rota de áudio para reproduzir")
-        }
+        // `emUso` devolve `null` quando não há rota. Falha nunca é silêncio — mas
+        // aqui o canal de aviso É o som, então só resta registrar; quem chamou já
+        // sabe pelo próprio estado da UI. O aviso em si sai de `RotaSustentada`,
+        // com a causa junto.
+        rota?.emUso { audio.reproduzir(pcm, sampleRateHz) }
     }
 
     /**

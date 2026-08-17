@@ -2,6 +2,7 @@ package com.claryon.field
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.claryon.common.getOrNull
 import com.whispercpp.whisper.WhisperContext
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertTrue
@@ -14,11 +15,24 @@ import java.nio.ByteOrder
 
 /**
  * Prova de que o **whisper.cpp nativo** funciona on-device: carrega o modelo
- * `ggml-tiny` (direto do asset, sem copiar para disco) e transcreve o `jfk.wav`
- * (16 kHz mono) — no emulador arm64, sem rede. Valida a cadeia JNI → C++ → texto.
+ * `ggml-tiny` (direto do asset, sem copiar para disco) e transcreve — no
+ * emulador arm64, sem rede. Valida a cadeia JNI → C++ → texto.
  *
- * Requer os assets `models/ggml-tiny.bin` e `jfk.wav` (não versionados; baixados
- * no setup). Ausente o modelo, o teste é ignorado (Assume).
+ * ## A testemunha era da língua errada
+ *
+ * Este teste transcrevia `jfk.wav`, em inglês, e exigia as palavras "country" ou
+ * "ask". Mas `jni.c:190` fixa `params.language = "pt"` — decisão deliberada, o
+ * copiloto é de segurança pública brasileira. Alimentar inglês num decodificador
+ * fixado em português devolvia *"e então, meu fellow americano… o que você pode
+ * fazer para você?"*: o nativo funcionando perfeitamente, e o teste vermelho.
+ *
+ * O teste só passaria se o produto falasse uma língua que ele não fala. Testemunha
+ * assim não certifica nada — e, pior, um dia alguém a faria passar trocando o
+ * idioma do produto.
+ *
+ * A testemunha certa já está no APK: o Piper sintetiza português no próprio
+ * aparelho. A ida e volta Piper → Whisper exercita exatamente o caminho de
+ * produção, sem rede e sem `.wav` versionado.
  */
 @RunWith(AndroidJUnit4::class)
 class WhisperCppSttTest {
@@ -35,6 +49,65 @@ class WhisperCppSttTest {
         return shorts
     }
 
+    /**
+     * Ida e volta em português: o Piper fala, o Whisper ouve.
+     *
+     * O `ggml-tiny` é o menor modelo da família e erra acentuação e palavra rara —
+     * por isso o aceite é sobre **palavras de conteúdo**, não sobre a frase
+     * inteira. Exigir transcrição literal de um `tiny` seria um teste que quebra
+     * por ruído, não por regressão.
+     */
+    @Test
+    fun whisperTranscrevePortuguesOnDevice() = runBlocking {
+        val temModelo = runCatching {
+            ctx.assets.open("models/ggml-tiny.bin").use { it.read() >= 0 }
+        }.getOrDefault(false)
+        Assume.assumeTrue("modelo ggml-tiny ausente nos assets", temModelo)
+
+        val alvo = InstrumentationRegistry.getInstrumentation().targetContext
+        val piper = com.claryon.field.voice.Modelos.piper(alvo)
+        Assume.assumeTrue("Piper ausente: sem ele não há fala em português para ouvir", piper != null)
+        val dito = piper!!.synthesize("Central, a guarnição está a caminho da ocorrência.").getOrNull()
+        piper.release()
+        Assume.assumeTrue("Piper não sintetizou", dito != null)
+
+        val whisper = WhisperContext.createContextFromAsset(ctx.assets, "models/ggml-tiny.bin")
+        try {
+            // O Piper gera na taxa da voz; o whisper.cpp exige 16 kHz.
+            val pcm = reamostrar(dito!!.samples, dito.sampleRateHz, 16_000)
+            val floats = FloatArray(pcm.size) { pcm[it] / 32768.0f }
+            val texto = whisper.transcribeData(floats, printTimestamp = false).trim().lowercase()
+            android.util.Log.i("ClaryonField", "WHISPER PT: $texto")
+
+            assertTrue("texto vazio", texto.isNotBlank())
+            val achou = listOf("central", "guarni", "caminho", "ocorr").count { texto.contains(it) }
+            assertTrue(
+                "esperava ao menos 2 palavras de conteúdo da frase falada; veio: $texto",
+                achou >= 2,
+            )
+        } finally {
+            whisper.release()
+        }
+    }
+
+    /** Linear: o teste prova transcrição, não fidelidade de reamostragem. */
+    private fun reamostrar(entrada: ShortArray, de: Int, para: Int): ShortArray {
+        if (de == para) return entrada
+        val saida = ShortArray((entrada.size.toLong() * para / de).toInt())
+        for (i in saida.indices) {
+            val pos = i.toDouble() * de / para
+            val a = pos.toInt().coerceIn(0, entrada.size - 1)
+            val b = (a + 1).coerceAtMost(entrada.size - 1)
+            val f = pos - a
+            saida[i] = (entrada[a] * (1 - f) + entrada[b] * f).toInt().toShort()
+        }
+        return saida
+    }
+
+    @org.junit.Ignore(
+        "A testemunha é inglesa e o decodificador é fixado em pt (jni.c:190). " +
+            "Mantido como registro do porquê; o teste vivo é whisperTranscrevePortuguesOnDevice.",
+    )
     @Test
     fun whisperTranscreveJfkOnDevice() = runBlocking {
         val temModelo = runCatching {

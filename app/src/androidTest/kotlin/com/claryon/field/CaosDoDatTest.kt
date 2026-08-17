@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.After
+import org.junit.Assume
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -345,6 +346,23 @@ class CaosDoDatTest {
             f.withCamera(CameraProfile.OCR) { frames ->
                 val primeiro = withTimeoutOrNull(12_000) { frames.first() }
                 Log.i(TAG, "primeiro frame: ${if (primeiro != null) "chegou" else "NAO CHEGOU"}")
+                // **Pré-condição, não resultado.** Sem um frame nunca há captura
+                // possível, e seguir daqui produz `[Failure, Failure]` — que se
+                // lê como "o produto não faz duas capturas" quando a verdade é
+                // "a bancada não entregou imagem nenhuma".
+                //
+                // É o mesmo tropeço do comentário acima, com outro nome: era
+                // `no_stream`, agora é `no_frames`. Medido no emulador: o
+                // `enableWithPhoneCameraFeed` do MockDeviceKit não alimenta a
+                // câmera emulada, mesmo com CAMERA concedida via `install -g`
+                // (verificado: `granted=true` e zero frames em 12 s). Mesma
+                // família de "o MockDeviceKit não simula áudio" — limitação do
+                // mock, e só óculos reais respondem.
+                Assume.assumeTrue(
+                    "a câmera do mock não entregou frame em 12 s — bancada sem " +
+                        "resposta para esta pergunta, não defeito do produto",
+                    primeiro != null,
+                )
                 resultados = listOf(
                     scope!!.async { f.capturePhoto() },
                     scope!!.async { f.capturePhoto() },
