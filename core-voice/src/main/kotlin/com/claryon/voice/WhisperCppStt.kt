@@ -46,7 +46,7 @@ class WhisperCppStt(private val fonte: ModelSource) : SttEngine {
      * controle (com prompt × sem prompt) que `docs/LEXICO_DO_INITIAL_PROMPT.md`
      * prescreve e que era impossível enquanto a string vivia em `jni.c`.
      */
-    var promptDeDominio: String? = com.whispercpp.whisper.PROMPT_DE_DOMINIO
+    var promptDeDominio: String? = null
 
     override suspend fun transcribe(pcm: ShortArray, sampleRateHz: Int): Result<Transcript> {
         if (!fonte.existe()) {
@@ -88,7 +88,21 @@ class WhisperCppStt(private val fonte: ModelSource) : SttEngine {
                     ClaryonError.Voice("stt.sem_texto", "O reconhecimento não produziu texto."),
                 )
             } else {
-                Result.success(Transcript(texto, confidence = null))
+                // **`confidence` deixa de ser sempre `null`.**
+                //
+                // O campo existia desde o primeiro dia e nunca foi preenchido, e a
+                // spec do gatilho registrou como risco aceito que "não há limiar de
+                // confiança a ajustar". A afirmação era falsa sobre o artefato: o
+                // whisper.cpp calcula `no_speech_prob` e a expõe em
+                // `whisper_full_get_segment_no_speech_prob` (whisper.h:766) — faltava
+                // binding, que agora existe.
+                //
+                // Convenção: `confidence` é **confiança de que É fala**, então é o
+                // complemento. Alto = pode agir; baixo = recusar e pedir repetição.
+                // Recusar por baixa confiança é recusa honesta; o critério de hoje é
+                // casamento de string sobre texto que pode ter sido alucinado.
+                val naoFala = ctx.probabilidadeDeNaoSerFala()
+                Result.success(Transcript(texto, confidence = naoFala?.let { 1.0f - it }))
             }
             }
         } catch (e: Exception) {

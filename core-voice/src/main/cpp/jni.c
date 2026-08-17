@@ -286,6 +286,29 @@ Java_com_whispercpp_whisper_WhisperLib_00024Companion_getTextSegmentCount(
     return whisper_full_n_segments(context);
 }
 
+/**
+ * Probabilidade de que o segmento NAO seja fala.
+ *
+ * **Existia no artefato desde sempre e nunca foi ligada.** O whisper.cpp calcula
+ * `state->no_speech_prob` e a usa internamente para decidir se emite o segmento
+ * (whisper.cpp:7622-7640); `whisper_full_get_segment_no_speech_prob` (whisper.h:766)
+ * a expoe. Faltava binding — e sem ele `Transcript.confidence` era sempre `null`,
+ * o que fez a spec do gatilho registrar como risco aceito que "nao ha limiar de
+ * confianca a ajustar". A afirmacao era falsa sobre o artefato.
+ *
+ * Para o portao da palavra de ativacao isto vale mais que qualquer ajuste de
+ * decodificacao: RECUSAR por baixa confianca e recusa honesta. O criterio de hoje
+ * e casamento de string sobre um texto que pode ter sido alucinado.
+ */
+JNIEXPORT jfloat JNICALL
+Java_com_whispercpp_whisper_WhisperLib_00024Companion_getSegmentNoSpeechProb(
+        JNIEnv *env, jobject thiz, jlong context_ptr, jint index) {
+    UNUSED(thiz);
+    UNUSED(env);
+    struct whisper_context *context = (struct whisper_context *) context_ptr;
+    return whisper_full_get_segment_no_speech_prob(context, index);
+}
+
 JNIEXPORT jstring JNICALL
 Java_com_whispercpp_whisper_WhisperLib_00024Companion_getTextSegment(
         JNIEnv *env, jobject thiz, jlong context_ptr, jint index) {

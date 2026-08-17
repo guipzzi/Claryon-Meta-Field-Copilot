@@ -85,6 +85,22 @@ class WhisperContext private constructor(private var ptr: Long) {
         return comMargem.coerceIn(AUDIO_CTX_MINIMO, AUDIO_CTX_MAXIMO)
     }
 
+    /**
+     * A **maior** `no_speech_prob` entre os segmentos do ultimo `transcribeData`.
+     *
+     * Maior e nao media: um unico segmento improvavel ja e motivo para desconfiar
+     * do enunciado inteiro, e o produto prefere recusar a adivinhar. Devolve `null`
+     * quando nao ha segmento — que e o caso em que o proprio whisper ja recusou.
+     */
+    suspend fun probabilidadeDeNaoSerFala(): Float? = withContext(scope.coroutineContext) {
+        require(ptr != 0L)
+        val n = WhisperLib.getTextSegmentCount(ptr)
+        if (n <= 0) return@withContext null
+        var maior = 0.0f
+        for (i in 0 until n) maior = maxOf(maior, WhisperLib.getSegmentNoSpeechProb(ptr, i))
+        maior
+    }
+
     suspend fun transcribeData(
         data: FloatArray,
         printTimestamp: Boolean = true,
@@ -95,7 +111,7 @@ class WhisperContext private constructor(private var ptr: Long) {
          * projeto reportava WER sem poder atribuir quanto vinha do modelo e quanto
          * vinha da dica que ele mesmo deu. Ver `docs/LEXICO_DO_INITIAL_PROMPT.md`.
          */
-        initialPrompt: String? = PROMPT_DE_DOMINIO,
+        initialPrompt: String? = null,
     ): String = withContext(scope.coroutineContext) {
         require(ptr != 0L)
         val numThreads = WhisperCpuConfig.preferredThreadCount
@@ -231,6 +247,9 @@ private class WhisperLib {
             audioData: FloatArray,
         )
         external fun getTextSegmentCount(contextPtr: Long): Int
+
+        /** Ver o KDoc no `jni.c`. Alto = provavelmente nao era fala. */
+        external fun getSegmentNoSpeechProb(contextPtr: Long, index: Int): Float
         external fun getTextSegment(contextPtr: Long, index: Int): String
         external fun getTextSegmentT0(contextPtr: Long, index: Int): Long
         external fun getTextSegmentT1(contextPtr: Long, index: Int): Long
