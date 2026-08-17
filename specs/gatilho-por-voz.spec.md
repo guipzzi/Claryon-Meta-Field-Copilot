@@ -109,7 +109,45 @@ nada. O caminho de comando entra primeiro e independe desta revisão humana.
 |---|---|---|
 | Ativação | **"Claryon"** | Decidido em `DECISIONS.md` 2026-08-14: plosiva + líquida + vogais abertas + nasal, tudo abaixo do corte de 4 kHz do HFP em banda estreita. **⚠️ Medido em 2026-08-17: o STT escreve "Clarion", não "Claryon" — ver abaixo** |
 
-#### ⚠️ A palavra de ativação não sobrevive à ORTOGRAFIA, e isso não é falha de reconhecimento
+#### ✅ Medido em 2026-08-17: a palavra tem de começar por VOGAL
+
+`PalavraDeAtivacaoTest`, 3 sínteses por candidata, `ggml-small-q5_1`, frase de
+comando real. O critério foi a primeira palavra transcrita ser a candidata:
+
+| Candidata | Acertos | Grafias produzidas | Início |
+|---|---|---|---|
+| `Claryon` *(controle)* | **0/3** | farion · cladion | consoante |
+| **Aurora** | **3/3** | aurora | **vogal** |
+| `Andorinha` | 0/3 | dandorinha | consoante¹ |
+| `Bandeirante` | 0/3 | flamirante · vamperante | consoante |
+| **Oriente** | **3/3** | oriente | **vogal** |
+
+¹ *"Andorinha" começa por vogal na grafia, mas o decodificador inseriu um /d/
+espúrio no ataque — o que reforça a leitura: o problema é a fronteira inicial da
+palavra, e uma vogal aberta e longa a defende melhor que uma vogal breve seguida
+de nasal.*
+
+**O princípio que a medição estabelece, e que a análise a priori errou:** o traço
+discriminativo não pode estar na consoante inicial. As três candidatas que falharam
+tiveram o *onset* corrompido ou um segmento espúrio inserido; as duas que passaram
+decidem a própria identidade por sequência vocálica e sonorantes. Isso é coerente
+com a banda útil do HFP em CVSD (300–3400 Hz): o *burst* de plosiva e a fricativa
+alta são justamente o que se perde, e a vogal é o que sobrevive.
+
+**Recomendação: `Aurora`.** Empata com `Oriente` em 3/3, e ganha no critério que a
+medição não cobre: "oriente" é também forma verbal de *orientar*, e a spec exige
+que a palavra de ativação seja **rara na fala espontânea** — um falso positivo custa
+o piso da guarnição. `Aurora` é substantivo/nome próprio e não é locução de
+protocolo policial.
+
+**O que esta medição NÃO decide, e é o número que realmente governa:** a **taxa de
+falso positivo** em fala espontânea de rádio. Mede-se transcrevendo áudio de
+operação normal e contando quantas vezes a palavra aparece sem ninguém a ter dito.
+Enquanto esse número não existir, `Aurora` é a **melhor candidata medida**, não a
+decisão final. Falta também o caminho HFP real de 8 kHz — foi o Piper a 16 kHz que
+aprovou "Claryon" em 14/08.
+
+#### ⚠️ Por que a hipótese anterior (ortografia) foi descartada
 
 Medido no aparelho com `ggml-base-q5_1`, 8 amostras: a palavra de ativação falhou em
 **6** delas — `clarion` (3×), `varion` (1×) e **omitida por completo** (2×).
@@ -143,11 +181,8 @@ o piso da guarnição.
 Consequência para o aceite A1/A2, que exige a transcrição **começar por "claryon"**:
 a comparação exata reprova uma escuta correta. As saídas, em ordem de preferência:
 
-1. **Trocar a palavra de ativação**, e escolher a nova por **medição**, não por
-   análise fonética a priori. O método já existe: sintetizar candidatas com o Piper,
-   transcrever com o modelo real, e exigir que a primeira palavra sobreviva em N de
-   N amostras. O critério passa a ser empírico — foi a análise a priori que produziu
-   "Claryon".
+1. **Trocar a palavra de ativação**, e escolher a nova por **medição**. ✅ **FEITO —
+   ver a tabela abaixo.**
 2. **Aceitar variantes ortográficas** — descartado como solução isolada pela tabela
    acima, mas ainda necessário como complemento: mesmo a palavra vencedora vai ter
    grafia alternativa, e a lista tem de ser **explícita e curta**, nunca distância

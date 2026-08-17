@@ -40,19 +40,21 @@ vai para `DECISIONS.md`.
    `ΣN ≈ 500`. O prompt estava **sem acento** e o BPE difere — corrigido.
    **A premissa do APK estava errada:** 372 MiB não excede o limite do Play (via AAB o base
    admite 500 MB). Decisão: manter tudo no APK e cortar o x86_64 do release (→ ~295 MiB).
-5. **A palavra de ativação é o gargalo, e não é ortografia.** Grafias medidas: clarion ·
-   **varyon** · **farion** · **parion** · **marcarion** · clarão. A plosiva inicial troca de
-   modo e lugar (/k/→/v/,/f/,/p/,/m/) no mesmo áudio, o que **contradiz** o critério que a
-   escolheu (`DECISIONS.md` 2026-08-14). Lista de variantes **não resolve**. Saídas em
-   [`specs/gatilho-por-voz.spec.md`](specs/gatilho-por-voz.spec.md): escolher **por medição**.
+5. **A palavra de ativação foi MEDIDA, e `Aurora` venceu 3/3** contra `Claryon` 0/3
+   (controle). O princípio que a medição estabelece: o traço discriminativo **não pode
+   estar na consoante inicial** — as três candidatas que falharam tiveram o *onset*
+   corrompido (`d`andorinha, `fl`amirante, `f`arion) e as duas que passaram começam por
+   vogal. Falta o número que **decide**: taxa de falso positivo em fala espontânea. E o
+   portão em si não existe: `grep -ri claryon` em `src/main` devolve **zero**, então os
+   erros de ativação não afetam código alcançável hoje.
 6. **Resposta falada fora da meta: 2144 ms contra 2000.** A decomposição de "TTS + rota"
    estava errada: ≥290 ms é o earcon `ACAO_EXECUTADA` tocando **serialmente** antes da
    síntese; a rota contribui zero; `generateWithCallback` daria 0 ms
    (`max_num_sentences = 1`); e os "332 ms de rede" não eram rede.
 7. **Buraco no aceite (b):** a preempção de P1 não alcança a fase de `render`. Enquanto o
    TTS sintetiza (~1,5 s) o P1 não corta, e o instrumento não gera amostra disso.
-8. **O portão da ativação não existe:** hoje qualquer fala com "mudar para X" trocaria de
-   grupo. Depende do item 5. A banda de 8 kHz **não** é a causa de nada (1,2× de WER).
+8. **O portão da ativação não existe** (ver item 5): hoje qualquer fala com "mudar para X"
+   trocaria de grupo. A banda de 8 kHz **não** é a causa de nada (1,2× de WER).
 9. `errorStream` não coletado · `STOPPED` não terminal · câmera do DAT nunca pedida ·
    transcrição na origem (P1) não existe · `WakeWordDetector` sem implementação.
 
@@ -65,7 +67,8 @@ humana de uma linha: reescrever o critério ou os comentários das Edge Function
 
 1. **Entregáveis de 22/08** (Fase 0), descrevendo a capacidade que **existe**: copiloto por
    botão com STT, TTS e troca de grupo falada, 100% local. Não o gatilho por voz.
-2. **Escolher a palavra de ativação por medição** — é o gargalo do acerto.
+2. **Decisão humana sobre `Aurora`** e, se aprovada, medir o **falso positivo** em fala
+   espontânea — é o número que governa, porque falso positivo toma o piso da guarnição.
 3. **Bench com `ΣN ≈ 500`** e os braços com/sem prompt; **re-medir `+dotprod`** em máquina
    ociosa; **medir em arm64 real** com óculos e fone.
 
