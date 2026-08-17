@@ -218,3 +218,73 @@ real e risco de LMK, num processo que o projeto já sabe que o sistema mata prim
 | **P-5** | 30 s, ancorado no BIP | documento mente e o agente perde tempo de fala |
 | **P-2** | **`Aurora` reprovada (1/8)** — trocar por **par de palavras** | falso positivo toma o piso da guarnição |
 | **P-4** | some se P-1 for com escopo | *foreground service* e risco de LMK sem necessidade |
+
+---
+
+## ✅ P-2 medida: o par funciona, mas `Hey Claryon` não
+
+Cinco candidatas, **banda estreita 8 kHz**, casamento exigindo o par **em sequência**:
+
+| Par | recall | falso positivo |
+|---|---|---|
+| **Hey Claryon** | **0/6** | 0/8 |
+| Escuta Claryon | 0/6 | 0/8 |
+| **Atenção Aurora** | **5/6 — 83,3%** | **0/8** |
+| Alerta Aurora | 2/6 — 33,3% | 0/8 |
+| Copiloto escuta | 0/6 | 0/8 |
+
+### Por que `Hey Claryon` falha: o par não conserta OOV
+
+```
+"Hey Claryon, mudar para guarnição 3"  →  "Eclareon, mudar para a guarnição 3"
+"Escuta Claryon, mudar para..."        →  "Escuta Clarion, mudar para..."
+```
+
+O "Hey" **funde** com "Claryon" e vira "Eclareon". E onde não funde, "Claryon"
+continua virando "Clarion" — porque **a palavra não existe no vocabulário do
+modelo**, e nada que venha antes muda isso.
+
+Isto delimita o que o par resolve: **o par ataca o eixo da raridade, não o da
+sobrevivência.** Uma palavra OOV continua OOV emparelhada.
+
+### O que o par resolveu, e resolveu por completo
+
+**Todas as cinco candidatas deram 0/8 de falso positivo** — inclusive as que usam
+`Aurora`, que sozinha disparava em "a aurora boreal". Exigir o par em sequência
+elimina o eixo que reprovou a palavra única. Esse era o risco que dominava a fase,
+e ele está resolvido pelo desenho.
+
+### `Atenção Aurora` é a melhor medida, e o motivo é instrutivo
+
+`Aurora` sozinha em banda estreita: **50%**. Precedida de "Atenção": **83,3%**. A
+palavra de contexto ajuda o decodificador a resolver a ambiguidade com "agora" — o
+modelo de linguagem passa a ter evidência de que ali começa um vocativo, não um
+advérbio. A única falha foi exatamente `"Atenção agora, mudar para G4"`, o mesmo
+colapso, agora raro.
+
+### O padrão que atravessa tudo o que foi medido hoje
+
+O modo de falha dominante do decodificador é **a fronteira de palavra**, não o
+fonema:
+
+```
+Andorinha    → Dandorinha     (inseriu)
+Copiloto     → O piloto       (partiu)
+Hey Claryon  → Eclareon       (fundiu)
+Aurora       → agora          (trocou pela vizinha frequente)
+```
+
+Isso explica em retrospecto por que a posição 1 é o pior lugar possível para a
+palavra de ativação: é a fronteira com o silêncio, a menos ancorada de todas.
+
+### O que falta: 83,3% contra a meta de 90%
+
+E o número é do **melhor caso** — Piper, sem sotaque, sem hesitação, sem AGC de
+*uplink*. Duas saídas, e a segunda ficou barata porque o falso positivo zerou:
+
+1. **Mais candidatas na mesma família** — palavra de contexto + palavra distintiva,
+   agora sabendo que o contexto é o que salva a segunda palavra.
+2. **Lista curta de variantes do par**, justificada por medição e não por esperança:
+   com 0/8 de falso positivo há orçamento para aceitar também `atenção agora`. Ela
+   precisa ser medida contra fala operacional antes de entrar — "atenção, agora
+   vamos" é frase plausível, e seria trocar um eixo pelo outro.

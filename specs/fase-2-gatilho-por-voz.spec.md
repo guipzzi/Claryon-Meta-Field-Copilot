@@ -1,7 +1,7 @@
 ---
 feature: gatilho-por-voz-fase-2
 capacidade: C1 (rádio tático) — abertura, fecho e comando sem tocar na tela
-estado: proposta — **espera decisão humana em 6 pontos marcados PROPOSTA**
+estado: **APROVADA em 2026-08-17** — as seis propostas foram decididas (ver §7)
 autor: revisão humana pendente
 criada: 2026-08-17
 substitui: as partes B/C de `specs/gatilho-por-voz.spec.md` (itens 5 a 26)
@@ -374,7 +374,31 @@ Também dá para fazer agora, e não é código: **criar os dois usuários no Go
 
 ---
 
-## 7. PROPOSTAS que sobrepõem regra dura — esperam decisão humana
+## 7. PROPOSTAS — ✅ DECIDIDAS em 2026-08-17
+
+**As seis foram decididas em revisão humana. O registro abaixo mantém o texto
+original de cada proposta e acrescenta a decisão, porque saber o que foi
+descartado é metade do valor de uma decisão.**
+
+| # | Decisão | Consequência imediata |
+|---|---|---|
+| **P-1** | **Escuta contínua COM ESCOPO** | armada pelo agente, desarmada ao sair da tela / ir a segundo plano / por teto. **P-4 sai de escopo.** Exige indicador audível de "estou ouvindo" e a mitigação escrita na meia página do art. 38 |
+| **P-2** | **Par de palavras** | palavra única abandonada. `Hey Claryon` entra como candidata medida (`ParDeAtivacaoTest`) — pedida na revisão e é a frase original do ROADMAP |
+| **P-3** | **Aprovada** | criar `CANAL_ABERTO`, `CANAL_FECHADO`, `CANAL_NEGADO` |
+| **P-4** | **Sai de escopo** | consequência de P-1: o modo mãos-livres não sobrevive ao segundo plano, então `EscutaDoAgente` segue liberando o whisper em `TRIM_MEMORY_UI_HIDDEN`. Sem *foreground service*, sem o risco de LMK |
+| **P-5** | **Aprovada** | teto 30 000 ms, âncora no BIP, `duracaoMaximaMs` promovido a parâmetro |
+| **P-6** | **Migração `0012`** | `talk_groups.primario` (ou `memberships.primario`); `meus_rotulos_falados()` passa a devolver qual é |
+
+**O que P-1 muda no Bloco 0:** a supressão da própria saída deixa de ser
+higiene e passa a ser **pré-condição de segurança** — sem ela, o modo armado
+transforma cada transmissão recebida num acionador remoto em N−1 aparelhos.
+A ordem do §5 não muda; o Bloco 0 só fica mais obrigatório.
+
+---
+
+### O texto original das propostas, preservado
+
+
 
 **PROPOSTA-1 — o portão textual transcreve a fala de terceiros.**
 CLAUDE.md §2 proíbe, "sem versão, sem flag, sem exceção": *"Transcrever, classificar ou indexar a fala de terceiros"*. Um portão textual transcreve **todo** segmento de fala fechado e só então decide se era para nós; o descarte posterior não desfaz a transcrição. Não há terceira via: `javap` no AAR 1.13.5 provou que os únicos presets de KWS são chinês e inglês, e não há preset **streaming** em pt para emprestar — logo não existe portão acústico em português. A única defesa é o beamforming, e `specs/gatilho-por-voz.spec.md:401-406` diz por escrito que ele é **premissa não medida** neste repositório. **Decisão humana:** (a) assumir por escrito que se transcreve terceiros, com as mitigações do §2 desta spec (supressão real, nada persistido, nenhum log de conteúdo, descarte imediato) e pagar isso na meia página do art. 38 da LGPD; ou (b) a Fase 2 fica restrita ao caminho por **botão** até haver KWS em pt. Não decido isto sozinho.
