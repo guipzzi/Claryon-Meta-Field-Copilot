@@ -19,49 +19,45 @@ vai para `DECISIONS.md`.
 - **Earcon: 605 → 305 ms, dentro da meta de 500.** O hangover era `0.6f`, copiado do
   `EnergyVoiceActivityDetector(hangoverMs = 600)` — parâmetro de detector RMS num detector
   neural; o default do binding é `0.25f`. 0,3 s fica acima do piso da juntura intra-frase em
-  pt-BR (250 ms) e casa com o *endpointer transacional* da Alexa (P50 300 ms).
-- **A régua limpa passa a meta: WER 3,4%, acurácia 96,6%** (meta ≥92%), com frases sem
-  colisão com o `initial_prompt`. Os dois erros são `baldio`, palavra rara.
+  pt-BR (250 ms, Oliveira 2002) e casa com o *endpointer transacional* da Alexa (P50 300 ms).
+- **A régua limpa passa a meta: WER 3,4%, acurácia 96,6%** (meta ≥92%). Os dois erros são
+  `baldio`, palavra rara.
 
 ## O que está quebrado, e nós sabemos
 
 1. **`CaosDoDatTest` falha um teste por rodada, variando qual** (`Wearables SDK already
    initialized`). Falha em `HEAD` limpo. Precisa isolamento de processo por classe.
-2. **`+dotprod` sem atribuição** (o commit `ef5cd1b` afirmou 4× errado): `llvm-objdump` deu
-   `sdot = 0` — as opções acumulam no alvo único `ggml-cpu` e o último `-march` vencia.
-   Consertado (`sdot = 923`), mas o emulador saturado deu 3171/685/2724 ms na mesma rodada.
-3. **SIGILL latente sem FEAT_FP16:** o `libggml-cpu.so` tem 1765 instruções FP16 e o
-   `libwhisper.so` (escolhido quando **não** há `fphp`) depende dele. Piso agora declarado.
-4. **A régua de operação (21,2%) é contaminada e estatisticamente cega:** 20 das 52 palavras
+2. **`+dotprod` sem atribuição** (`ef5cd1b` afirmou 4× errado): `objdump` deu `sdot = 0`,
+   as opções acumulam no alvo único `ggml-cpu`. Consertado (`sdot = 923`), falta máquina
+   ociosa. **SIGILL latente sem FEAT_FP16:** o `libggml-cpu.so` tem 1765 instruções FP16 e o
+   `libwhisper.so` (escolhido sem `fphp`) depende dele; piso agora declarado.
+3. **A régua de operação (21,2%) é contaminada e estatisticamente cega:** 20 das 52 palavras
    estão no `initial_prompt`, e com `ΣN = 52` o IC95% é **[10,1%; 32,3%]**. Precisa de
    `ΣN ≈ 500`. O prompt estava **sem acento** e o BPE difere — corrigido.
    **A premissa do APK estava errada:** 372 MiB não excede o limite do Play (via AAB o base
    admite 500 MB). Decisão: manter tudo no APK e cortar o x86_64 do release (→ ~295 MiB).
-5. **A palavra de ativação foi MEDIDA: `Aurora` 3/3 contra `Claryon` 0/3** (controle). O
-   princípio: o traço discriminativo **não pode estar na consoante inicial** — as três que
-   falharam tiveram o *onset* corrompido (`d`andorinha, `fl`amirante, `f`arion); as duas que
-   passaram começam por vogal. Falta o número que decide: **falso positivo** em fala
-   espontânea. E o portão não existe — `grep -ri claryon` em `src/main` devolve **zero**.
-6. **Resposta falada: 2144 ms contra 2000.** A decomposição de "TTS + rota" estava errada:
-   ≥290 ms é o earcon `ACAO_EXECUTADA` tocando **serialmente** antes da síntese; a rota
-   contribui zero; `generateWithCallback` daria 0 ms (`max_num_sentences = 1`); e os "332 ms
-   de rede" não eram rede.
-7. **Buraco no aceite (b):** a preempção de P1 não alcança a fase de `render` — enquanto o
+4. **A palavra de ativação foi MEDIDA: `Aurora` 3/3 contra `Claryon` 0/3** (controle). O
+   traço discriminativo **não pode estar na consoante inicial** — as três que falharam
+   tiveram o *onset* corrompido; as duas que passaram começam por vogal. Falta o número que
+   decide: **falso positivo**. O portão não existe: `grep -ri claryon` em `src/main` = zero.
+5. **Resposta falada: 2144 ms contra 2000.** A decomposição estava errada: ≥290 ms é o
+   earcon `ACAO_EXECUTADA` tocando **serialmente** antes da síntese; a rota contribui zero;
+   `generateWithCallback` daria 0 ms (`max_num_sentences = 1`); os "332 ms de rede" não eram.
+6. **Buraco no aceite (b):** a preempção de P1 não alcança a fase de `render` — enquanto o
    TTS sintetiza (~1,5 s) o P1 não corta, e o instrumento não gera amostra.
-8. `errorStream` não coletado · `STOPPED` não terminal · câmera do DAT nunca pedida ·
+7. `errorStream` não coletado · `STOPPED` não terminal · câmera do DAT nunca pedida ·
    transcrição na origem (P1) não existe · `WakeWordDetector` sem implementação.
+
+**Pendências:** `security-crypto` `1.1.0-alpha06` · conferir se o documento submetido cita
+WhatsApp (§14.1 veda mudar escopo) · isolar `CaosDoDatTest`.
 
 ## O que vem a seguir
 
 **A Fase 2 não vence em 22/08:** o `ROADMAP` a agenda para **30/08–05/09**. O prazo de 22/08
 é da **Fase 0** — documento e deck no template, meia página de risco do art. 38 da LGPD, e
-reler a proposta atrás de menção a WhatsApp. O aceite (d) da Fase 0 falha hoje e é decisão
-humana de uma linha.
+reler a proposta atrás de menção a WhatsApp. O aceite (d) falha hoje: decisão humana.
 
-1. **Entregáveis de 22/08** (Fase 0), descrevendo a capacidade que **existe**: copiloto por
-   botão com STT, TTS e troca de grupo falada. Não o gatilho por voz.
+1. **Entregáveis de 22/08** (Fase 0), com a capacidade que **existe**: copiloto por botão,
+   STT, TTS e troca de grupo falada. Não o gatilho por voz.
 2. **Decisão sobre `Aurora`** e, se aprovada, medir o **falso positivo** em fala espontânea.
-3. **Bench `ΣN ≈ 500`** · **re-medir `+dotprod`** em máquina ociosa · **medir em arm64 real**.
-
-**Pendências:** `security-crypto` `1.1.0-alpha06` · conferir se o documento submetido cita
-WhatsApp (§14.1 veda mudar escopo) · isolar `CaosDoDatTest`.
+3. **Bench `ΣN ≈ 500`** · **re-medir `+dotprod`** ocioso · **medir em arm64 real**.
