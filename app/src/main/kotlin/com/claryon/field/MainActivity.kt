@@ -23,6 +23,7 @@ import com.claryon.field.radio.RadioViewModel
 import com.claryon.field.ui.CascoTatico
 import com.claryon.field.ui.Destino
 import com.claryon.field.ui.DiagnosticsViewModel
+import com.claryon.field.ui.MapaViewModel
 import com.claryon.field.ui.telas.Capacidade
 import com.claryon.field.ui.telas.TelaDeGuarnicao
 import com.claryon.field.ui.telas.TelaDeLogin
@@ -51,6 +52,8 @@ class MainActivity : ComponentActivity() {
             TemaClaryon {
                 val diag: DiagnosticsViewModel = viewModel()
                 val radio: RadioViewModel = viewModel()
+                // O mapa saiu do `DiagnosticsViewModel` — ver `MapaViewModel`.
+                val mapa: MapaViewModel = viewModel()
 
                 // `tudoConcedido`, não `podeOperar`: com `podeOperar` o agente que
                 // concedesse o microfone e negasse a localização ia direto à
@@ -74,6 +77,7 @@ class MainActivity : ComponentActivity() {
                     else -> Operacao(
                         diag = diag,
                         radio = radio,
+                        mapa = mapa,
                         destino = destino,
                         aoNavegar = { destino = it },
                         aoEncerrarTurno = {
@@ -108,6 +112,7 @@ class MainActivity : ComponentActivity() {
 private fun Operacao(
     diag: DiagnosticsViewModel,
     radio: RadioViewModel,
+    mapa: MapaViewModel,
     destino: Destino,
     aoNavegar: (Destino) -> Unit,
     aoEncerrarTurno: () -> Unit,
@@ -117,7 +122,7 @@ private fun Operacao(
     val pares by radio.pares.collectAsState()
     val noAr by radio.noAr.collectAsState()
     val copilotoOcupado by diag.copilotoOcupado.collectAsState()
-    val estadoMapa by diag.estadoDoMapa.collectAsState()
+    val estadoMapa by mapa.estado.collectAsState()
     val registro by diag.registration.collectAsState()
 
     LaunchedEffect(Unit) { diag.anunciarEstadoDegradado() }
@@ -135,7 +140,7 @@ private fun Operacao(
         // E o publicador é injetado antes do `iniciar`, senão o serviço nasce
         // coletando e descartando — o pior desperdício, porque o GPS acorda e o
         // dado morre no caminho.
-        CopilotService.publicador = diag.publicadorDePosicao
+        CopilotService.publicador = mapa.publicadorDePosicao
         CopilotService.iniciar(contexto, ModoOperacao.ATIVO)
         radio.abrir(
             canal = CANAL_DEMO,
@@ -170,8 +175,8 @@ private fun Operacao(
 
             Destino.MAPA -> TelaDoMapa(
                 estado = estadoMapa,
-                aoAbrir = diag::abrirMapa,
-                aoFechar = diag::fecharMapa,
+                aoAbrir = mapa::abrirMapa,
+                aoFechar = mapa::fecharMapa,
                 modifier = modifier,
             )
 

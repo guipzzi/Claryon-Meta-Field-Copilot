@@ -7,7 +7,9 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -45,11 +47,18 @@ class PrioritySoundQueueTest {
     /** Cria a fila num escopo próprio e garante que ele morre no fim do teste. */
     private suspend fun TestScope.comFila(
         render: suspend (Sound) -> ShortArray?,
-        play: suspend (ShortArray) -> Unit,
+        play: suspend (Sound, ShortArray) -> Unit,
+        aoInterromper: (Long) -> Unit = {},
         corpo: suspend (PrioritySoundQueue) -> Unit,
     ) {
         val escopoDaFila = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
-        val fila = PrioritySoundQueue(scope = escopoDaFila, render = render, play = play)
+        val fila = PrioritySoundQueue(
+            scope = escopoDaFila,
+            render = render,
+            play = play,
+            aoInterromper = aoInterromper,
+            agoraMs = { currentTime },
+        )
         try {
             corpo(fila)
         } finally {
@@ -67,7 +76,7 @@ class PrioritySoundQueueTest {
 
         comFila(
             render = { sound -> pcmDe(sound) },
-            play = { pcm ->
+            play = { _, pcm ->
                 val prioridade = prioridadeDe(pcm)
                 tocados.add(prioridade)
                 if (prioridade == Priority.RESPOSTA) {
@@ -81,11 +90,15 @@ class PrioritySoundQueueTest {
             },
         ) { fila ->
             fila.enqueue(tone(Priority.RESPOSTA))
-            advanceUntilIdle()
-            // A fila está presa em `play` para o RESPOSTA (dentro do `delay`).
+            // **`advanceTimeBy`, NUNCA `advanceUntilIdle` aqui.** `advanceUntilIdle`
+            // roda o `delay(10_000)` até o fim, a RESPOSTA termina sozinha, e o
+            // `finally` completa o `CompletableDeferred` — o teste passava
+            // VERDE sem nunca ter exercitado a preempção. Descoberto quando o
+            // teste de medição, ao lado, acusou zero interrupções.
+            advanceTimeBy(100)
 
             fila.enqueue(tone(Priority.EMERGENCIA))
-            advanceUntilIdle()
+            advanceTimeBy(100)
 
             assertTrue(
                 "job da reprodução RESPOSTA precisa ser cancelado, não apenas suceder",
@@ -106,7 +119,7 @@ class PrioritySoundQueueTest {
 
         comFila(
             render = { sound -> pcmDe(sound) },
-            play = { pcm ->
+            play = { _, pcm ->
                 val prioridade = prioridadeDe(pcm)
                 tocados.add(prioridade)
                 if (prioridade == Priority.EMERGENCIA) {
@@ -136,7 +149,7 @@ class PrioritySoundQueueTest {
 
         comFila(
             render = { sound -> pcmDe(sound) },
-            play = {
+            play = { _, _ ->
                 try {
                     delay(10_000)
                 } finally {
@@ -145,10 +158,10 @@ class PrioritySoundQueueTest {
             },
         ) { fila ->
             fila.enqueue(tone(Priority.INFORMATIVO))
-            advanceUntilIdle()
+            advanceTimeBy(100) // no meio do delay, tocando — ver o teste acima
 
             fila.clear()
-            advanceUntilIdle()
+            advanceTimeBy(100)
 
             assertTrue(
                 "clear() precisa cortar o que está tocando, não só esvaziar a fila pendente",
@@ -158,12 +171,62 @@ class PrioritySoundQueueTest {
     }
 
     @Test
+    fun `a preempcao e MEDIDA, nao so executada`() = runTest {
+        // O aceite da Fase 1 diz "corta em <= 200 ms, medido por Telemetry".
+        // Sem observador, a preempcao era demonstravel e nao mensuravel — e
+        // meta sem numero e aspiracao.
+        val atrasos = mutableListOf<Long>()
+
+        comFila(
+            render = { sound -> pcmDe(sound) },
+            play = { _, pcm ->
+                if (prioridadeDe(pcm) == Priority.RESPOSTA) delay(10_000)
+            },
+            aoInterromper = { atrasos.add(it) },
+        ) { fila ->
+            fila.enqueue(tone(Priority.RESPOSTA))
+            advanceTimeBy(100) // a RESPOSTA fica NO MEIO do delay, tocando
+
+            fila.enqueue(tone(Priority.EMERGENCIA))
+            advanceTimeBy(100)
+
+            assertEquals("uma preempção, uma medição", 1, atrasos.size)
+            assertTrue("o atraso medido não pode ser negativo", atrasos[0] >= 0)
+            assertTrue("aceite da Fase 1: <= 200 ms (medido: ${atrasos[0]}ms)", atrasos[0] <= 200)
+        }
+    }
+
+    @Test
+    fun `som que NAO interrompe nao gera medicao de preempcao`() = runTest {
+        // Sem esta guarda o percentil encheria de zeros de sons que nunca
+        // cortaram nada, e o p95 diria "0 ms" sobre uma preempção que nunca foi
+        // exercitada.
+        val atrasos = mutableListOf<Long>()
+
+        comFila(
+            render = { sound -> pcmDe(sound) },
+            play = { _, _ -> },
+            aoInterromper = { atrasos.add(it) },
+        ) { fila ->
+            fila.enqueue(tone(Priority.RESPOSTA))
+            advanceUntilIdle()
+            fila.enqueue(tone(Priority.INFORMATIVO))
+            advanceUntilIdle()
+            // Emergência com a fila VAZIA: não há o que cortar.
+            fila.enqueue(tone(Priority.EMERGENCIA))
+            advanceUntilIdle()
+
+            assertTrue("nada estava tocando: não houve preempção a medir", atrasos.isEmpty())
+        }
+    }
+
+    @Test
     fun `render nulo pula o som sem travar a fila`() = runTest {
         val tocados = mutableListOf<Priority>()
 
         comFila(
             render = { sound -> if (sound.priority == Priority.INFORMATIVO) null else pcmDe(sound) },
-            play = { pcm -> tocados.add(prioridadeDe(pcm)) },
+            play = { _, pcm -> tocados.add(prioridadeDe(pcm)) },
         ) { fila ->
             fila.enqueue(tone(Priority.INFORMATIVO))
             fila.enqueue(tone(Priority.RESPOSTA))

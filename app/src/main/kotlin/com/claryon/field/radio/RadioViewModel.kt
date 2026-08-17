@@ -358,6 +358,9 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
         // isto, a única forma de ver p50/p95 seria pedir por voz durante a
         // operação, e ninguém faz isso no meio de uma ocorrência.
         radio?.telemetria?.relatorio()?.let { Log.i(TAG, it) }
+        // O ciclo de voz e a preempção de P1 saem no mesmo ponto: é o único
+        // momento alcançável em que alguém lê os dois relatórios juntos.
+        Log.i(TAG, SaidaUnica.telemetriaDoCiclo.relatorio())
         radio?.sairDeModoAtivo()
         radio = null
         rota = null

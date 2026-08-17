@@ -22,12 +22,27 @@ import java.util.Base64
  */
 class FileOutbox(private val dir: File) : Outbox {
 
-    init {
+    /**
+     * **O construtor não toca em disco.**
+     *
+     * `mkdirs()` no `init` custou **965 ms na thread principal** no arranque do
+     * app — medido pelo StrictMode instalado na Fase 1, com a cadeia
+     * `DiagnosticsViewModel.<init>` → `SyncManager.outbox(app)` → aqui. Um
+     * construtor de ViewModel roda durante a composição, então esse quase um
+     * segundo era tela parada antes do primeiro quadro.
+     *
+     * O diretório passa a ser criado no primeiro uso que **precisa** dele — e
+     * quem precisa é só a escrita. Leitura em diretório inexistente já devolvia
+     * lista vazia por `listFiles() ?: emptyArray()`, que é a resposta certa: fila
+     * que nunca recebeu nada está vazia, não quebrada.
+     */
+    private fun garantirDiretorio() {
         if (!dir.exists()) dir.mkdirs()
     }
 
     @Synchronized
     override fun enqueue(item: OutboxItem): Long {
+        garantirDiretorio()
         val seq = (maiorSeq() + 1)
         escrever(seq, item)
         return seq
@@ -49,6 +64,7 @@ class FileOutbox(private val dir: File) : Outbox {
         val f = arquivo(seq)
         val atual = ler(f) ?: return -1
         val novo = atual.copy(attempts = atual.attempts + 1)
+        garantirDiretorio()
         escrever(seq, novo)
         return novo.attempts
     }

@@ -8,6 +8,7 @@ import com.claryon.agent.Utterance
 import com.claryon.agent.utteranceFor
 import com.claryon.common.Earcon
 import com.claryon.common.Priority
+import com.claryon.common.Telemetry
 import com.claryon.voice.VoiceActivityDetector
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -42,6 +43,19 @@ class VoiceCycle(
     private val executor: IntentExecutor,
     private val emitir: suspend (Utterance) -> Unit,
     private val sampleRateHz: Int,
+    /**
+     * `NoOp` por padrão: instrumentação é opt-in e nenhum teste existente
+     * precisa aprender um parâmetro novo.
+     *
+     * Marca só os estágios que **este** objeto executa em sequência. Os dois de
+     * reprodução (`EARCON_PLAYED`, `RESPONSE_FIRST_AUDIO`) são marcados pelo
+     * dono da saída, no instante em que o PCM entra no `AudioTrack` — marcá-los
+     * aqui mediria `emitir`, que só enfileira, e produziria um número
+     * consistentemente otimista.
+     */
+    private val telemetria: Telemetry = Telemetry.NoOp,
+    private val agoraMs: () -> Long = { System.currentTimeMillis() },
+    private val novoCicloId: () -> String = { "ciclo-${System.currentTimeMillis()}" },
 ) {
 
     data class Resultado(
@@ -53,16 +67,25 @@ class VoiceCycle(
 
     /** Executa um ciclo: espera uma janela de fala, entende, **age**, e responde. */
     suspend fun runOnce(): Resultado {
+        val cicloId = novoCicloId()
         val segmento = vad.segment(pcmInput()).first() // 1ª janela fechada pelo VAD
+
+        // Este é o zero de todas as metas de latência do ciclo: o instante em
+        // que o agente PAROU de falar. Tudo depois disso é espera dele.
+        telemetria.mark(cicloId, Telemetry.Stage.VAD_WINDOW_CLOSED, agoraMs())
 
         // Earcon IMEDIATO, antes do STT: confirma escuta enquanto a ação corre.
         emitir(Utterance.Sinalizar(Earcon.OUVI_VOCE, Priority.RESPOSTA))
 
         val transcricao = sttFn(segmento.pcm, segmento.sampleRateHz.orDefault(sampleRateHz))
+        telemetria.mark(cicloId, Telemetry.Stage.STT_DONE, agoraMs())
+
         val intent = router.route(transcricao)
+        telemetria.mark(cicloId, Telemetry.Stage.INTENT_ROUTED, agoraMs())
 
         // A ação acontece AQUI. Só depois existe algo a dizer.
         val outcome = executor.execute(intent)
+        telemetria.mark(cicloId, Telemetry.Stage.ACTION_DONE, agoraMs())
 
         val utterance = utteranceFor(outcome)
         emitir(utterance)

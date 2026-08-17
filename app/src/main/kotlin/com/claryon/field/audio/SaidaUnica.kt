@@ -4,10 +4,14 @@ import android.app.Application
 import android.content.Context
 import android.util.Log
 import com.claryon.audio.GlassesAudioManagerImpl
+import com.claryon.common.Earcon
 import com.claryon.common.Result
+import com.claryon.common.Telemetry
 import com.claryon.field.voice.Modelos
+import com.claryon.field.voice.TelemetriaDoCicloDeVoz
 import com.claryon.field.voice.VoiceOutput
 import com.claryon.net.SupressorDeSaidaPropria
+import com.claryon.sound.Sound
 import com.claryon.voice.AndroidTts
 import com.claryon.voice.PcmAudio
 import com.claryon.voice.PiperTts
@@ -102,6 +106,13 @@ object SaidaUnica {
     private var piper: PiperTts? = null
     private var piperResolvido = false
 
+    /**
+     * Telemetria do ciclo de voz. Mora aqui porque é aqui que os dois marcos de
+     * **reprodução** acontecem — e eles têm de ser marcados no instante em que o
+     * som começa a sair, não quando foi pedido. Ver `TelemetriaDoCicloDeVoz`.
+     */
+    val telemetriaDoCiclo = TelemetriaDoCicloDeVoz()
+
     /** A fila única. Criada na primeira chamada. */
     fun de(context: Context): VoiceOutput =
         instancia ?: synchronized(this) {
@@ -113,6 +124,11 @@ object SaidaUnica {
                     scope = escopo,
                     sintetizar = { texto -> sintetizar(app, fallback, texto) },
                     reproduzir = { pcm, sr -> reproduzirComRotaESupressao(audio, pcm, sr) },
+                    aoIniciarReproducao = { sound -> marcarReproducao(sound) },
+                    aoInterromperPorEmergencia = { atraso ->
+                        telemetriaDoCiclo.registrarPreempcao(atraso)
+                        Log.i(TAG, "P1 cortou a reprodução em curso em ${atraso}ms")
+                    },
                 ).also { instancia = it }
             }
         }
@@ -146,6 +162,24 @@ object SaidaUnica {
             // resta registrar. Quem chamou já sabe pelo próprio estado da UI.
             is Result.Failure ->
                 Log.w(TAG, "sem rota de áudio para reproduzir")
+        }
+    }
+
+    /**
+     * Traduz "começou a tocar isto" em marco de telemetria.
+     *
+     * O earcon `OUVI_VOCE` é o do ciclo de voz — os outros tons (falha do rádio,
+     * prioritária, gravando) não pertencem a nenhum ciclo e não devem virar
+     * `EARCON_PLAYED`, senão a meta "fim da fala → earcon" passaria a medir um
+     * bipe do rádio que aconteceu no meio de outra coisa.
+     */
+    private fun marcarReproducao(sound: Sound) {
+        val agora = System.currentTimeMillis()
+        when {
+            sound is Sound.Tone && sound.earcon == Earcon.OUVI_VOCE ->
+                telemetriaDoCiclo.marcarNoCicloCorrente(Telemetry.Stage.EARCON_PLAYED, agora)
+            sound is Sound.Speech ->
+                telemetriaDoCiclo.marcarNoCicloCorrente(Telemetry.Stage.RESPONSE_FIRST_AUDIO, agora)
         }
     }
 

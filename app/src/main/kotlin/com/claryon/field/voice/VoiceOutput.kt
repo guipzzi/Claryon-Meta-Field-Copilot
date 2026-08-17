@@ -42,6 +42,18 @@ class VoiceOutput(
      * primeira versão desta correção.
      */
     private val dispatcherDeAudio: CoroutineContext = Dispatchers.Default,
+    /**
+     * Chamado no instante em que o PCM **começa a ser reproduzido** — não no
+     * `emitir`, que só enfileira.
+     *
+     * É a diferença entre medir latência e medir intenção: a fila pode estar
+     * ocupada com uma emergência, e o earcon de "ouvi você" sair segundos depois
+     * de ter sido pedido. Um marco no enfileiramento afirmaria "400 ms" com o
+     * agente esperando três segundos em silêncio.
+     */
+    private val aoIniciarReproducao: (Sound) -> Unit = {},
+    /** Repassado à fila: mede o aceite "P1 corta em ≤ 200 ms". */
+    private val aoInterromperPorEmergencia: (atrasoMs: Long) -> Unit = {},
 ) {
 
     init {
@@ -65,7 +77,13 @@ class VoiceOutput(
                 is Sound.Speech -> sintetizar(sound.text)?.let { naTaxaDeSaida(it) }
             }
         },
-        play = { pcm -> reproduzir(pcm, TAXA_SAIDA_HZ) },
+        play = { sound, pcm ->
+            // ANTES de escrever no track: é este o instante que as metas de
+            // latência do ciclo de voz medem.
+            aoIniciarReproducao(sound)
+            reproduzir(pcm, TAXA_SAIDA_HZ)
+        },
+        aoInterromper = aoInterromperPorEmergencia,
     )
 
     /** Enfileira o que o agente deve ouvir. Não bloqueia: a fila conduz a ordem. */

@@ -28,7 +28,7 @@ import com.claryon.field.permissoes.PermissoesEssenciais
 import com.claryon.agent.FalaDePosicao
 import com.claryon.agent.PosicaoRelativa
 import com.claryon.agent.Rumo
-import com.claryon.field.auth.CofreDeSessaoCifrado
+import com.claryon.field.auth.SessaoDoAgente
 import com.claryon.net.AutenticacaoSupabase
 import com.claryon.net.ConfigRealtime
 import com.claryon.net.ConsultaDePosicao
@@ -202,49 +202,30 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
     private val local = ProvedorDeLocal(app)
 
     // ── Sessão e rede (C2) ────────────────────────────────────────────────────
+    //
+    // A sessão saiu daqui: `SessaoDoAgente` é dono de processo. Este ViewModel
+    // chamava-se "Diagnostics" e guardava a credencial do app inteiro, o que
+    // impedia a decomposição — `MainActivity` precisava dele só para o portão de
+    // login. Os campos abaixo são reexportações finas, mantidas para não mudar a
+    // superfície da UI no mesmo passo em que se move a propriedade.
 
-    /** `false` quando `local.properties` não trouxe o projeto: sem servidor, sem C2. */
-    val redeConfigurada: Boolean =
-        BuildConfig.SUPABASE_URL.isNotBlank() && BuildConfig.SUPABASE_ANON_KEY.isNotBlank()
+    val redeConfigurada: Boolean = SessaoDoAgente.redeConfigurada
 
-    private val configRede = ConfigRealtime(
-        projetoUrl = BuildConfig.SUPABASE_URL.trimEnd('/'),
-        apiKey = BuildConfig.SUPABASE_ANON_KEY,
-    )
+    private val configRede = SessaoDoAgente.config
 
-    val autenticacao = AutenticacaoSupabase(
-        config = configRede,
-        cofre = CofreDeSessaoCifrado(app),
-    )
+    val autenticacao = SessaoDoAgente.de(app)
 
     private val consulta = ConsultaDePosicao(
         config = configRede,
         // `runBlocking` NÃO: a renovação de token não pode travar o ciclo de voz.
-        // O token corrente é lido de forma síncrona a partir do cofre, e a
-        // renovação acontece antes, no `publicarPosicao` periódico.
-        tokenDeSessao = { tokenCorrente },
+        // Lê o cache já validado; quem renova é `SessaoDoAgente.tokenValido`.
+        tokenDeSessao = { SessaoDoAgente.tokenCorrente },
     )
 
-    @Volatile
-    private var tokenCorrente: String? = null
-
-    /** Exposto para o serviço em primeiro plano, que coleta com o app fechado. */
-    val publicadorDePosicao: com.claryon.net.PublicadorDePosicao get() = publicador
-
-    private val publicador = PublicadorDePosicaoSupabase(
-        config = configRede,
-        tokenDeSessao = { autenticacao.tokenValido()?.also { tokenCorrente = it } },
-    )
 
     // ── Mapa da guarnição (C5) ────────────────────────────────────────────────
 
 
-    private val _estadoDoMapa = MutableStateFlow(
-        EstadoDoMapa.indisponivel("Abra o mapa para ver a guarnição."),
-    )
-    val estadoDoMapa: StateFlow<EstadoDoMapa> = _estadoDoMapa.asStateFlow()
-
-    private var bombaDoMapa: Job? = null
 
     /**
      * Chamado pelo `ON_START` da tela do mapa.
@@ -269,79 +250,6 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
     fun anunciarEstadoDegradado() {
         anunciarCapacidadesPerdidas()
         anunciarRegistroPerdido()
-    }
-
-    fun abrirMapa() {
-        if (bombaDoMapa != null) return
-        bombaDoMapa = viewModelScope.launch {
-            if (!redeConfigurada || autenticacao.tokenValido()?.also { tokenCorrente = it } == null) {
-                _estadoDoMapa.value =
-                    EstadoDoMapa.indisponivel("Sem sessão. Entre para ver a guarnição.")
-                return@launch
-            }
-
-            val historico = HistoricoDoCanal(
-                config = configRede,
-                tokenDeSessao = { autenticacao.tokenValido()?.also { tokenCorrente = it } },
-            )
-
-            // Publicar a própria posição ao abrir. Reciprocidade: o servidor só
-            // devolve distâncias se souber de onde medir, e quem vê é visto.
-            publicarPosicao()
-
-            while (true) {
-                val r = historico.posicoesDoGrupo(TALK_GROUP_DEMO)
-                _estadoDoMapa.value = r.fold(
-                    onSuccess = { lista -> montarMapa(lista) },
-                    onFailure = {
-                        EstadoDoMapa.indisponivel("Não foi possível ler as posições da guarnição.")
-                    },
-                )
-                // Redesenhar por tempo, e não só quando chega dado: o esmaecimento
-                // depende do relógio. Um par que **parou** de publicar precisa
-                // esmaecer sozinho — é esse o caso que a regra existe para cobrir.
-                delay(INTERVALO_DE_REDESENHO_MS)
-                publicarPosicao()
-            }
-        }
-    }
-
-    /**
-     * Monta o estado do mapa a partir das grandezas que o servidor devolveu.
-     *
-     * A idade da **própria** posição é verificada primeiro: as distâncias foram
-     * todas medidas a partir dela, então uma posição própria velha torna a tela
-     * inteira falsa — não só uma linha.
-     */
-    private suspend fun montarMapa(lista: List<RespostaDePosicao>): EstadoDoMapa {
-        val minhaIdade = lista.minOfOrNull { it.idadeDoSolicitanteS } ?: Int.MAX_VALUE
-        if (lista.isNotEmpty() && minhaIdade > FalaDePosicao.IDADE_MAXIMA_S) {
-            return EstadoDoMapa.indisponivel(
-                "Sua posição está desatualizada. As distâncias seriam medidas do lugar errado.",
-            )
-        }
-        // A origem do mapa vem da coleta local, não do servidor: o servidor
-        // devolve grandezas relativas justamente para nunca ter que devolver
-        // coordenada, e a única coordenada que este aparelho pode ter é a dele.
-        val minha = local.ultimaPosicao()
-        return MapaDePares.montarDeGrandezas(
-            lista,
-            assinado = true,
-            minhaLatitude = minha?.latitude,
-            minhaLongitude = minha?.longitude,
-            meuRumoGraus = minha?.rumoGraus,
-        )
-    }
-
-    /** Chamado pelo `ON_STOP` da tela. Fecha a assinatura e descarta o espelho. */
-    /** Chamado pelo `ON_STOP` da tela. Fecha a assinatura e descarta o espelho. */
-    fun fecharMapa() {
-        // Sondagem, não assinatura: cancelar o laço já para o tráfego por
-        // completo. Não há nada aberto do outro lado para avisar — que é
-        // justamente a vantagem de perguntar em vez de assinar.
-        bombaDoMapa?.cancel()
-        bombaDoMapa = null
-        _estadoDoMapa.value = EstadoDoMapa.indisponivel("Abra o mapa para ver a guarnição.")
     }
 
     /**
@@ -378,17 +286,6 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
     private var jaAnunciouPermissoes = false
 
     /**
-     * Sobe a posição própria. É ela que dá ao servidor o ponto de onde medir a
-     * distância na consulta por voz — sem publicar, C2 responde "não sei de onde
-     * medir", que é honesto mas inútil.
-     */
-    suspend fun publicarPosicao() {
-        if (!redeConfigurada) return
-        val c = local.ultimaPosicao() ?: return
-        publicador.publicar(c.latitude, c.longitude, c.precisaoM, null)
-    }
-
-    /**
      * Traduz a resposta do servidor em [BuscaDePar].
      *
      * O ramo de [BuscaDePar.PosicaoPropriaVelha] é o que impede o modo de falha
@@ -397,7 +294,7 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
      * quilômetros sem nada no payload denunciando.
      */
     private suspend fun localizar(indicativo: String): BuscaDePar {
-        if (!redeConfigurada || autenticacao.tokenValido()?.also { tokenCorrente = it } == null) {
+        if (!redeConfigurada || SessaoDoAgente.tokenValido(getApplication()) == null) {
             return BuscaDePar.Indisponivel
         }
         val r = consulta.onde(indicativo).getOrElse { return BuscaDePar.Indisponivel }
@@ -422,12 +319,34 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
      * "Sem rede. Na fila." — que é a verdade. Quando o transporte existir, troca-se
      * [SemTransporteGateway] aqui e nada mais muda.
      */
-    private val despachante = TacticalDispatcher(
-        outbox = SyncManager.outbox(app),
-        gateway = SemTransporteGateway,
-        novoId = { m -> "${m.agentId}-${System.currentTimeMillis()}" },
-        agora = { System.currentTimeMillis() },
-    )
+    /**
+     * `by lazy` + aquecimento em IO, e não campo direto.
+     *
+     * `SyncManager.outbox(app)` chama `context.filesDir`, e o
+     * `ensurePrivateDirExists` do framework faz E/S de disco na primeira
+     * chamada: **965 ms na thread principal**, medidos pelo StrictMode com a
+     * cadeia `DiagnosticsViewModel.<init>` → `SyncManager.outbox` →
+     * `ContextImpl.getFilesDir`. Um construtor de ViewModel roda durante a
+     * composição, então isso era quase um segundo de tela parada.
+     *
+     * O `filesDir` fica cacheado pelo framework depois da primeira resolução, e
+     * é o `init` abaixo que paga essa primeira em `Dispatchers.IO`. Sem o `by
+     * lazy` o campo seria construído na hora, no construtor, e o aquecimento
+     * chegaria tarde demais.
+     */
+    private val despachante by lazy {
+        TacticalDispatcher(
+            outbox = SyncManager.outbox(app),
+            gateway = SemTransporteGateway,
+            novoId = { m -> "${m.agentId}-${System.currentTimeMillis()}" },
+            agora = { System.currentTimeMillis() },
+        )
+    }
+
+    init {
+        // Paga a primeira resolução do `filesDir` fora da Main. Ver `despachante`.
+        viewModelScope.launch(Dispatchers.IO) { despachante }
+    }
 
     // Dono único da saída (`SaidaUnica`) — a mesma fila que o rádio usa para os
     // próprios earcons. Antes deste ViewModel construía a sua própria
@@ -439,7 +358,8 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
     // pré-roll do rádio sem proteção nenhuma. Ver `SaidaUnica`.
     private val saida = SaidaUnica.de(app)
 
-    private val executor = ClaryonIntentExecutor(
+    private val executor by lazy {
+        ClaryonIntentExecutor(
         cofre = cofre,
         despachante = despachante,
         // Identidade de demonstração; no produto vem do onboarding/credencial.
@@ -465,7 +385,8 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
         // agente ouve "Consulta indisponível." em vez de "Alfa Dois não
         // localizado", que afirmaria que o companheiro sumiu.
         localizarPar = { indicativo -> localizar(indicativo) },
-    )
+        )
+    }
 
     /** Comando por TEXTO (bypassa o STT): roteador → resposta lacônica → TTS. */
     fun runCommand(text: String) {
@@ -675,6 +596,10 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
             val origem = Modelos.fonteDoWhisper(getApplication())?.toString() ?: "indisponível"
             _commandStatus.value = "ciclo: ouvindo… (STT=$origem)"
 
+            // Um id, gerado uma vez, usado pelos dois lados da instrumentação.
+            val cicloId = "ciclo-${System.currentTimeMillis()}"
+            SaidaUnica.telemetriaDoCiclo.abrirCiclo(cicloId)
+
             val cycle = VoiceCycle(
                 pcmInput = { audio.microfonePcm(prova) },
                 vad = EnergyVoiceActivityDetector(sampleRateHz = 16_000),
@@ -685,6 +610,18 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
                 executor = executor,
                 emitir = { utterance -> saida.emitir(utterance) },
                 sampleRateHz = 16_000,
+                // A instrumentação que faltava: `Telemetry.mark` não tinha
+                // NENHUM chamador no projeto inteiro, e as três metas de
+                // latência do ciclo de voz eram adjetivo. Os marcos de
+                // reprodução vêm de `SaidaUnica`, no instante em que o som
+                // começa a sair — ver `TelemetriaDoCicloDeVoz`.
+                telemetria = SaidaUnica.telemetriaDoCiclo,
+                // **O MESMO id** que `abrirCiclo` registrou. Gerar um id aqui e
+                // outro ali faria os marcos de reprodução (que usam o ciclo
+                // corrente) caírem num ciclo diferente do que o `VoiceCycle`
+                // marca — e o relatório mostraria "sem amostras" nas duas metas
+                // que mais importam, sem nenhum erro visível.
+                novoCicloId = { cicloId },
             )
             // Timeout e exceção são coisas DIFERENTES e não podem virar a mesma
             // mensagem: colapsar os dois em "sem fala detectada" mandou o

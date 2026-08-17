@@ -20,12 +20,25 @@ import kotlin.coroutines.coroutineContext
  * @param render converte um [Sound] em PCM (earcon → [EarconSynthesizer]; fala →
  *   TTS). `null` = pular.
  * @param play reproduz o PCM (AudioTrack via GlassesAudioManager). Suspende até o
- *   fim; é cancelado quando uma **emergência** interrompe.
+ *   fim; é cancelado quando uma **emergência** interrompe. Recebe também o
+ *   [Sound] de origem: quem reproduz precisa saber **o que** está tocando para
+ *   marcar telemetria de reprodução (earcon vs. fala) sem ter de adivinhar pelo
+ *   tamanho do PCM.
  */
 class PrioritySoundQueue(
     private val scope: CoroutineScope,
     private val render: suspend (Sound) -> ShortArray?,
-    private val play: suspend (ShortArray) -> Unit,
+    private val play: suspend (Sound, ShortArray) -> Unit,
+    /**
+     * Chamado quando uma emergência **de fato corta** um som em curso, com o
+     * tempo entre o `enqueue` da emergência e o cancelamento do job que tocava.
+     *
+     * É o instrumento do aceite "um P1 chegando durante fala do copiloto corta a
+     * fala em ≤ 200 ms". Sem ele, a preempção era demonstrável por teste
+     * unitário e **não mensurável** — e meta sem número é aspiração.
+     */
+    private val aoInterromper: (atrasoMs: Long) -> Unit = {},
+    private val agoraMs: () -> Long = { System.currentTimeMillis() },
 ) : SoundQueue {
 
     private val scheduler = SoundScheduler()
@@ -42,18 +55,26 @@ class PrioritySoundQueue(
     }
 
     override fun enqueue(sound: Sound) {
+        // Fora do `launch`: é o instante em que a emergência CHEGOU, não o
+        // instante em que a corrotina foi escalonada. Medir lá dentro esconderia
+        // justamente a espera que interessa quando a Main está ocupada.
+        val chegada = agoraMs()
         scope.launch {
             // Tudo sob o mesmo lock que o laço usa para publicar `playing`/
             // `playingPriority`: ler a prioridade nova e cancelar o job antigo em
             // dois passos fazia a emergência cancelar um job JÁ CONCLUÍDO,
             // deixando o som de menor prioridade tocar até o fim — quebrando
             // "nível 1 interrompe tudo".
+            var interrompeu = false
             mutex.withLock {
                 if (!scheduler.offer(sound)) return@launch
                 if (scheduler.deveInterromper(sound.priority, playingPriority)) {
                     playing?.cancel()
+                    interrompeu = true
                 }
             }
+            // Fora do lock: o observador é do chamador e não pode segurar a fila.
+            if (interrompeu) aoInterromper(agoraMs() - chegada)
             wake.trySend(Unit)
         }
     }
@@ -91,7 +112,7 @@ class PrioritySoundQueue(
                 val pcm = render(next) ?: continue
                 val job = playScope.launch {
                     try {
-                        play(pcm)
+                        play(next, pcm)
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Throwable) {

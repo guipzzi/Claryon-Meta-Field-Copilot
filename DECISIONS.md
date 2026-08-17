@@ -1310,3 +1310,58 @@ aparelho tem" é exatamente o que se defende numa auditoria.
   Limitação declarada: `detectCustomSlowCalls` **não** pega o bloqueio do `MediaCodec` (não é
   E/S aos olhos do StrictMode); a garantia de que o Opus saiu da Main é o `dispatcher`
   injetado, não este detector.
+
+## 2026-08-16 — Fase 1, segunda passada: o que a primeira deixou pela metade
+
+- **Eu declarei "Fase 1 FECHADA" com dois itens do ROADMAP por fazer.** O item de telemetria
+  pede `Telemetry.mark` **e** `TelemetriaDoRadio`; só a segunda tinha sido ligada. O item
+  `[REFAT]` de quebrar o `DiagnosticsViewModel` nunca foi iniciado — eu sequer criei tarefa
+  para ele. E dois critérios de aceite não tinham número: a preempção de P1 em ≤ 200 ms
+  (provada por teste, nunca medida) e a queda de mensagens/s (não atingida, por decisão sobre
+  o `AgrupadorDeQuadros`). O usuário perguntou se a fase estava completa; não estava.
+
+- **`Telemetry.mark` mede reprodução REAL, não enfileiramento.** `VoiceOutput.emitir` só
+  enfileira; a fila pode estar ocupada com uma emergência. Marcar ali daria "400 ms" com o
+  agente esperando três segundos em silêncio. Por isso `PrioritySoundQueue.play` passou a
+  receber o `Sound` junto do PCM, e `SaidaUnica` marca `EARCON_PLAYED`/`RESPONSE_FIRST_AUDIO`
+  no instante em que o áudio entra no `AudioTrack`. `WAKE_DETECTED` fica **sem produtor** e o
+  relatório diz isso — "sem amostras", nunca zero.
+
+- **"O primeiro marco vence."** O ciclo continua corrente depois que `runOnce` retorna, porque
+  a fala só toca quando a fila chega nela. Sem essa regra, um `Sound.Speech` posterior (o "Sem
+  rede." do rádio) sobrescreveria o instante e a métrica mediria outra coisa, atribuída ao
+  ciclo errado. `RESPONSE_FIRST_AUDIO` diz *first* no nome.
+
+- **Um teste meu passava pelo motivo errado, e o teste seguinte denunciou.** O teste de
+  preempção usava `advanceUntilIdle()` depois de enfileirar a RESPOSTA — o que roda o
+  `delay(10_000)` inteiro, faz a reprodução terminar sozinha e completa o `CompletableDeferred`
+  do `finally`. Verde, sem nunca ter exercitado o corte. Só apareceu quando o teste de
+  *medição* acusou zero interrupções. Trocado por `advanceTimeBy`, nos três testes afetados.
+
+- **O conserto do StrictMode mirou a peça errada na primeira tentativa.** Tirei o `mkdirs()`
+  do construtor do `FileOutbox` — correto e ainda assim insuficiente: o log de aparelho
+  mostrou que os 965 ms são de `context.filesDir`, cujo `ensurePrivateDirExists` do framework
+  faz E/S na primeira chamada. A correção real é `by lazy` no `despachante` mais aquecimento
+  em `Dispatchers.IO` no `init`. Sem reinstalar e reler o log, eu teria fechado o achado como
+  resolvido. **Medir depois de consertar não é formalidade.**
+
+- **`SessaoDoAgente` antes de qualquer corte, e é pré-requisito, não consequência.** Nenhum
+  dos três ViewModels propostos é dono natural da autenticação: o mapa usa, o copiloto usa, o
+  rádio usa, e o `MainActivity` usa para o portão de login. Deixá-la em qualquer um faria o
+  `MainActivity` instanciar aquele ViewModel só para decidir se mostra a tela de login.
+  Quarto objeto de processo, pelo mesmo critério dos outros três.
+
+- **A quebra parou no `MapaViewModel`, de propósito.** `CopilotoViewModel` e
+  `EvidenciaViewModel` compartilham `executor` e `gravacaoJob` — e esses dois **são** a
+  exclusão mútua entre gravar evidência e falar com o copiloto: o handle da gravação vive
+  dentro do executor. Duplicá-lo produziria manifesto aberto e vazio, que é exatamente a
+  mentira que o KDoc do cofre diz ter vindo corrigir. O corte seguinte precisa de um dono
+  único do executor primeiro.
+
+- **O push falhava por configuração, não por falta de acesso.** `~/.gitconfig` tem
+  `credential.https://github.com.helper` vazio (o que **zera** a cadeia herdada) seguido de
+  `!gh auth git-credential` — o que o `gh auth setup-git` escreve. Com isso o `osxkeychain`
+  do `/opt/homebrew/etc/gitconfig` é descartado para github.com, e o `gh` está com token
+  inválido (`gh auth status`). O keychain tem credencial válida: o push passou forçando
+  `-c credential.https://github.com.helper=osxkeychain`. Hipótese não verificada: o PAT
+  exposto no setup da Fase 0 pode ter sido revogado automaticamente pelo GitHub.

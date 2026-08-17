@@ -7,6 +7,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import java.io.File
 
 class OfflineSyncTest {
 
@@ -26,6 +27,36 @@ class OfflineSyncTest {
         priority = "ALTA",
         evidenceStatus = null,
     )
+
+    @Test
+    fun construtor_naoTocaEmDisco() {
+        // Regressão medida: `mkdirs()` no `init` custava 965 ms na Main durante o
+        // arranque (`DiagnosticsViewModel.<init>` → `SyncManager.outbox`), achado
+        // pelo StrictMode instalado na Fase 1. Construir uma `FileOutbox` é
+        // barato por contrato; quem paga disco é quem escreve.
+        val dir = File(tmp.newFolder("raiz"), "ainda-nao-existe")
+        assertFalse("pré-condição do teste", dir.exists())
+
+        FileOutbox(dir)
+
+        assertFalse("o construtor criou o diretório — voltou a tocar em disco", dir.exists())
+    }
+
+    @Test
+    fun oDiretorioNasceNaPrimeiraEscrita_eALeituraAntesDissoEhListaVazia() {
+        val dir = File(tmp.newFolder("raiz2"), "outbox")
+        val fila = FileOutbox(dir)
+
+        // Fila que nunca recebeu nada está VAZIA, não quebrada.
+        assertEquals(0, fila.size())
+        assertTrue(fila.list().isEmpty())
+        assertFalse(dir.exists())
+
+        fila.enqueue(item("1"))
+
+        assertTrue("a escrita precisa criar o diretório", dir.exists())
+        assertEquals(1, fila.size())
+    }
 
     @Test
     fun fila_persisteEmDisco_eSobreviveANovaInstancia() {
