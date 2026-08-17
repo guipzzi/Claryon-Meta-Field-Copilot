@@ -20,6 +20,7 @@ interface Telemetry {
         WAKE_DETECTED,       // wake word disparou
         VAD_WINDOW_CLOSED,   // fim de fala detectado → earcon dispara aqui
         EARCON_PLAYED,       // primeira nota do earcon de reconhecimento
+        STT_STARTED,         // o PCM entrou no whisper — o zero do custo REAL do STT
         STT_DONE,            // transcrição pronta
         INTENT_ROUTED,       // intenção classificada
         ACTION_DONE,         // ação local/rede concluída

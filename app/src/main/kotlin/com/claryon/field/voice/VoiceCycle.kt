@@ -86,6 +86,14 @@ class VoiceCycle(
         // Earcon IMEDIATO, antes do STT: confirma escuta enquanto a ação corre.
         emitir(Utterance.Sinalizar(Earcon.OUVI_VOCE, Priority.RESPOSTA))
 
+        // **O zero do custo REAL do STT.**
+        //
+        // Sem este marco, `Transicao.STT` media `STT_DONE − VAD_WINDOW_CLOSED` — e
+        // `VAD_WINDOW_CLOSED` está ancorado 600 ms no passado (o hangover do VAD),
+        // com o `emitir` do earcon ainda no meio. O relatório dizia "transcrição
+        // (whisper): 1021 ms" quando o whisper custava ~421. Mentira de rótulo, e
+        // dela saíram dois KDoc de produção repetindo o número errado.
+        telemetria.mark(cicloId, Telemetry.Stage.STT_STARTED, agoraMs())
         val transcricao = sttFn(segmento.pcm, segmento.sampleRateHz.orDefault(sampleRateHz))
         telemetria.mark(cicloId, Telemetry.Stage.STT_DONE, agoraMs())
 

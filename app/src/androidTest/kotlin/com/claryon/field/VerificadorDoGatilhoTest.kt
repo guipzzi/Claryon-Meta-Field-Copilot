@@ -460,4 +460,77 @@ class VerificadorDoGatilhoTest {
             agregado.acuraciaPercentual >= 92.0,
         )
     }
+
+    /**
+     * **A régua limpa: frases cujo vocabulário NÃO está no `initial_prompt`.**
+     *
+     * O bench acima mede o **melhor caso do prompt**: todas as suas quatro frases
+     * têm de duas a três palavras dentro do prior de `jni.c`. O número que sai dali
+     * descreve o produto em uso, e é legitimamente melhor — mas não pode ser o que
+     * vai contra a meta de ≥92% do `ROADMAP`, porque não mede o STT: mede o STT
+     * mais uma dica que eu mesmo dei.
+     *
+     * Estas frases são do mesmo domínio operacional e **não compartilham nenhuma
+     * palavra de conteúdo** com o prompt (`Central`, `guarnicao`, `ocorrencia`,
+     * `viatura`, `deslocamento`, `apoio`, `Sargento`, `Claryon`). A lista dos dois
+     * lados vive em `docs/LEXICO_DO_INITIAL_PROMPT.md`, lado a lado, para que a
+     * colisão seja visível numa tela — foi por não estarem juntas que ela passou.
+     *
+     * As duas réguas são reportadas **sempre juntas**. A diferença entre elas é
+     * quanto o prior vale, número que ninguém neste projeto tinha.
+     */
+    @Test
+    fun qualidadeDoStt_reguaLimpa(): Unit = runBlocking {
+        val frases = listOf(
+            "O veículo parou na esquina da avenida principal.",
+            "Dois indivíduos correram para o terreno baldio.",
+            "A perseguição terminou perto do posto de gasolina.",
+            "Solicito reforço imediato no ponto indicado.",
+        )
+
+        // Mesma sequência do outro bench: sintetiza tudo, solta o Piper, e só então
+        // carrega o whisper. Os dois no mesmo processo estouram o LMK.
+        val piper = Modelos.piper(ctx)
+        Assume.assumeTrue("Piper ausente", piper != null)
+        val amostras = mutableListOf<Pair<String, ShortArray>>()
+        for (frase in frases) {
+            repeat(2) {
+                piper!!.synthesize(frase).getOrNull()?.let {
+                    amostras += frase to reamostrar(it.samples, it.sampleRateHz, taxa)
+                }
+            }
+        }
+        piper!!.release()
+        Assume.assumeTrue("Piper não sintetizou", amostras.isNotEmpty())
+
+        val whisper = Modelos.whisper(ctx)
+        Assume.assumeTrue("modelo whisper ausente", whisper != null)
+
+        val pares = mutableListOf<Pair<String, String>>()
+        for ((frase, pcm) in amostras) {
+            val txt = (whisper!!.transcribe(pcm, taxa) as? Result.Success)?.value?.text.orEmpty()
+            pares += frase to txt
+            android.util.Log.i(
+                "ClaryonField",
+                "STT LIMPA | esperado: \"$frase\" | veio: \"$txt\" | ${Wer.calcular(frase, txt)}",
+            )
+        }
+
+        val agregado = Wer.calcularCorpus(pares)
+        android.util.Log.i(
+            "ClaryonField",
+            """
+            |RÉGUA LIMPA — ${pares.size} amostras SEM colisão com o initial_prompt
+            |  modelo ......... ${Modelos.WHISPER_ASSET}
+            |  $agregado
+            |  acurácia ....... ${"%.1f".format(agregado.acuraciaPercentual)}%
+            |  erros .......... ${agregado.errosLegiveis().take(500)}
+            |  (comparar com a régua de operação, que tem o prior a favor)
+            """.trimMargin(),
+        )
+
+        // Asserção sobre o INSTRUMENTO: a régua limpa tem de produzir número.
+        // O veredito contra a meta fica no bench de operação, que é @Ignore.
+        assertTrue("a régua limpa não produziu amostra", agregado.palavrasDeReferencia > 0)
+    }
 }

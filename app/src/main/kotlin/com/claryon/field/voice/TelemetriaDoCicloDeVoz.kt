@@ -62,7 +62,26 @@ class TelemetriaDoCicloDeVoz(private val capacidade: Int = CAPACIDADE) : Telemet
     enum class Transicao(val rotulo: String, val metaMs: Long?) {
         FIM_DA_FALA_ATE_EARCON("fim da fala → earcon", 500),
         FIM_DA_FALA_ATE_RESPOSTA("fim da fala → resposta falada", 2_000),
-        STT("transcrição (whisper)", null),
+        /**
+         * **O custo real do whisper**, de `STT_STARTED` a `STT_DONE`.
+         *
+         * Antes esta transição era `STT_DONE − VAD_WINDOW_CLOSED` e chamava-se
+         * "transcrição (whisper)". Mas `VAD_WINDOW_CLOSED` é ancorado no fim da
+         * FALA — 600 ms antes do fechamento da janela — e entre os dois ainda
+         * cabe o `emitir` do earcon. O rótulo dizia whisper e o número media
+         * hangover + earcon + whisper: **1021 ms para um whisper de ~421**.
+         *
+         * O erro era invisível porque o número era plausível e internamente
+         * coerente. Foi preciso somar as parcelas e ver que não fechavam.
+         */
+        STT("transcrição (whisper, custo real)", null),
+
+        /**
+         * Fim da fala → transcrição pronta. É o que a transição anterior media
+         * sem dizer, e é uma métrica legítima — só não é o custo do whisper.
+         * Inclui o hangover do VAD, que sozinho é 600 ms.
+         */
+        FIM_DA_FALA_ATE_TRANSCRICAO("fim da fala → transcrição pronta", null),
         ACAO("execução da ação", null),
 
         /**
@@ -125,8 +144,14 @@ class TelemetriaDoCicloDeVoz(private val capacidade: Int = CAPACIDADE) : Telemet
         doCiclo[Telemetry.Stage.RESPONSE_FIRST_AUDIO]?.let {
             registrar(cycleId, Transicao.FIM_DA_FALA_ATE_RESPOSTA, it - fim)
         }
-        doCiclo[Telemetry.Stage.STT_DONE]?.let {
-            registrar(cycleId, Transicao.STT, it - fim)
+        doCiclo[Telemetry.Stage.STT_DONE]?.let { pronta ->
+            registrar(cycleId, Transicao.FIM_DA_FALA_ATE_TRANSCRICAO, pronta - fim)
+            // O custo REAL do whisper só existe se o produtor marcou o início.
+            // Ausente, a transição fica sem amostra — que é honesto — em vez de
+            // cair para `pronta - fim` e mentir de novo.
+            doCiclo[Telemetry.Stage.STT_STARTED]?.let { comecou ->
+                registrar(cycleId, Transicao.STT, pronta - comecou)
+            }
         }
         val roteado = doCiclo[Telemetry.Stage.INTENT_ROUTED]
         val agiu = doCiclo[Telemetry.Stage.ACTION_DONE]
