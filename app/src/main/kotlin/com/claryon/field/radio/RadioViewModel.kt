@@ -470,22 +470,12 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
 
     // ── Telemetria ────────────────────────────────────────────────────────────
 
-    /**
-     * Relatório de latências e contadores do rádio — p50/p95 de toque até o
-     * primeiro quadro, concessão de canal, codificação e recepção.
-     *
-     * **O caminho alcançável hoje é `adb logcat -s ClaryonField`**, pelo
-     * registro que [fechar] emite ao encerrar o rádio. Não há comando de voz
-     * nem tela que exponha isto — e não inventar um agora é deliberado:
-     * acrescentar `Intent.ConsultarTelemetria` é mudança de comportamento do
-     * copiloto e, pela regra do projeto, começa por diff de spec, não por diff
-     * de código.
-     *
-     * Devolve `null` quando o rádio nunca abriu: "sem amostras" é resposta
-     * diferente de "zero", e confundir as duas faria ausência de medição ser
-     * lida como medição excelente.
-     */
-    fun relatorioDeTelemetria(): String? = radio?.telemetria?.relatorio()
+    // O relatório de telemetria sai por `fechar()`, logo acima — via
+    // `adb logcat -s ClaryonField`. Houve aqui um `relatorioDeTelemetria()`
+    // público e SEM CHAMADOR: função de diagnóstico que ninguém chama dá a quem
+    // lê o código a impressão de que o produto exporta a métrica. O item do
+    // ROADMAP pede "comando de diagnóstico"; enquanto ele não existir, o
+    // honesto é não fingir que existe.
 
     // ── Peças auxiliares ──────────────────────────────────────────────────────
 

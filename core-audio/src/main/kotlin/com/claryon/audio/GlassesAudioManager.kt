@@ -55,8 +55,11 @@ interface GlassesAudioManager {
      * Fluxo de PCM mono 16-bit capturado do microfone **dos óculos**.
      *
      * @param route prova de roteamento devolvida por [iniciar]. A rota é
-     *   reconferida no início da captura: se caiu no intervalo, o fluxo falha em
-     *   vez de gravar pelo microfone do celular.
+     *   reconferida no início da captura **e a cada 200 ms enquanto ela dura**:
+     *   se cair no meio, o fluxo falha com `RotaDeAudioPerdidaException` em vez
+     *   de seguir gravando pelo microfone do celular. Conferir só na abertura
+     *   deixava a janela de exposição do tamanho da captura — que, no pré-roll
+     *   do rádio, é o turno inteiro.
      */
     fun microfonePcm(route: GlassesAudioRoute): Flow<ShortArray>
 

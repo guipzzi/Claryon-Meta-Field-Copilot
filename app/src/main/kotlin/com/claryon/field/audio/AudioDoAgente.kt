@@ -21,7 +21,9 @@ import com.claryon.field.BuildConfig
  *
  * 1. `RadioTatico.entrarEmModoAtivo` abre **um** fluxo de captura de longa duração
  *    que alimenta o pré-roll enquanto o modo ativo durar.
- * 2. `microfonePcm` confere a rota **uma vez**, na abertura do fluxo.
+ * 2. `microfonePcm` conferia a rota **uma vez**, na abertura do fluxo. (Isto
+ *    mudou na Fase 1: `FonteUnicaDeMicrofone` reconfere a cada 200 ms durante o
+ *    stream. O relato abaixo descreve o defeito como ele era.)
  * 3. Quando o `clearCommunicationDevice()` do outro dono cai no meio do stream,
  *    ninguém reconfere. O `AudioRecord` segue lendo do que o sistema escolher —
  *    o **microfone omnidirecional do celular**.

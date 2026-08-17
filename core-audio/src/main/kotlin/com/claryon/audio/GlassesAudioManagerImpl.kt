@@ -358,6 +358,11 @@ class GlassesAudioManagerImpl(
 
         init {
             runCatching { track.play() }
+            // Contável no `logcat`, como o `AudioRecord` já era. O aceite da
+            // Fase 1 pede "um AudioTrack vivo" verificável por
+            // `adb logcat -s ClaryonField` — sem estas duas linhas a metade da
+            // saída do critério não tinha instrumento nenhum.
+            Log.i(TAG, "AudioTrack aberto a $sampleRateHz Hz (fluxo da recepção)")
         }
 
         override suspend fun escrever(pcm: ShortArray): Result<Unit> =
@@ -411,6 +416,7 @@ class GlassesAudioManagerImpl(
                 delay(duracaoMaximaEmVooMs)
                 runCatching { track.stop() }
                 runCatching { track.release() }
+                Log.i(TAG, "AudioTrack fechado (fluxo da recepção)")
             }
         }
     }

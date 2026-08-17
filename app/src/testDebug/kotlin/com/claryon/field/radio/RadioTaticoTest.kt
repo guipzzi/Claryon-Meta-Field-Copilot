@@ -119,10 +119,15 @@ class RadioTaticoTest {
      */
     private class MicrofoneFake(private val amostrasPorQuadro: Int) {
         val assinaturas = AtomicInteger()
+
+        /** Quantos blocos a captura AO VIVO entregou (a 2ª assinatura). */
+        val blocosEmitidos = AtomicInteger()
+
         fun fluxo(): Flow<ShortArray> = flow {
-            assinaturas.incrementAndGet()
+            val ehAoVivo = assinaturas.incrementAndGet() == 2
             while (true) {
                 delay(20)
+                if (ehAoVivo) blocosEmitidos.incrementAndGet()
                 emit(ShortArray(amostrasPorQuadro) { 6_000 })
             }
         }
@@ -143,6 +148,7 @@ class RadioTaticoTest {
      * herda tarefas no mesmo escalonador.
      */
     private suspend fun TestScope.comRadio(
+        taxaDoRadio: Int = taxa,
         // Relógio virtual do escalonador, e não uma constante: `GatilhoPtt` mede
         // repique e `SessaoPtt` mede duração por `agoraMs`. Com um relógio
         // parado em 0, o primeiro toque no PTT é descartado como repique e o
@@ -169,7 +175,7 @@ class RadioTaticoTest {
             emitir = { u -> emitidos.add(u) },
             duracaoDoEarconMs = { 320L },
             agoraMs = relogio,
-            sampleRateHz = taxa,
+            sampleRateHz = taxaDoRadio,
             supressor = supressor,
         )
         try {
@@ -197,7 +203,46 @@ class RadioTaticoTest {
             advanceTimeBy(100)
 
             assertTrue("nada foi transmitido", c.transporte.quadros.isNotEmpty())
+
+            assertTrue("o teste precisa de captura para valer", c.microfone.blocosEmitidos.get() > 0)
         }
+    }
+
+    @Test
+    fun taxaDivergente_dobraAContagemDeQuadros_eEhDetectavel() = runTest {
+        // **O teste que faltava, e o que ele prova.** A versão anterior parava
+        // em "transmitiu alguma coisa" — e transmitir alguma coisa é o que o
+        // código defeituoso TAMBÉM fazia: ele saía a 8 kHz contra um microfone
+        // de 16 kHz, uma oitava abaixo, com o dobro da duração. O produto não
+        // era demonstrável e a suíte ficava verde.
+        //
+        // O que distingue os dois casos é a CONTAGEM. `SessaoPtt.fatiar` corta
+        // em `sampleRateHz / 50`: a 16 kHz são 320 amostras por quadro e cada
+        // bloco do microfone rende UM quadro; a 8 kHz seriam 160, e o MESMO
+        // bloco rende DOIS. Rodar a mesma bancada nas duas taxas e comparar é a
+        // prova direta — não uma asserção sobre um número mágico.
+        suspend fun quadrosCom(taxaDoRadio: Int): Int {
+            var n = 0
+            comRadio(taxaDoRadio = taxaDoRadio) { c ->
+                c.radio.entrarEmModoAtivo(rota)
+                advanceTimeBy(200)
+                c.radio.aoPressionar(rota)
+                advanceTimeBy(300)
+                c.radio.aoSoltar()
+                advanceTimeBy(100)
+                n = c.transporte.quadros.count { !it.ultimo }
+            }
+            return n
+        }
+
+        val certo = quadrosCom(16_000)   // casa com o microfone
+        val errado = quadrosCom(8_000)   // o defeito original
+
+        assertTrue("a bancada precisa transmitir para o teste valer", certo > 0)
+        assertTrue(
+            "taxa divergente tem de dobrar a contagem de quadros (16k=$certo, 8k=$errado)",
+            errado >= certo * 2 - 2,
+        )
     }
 
     @Test

@@ -1365,3 +1365,51 @@ aparelho tem" é exatamente o que se defende numa auditoria.
   inválido (`gh auth status`). O keychain tem credencial válida: o push passou forçando
   `-c credential.https://github.com.helper=osxkeychain`. Hipótese não verificada: o PAT
   exposto no setup da Fase 0 pode ter sido revogado automaticamente pelo GitHub.
+
+## 2026-08-17 — Verificação da Fase 1: 8 de 8 itens vieram PARCIAIS
+
+Rodei uma auditoria com um agente por item do ROADMAP, cada veredito de CUMPRIDO passando
+por um cético. Resultado: **nenhum item saiu como cumprido**. O que sobreviveu à checagem:
+
+- **Eu tinha declarado "aceite completo" com o critério (d) não atingido.** "Contagem de
+  mensagens cai de ~50/s para ~17/s medida em `TransporteRealtime`" — não caiu, e nem o
+  contador existe. É consequência direta e conhecida de não construir o `AgrupadorDeQuadros`,
+  mas o `ESTADO.md` dizia "aceite completo" na linha 1 e contradizia a si mesmo na linha 53.
+  Corrigido: o título agora nomeia a pendência.
+
+- **Dois KDoc passaram a mentir por causa do MEU próprio conserto.** `AudioDoAgente.kt:24` e
+  `GlassesAudioManager.kt:57` afirmavam "a rota é conferida uma vez, na abertura" — verdade
+  quando foram escritos, falsos desde `FonteUnicaDeMicrofone`. É a mesma classe de defeito que
+  esta fase caçou no `AgrupadorDeQuadros`, cometida por mim, no mesmo dia. Consertar código
+  sem varrer o que o descrevia é criar a próxima mentira.
+
+- **A guarda de exclusão mútua do ciclo de voz continua certa, por outro motivo.** O comentário
+  dizia "duas capturas abririam dois `AudioRecord`... até lá o acesso é exclusivo" — e essa
+  razão morreu com a fonte única. A auditoria concluiu, por isso, que a guarda era resíduo a
+  remover. **Está errada.** A captura de evidência não filtra pelo supressor de saída própria,
+  então rodar o ciclo de voz durante uma gravação gravaria a fala do copiloto DENTRO da
+  evidência — um arquivo de custódia com a voz do app misturada à do agente é pior que não ter
+  o arquivo. A guarda fica; o comentário foi reescrito com a razão verdadeira.
+
+- **Meu teste de taxa de amostragem não testava taxa.** `oPtt_transmiteQuadros_naTaxaConfigurada`
+  asseria apenas `quadros.isNotEmpty()` — e transmitir alguma coisa é o que o código defeituoso
+  também fazia, a 8 kHz, uma oitava abaixo. O nome do teste afirmava mais do que o corpo
+  provava. Substituído por um teste **comparativo**: roda a mesma bancada a 16 kHz e a 8 kHz
+  contra o mesmo microfone de 16 kHz e exige que a contagem de quadros dobre. Prova a
+  divergência em vez de nomeá-la. (A primeira tentativa de asserção falhou e estava certa em
+  falhar: eu tinha esquecido que o pré-roll também vai para a rede.)
+
+- **Código morto que fingia capacidade.** `TelemetriaDoCicloDeVoz.fecharCiclo()` e
+  `RadioViewModel.relatorioDeTelemetria()` não tinham chamador nenhum. O primeiro não pode ter:
+  fechar o ciclo quando `runOnce` retorna descartaria os dois marcos de reprodução, que chegam
+  depois. Os dois foram removidos, com o porquê no lugar. Função de diagnóstico sem chamador dá
+  a quem lê a impressão de que o produto exporta a métrica.
+
+- **`DiagnosticsViewModel`: 769 → 205 linhas**, depois de remover 37 imports mortos, dois campos
+  privados nunca lidos (`configRede`, `consulta`) e um KDoc de mapa colado por engano no de
+  outro método. O compilador não pega nada disso, e o arquivo mantinha a aparência de ainda
+  fazer evidência e ciclo de voz.
+
+- **O que a auditoria pediu e eu NÃO fiz:** o gate `BuildConfig.DEBUG` sobre o que sobrou de
+  diagnóstico. `echo()`, `enableMock`, `startCamera` embarcam no release, mortos porque a tela
+  que os chama não é composta — inalcançável não é o mesmo que gateado. Fica registrado.

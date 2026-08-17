@@ -2,61 +2,23 @@ package com.claryon.field.ui
 
 import android.app.Activity
 import android.app.Application
-import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.claryon.agent.ActionOutcome
-import com.claryon.agent.DeterministicIntentRouter
-import com.claryon.agent.FalhaOperacional
-import com.claryon.agent.ModoOperacao
 import com.claryon.agent.Utterance
-import com.claryon.agent.utteranceFor
 import com.claryon.field.audio.AudioDoAgente
 import com.claryon.field.audio.SaidaUnica
-import com.claryon.audio.RotaDeAudioPerdidaException
 import com.claryon.common.Result
-import com.claryon.evidence.EncryptedEvidenceVault
 import com.claryon.field.BuildConfig
-import com.claryon.agent.Intent
-import com.claryon.field.agent.AnexoDeEvidencia
-import com.claryon.field.agent.ClaryonIntentExecutor
-import android.content.pm.PackageManager
-import com.claryon.agent.BuscaDePar
 import com.claryon.common.Earcon
 import com.claryon.common.Priority
-import com.claryon.field.permissoes.PermissoesEssenciais
-import com.claryon.agent.FalaDePosicao
-import com.claryon.agent.PosicaoRelativa
-import com.claryon.agent.Rumo
 import com.claryon.field.auth.SessaoDoAgente
-import com.claryon.net.AutenticacaoSupabase
-import com.claryon.net.ConfigRealtime
-import com.claryon.net.ConsultaDePosicao
-import com.claryon.net.HistoricoDoCanal
-import com.claryon.net.RespostaDePosicao
-import com.claryon.field.mapa.EstadoDoMapa
-import com.claryon.field.mapa.MapaDePares
-import com.claryon.net.PublicadorDePosicaoSupabase
-import com.claryon.field.agent.Identidade
-import com.claryon.field.local.ProvedorDeLocal
 import com.claryon.glasses.DatGlassesFacade
 import com.claryon.glasses.RegistrationStatus
 import com.claryon.glasses.MockDeviceController
-import com.claryon.field.voice.Modelos
-import com.claryon.field.voice.VoiceCycle
-import com.claryon.sync.SemTransporteGateway
-import com.claryon.sync.SyncManager
-import com.claryon.sync.TacticalDispatcher
-import com.claryon.voice.AndroidOnDeviceStt
-import com.claryon.voice.EnergyVoiceActivityDetector
-import java.io.File
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -198,33 +160,8 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
 
     val redeConfigurada: Boolean = SessaoDoAgente.redeConfigurada
 
-    private val configRede = SessaoDoAgente.config
-
     val autenticacao = SessaoDoAgente.de(app)
 
-    private val consulta = ConsultaDePosicao(
-        config = configRede,
-        // `runBlocking` NÃO: a renovação de token não pode travar o ciclo de voz.
-        // Lê o cache já validado; quem renova é `SessaoDoAgente.tokenValido`.
-        tokenDeSessao = { SessaoDoAgente.tokenCorrente },
-    )
-
-
-    // ── Mapa da guarnição (C5) ────────────────────────────────────────────────
-
-
-
-    /**
-     * Chamado pelo `ON_START` da tela do mapa.
-     *
-     * É aqui que a regra de bateria vira código: **a assinatura do canal de
-     * posições nasce com a tela e morre com ela**. Numa guarnição de oito,
-     * mantê-la aberta o turno inteiro seria 8 × 8 de tráfego permanente para uma
-     * tela fechada 95% do tempo.
-     *
-     * E a reciprocidade é pré-condição, não convenção: [CanalDePosicoes.assinar]
-     * recusa se a publicação própria não estiver ativa. Quem vê é visto.
-     */
     /**
      * Anuncia o que está degradado **no DAT**.
      *

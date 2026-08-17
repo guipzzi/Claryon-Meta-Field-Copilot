@@ -1,4 +1,4 @@
-# Onde estamos — 2026-08-16 · Fase 1 FECHADA (aceite completo)
+# Onde estamos — 2026-08-17 · Fase 1 fechada, com UM critério de aceite não atingido
 
 Fonte única de "estado da conversa". **Reescrito ao fim de cada sessão, nunca acrescentado.**
 Teto duro: **60 linhas**. O que não couber é história e vai para `DECISIONS.md`. Aqui só
@@ -6,7 +6,7 @@ entra o que muda a próxima decisão: o que funciona, o que está quebrado, o qu
 
 ## O que funciona hoje
 
-- `./gradlew build` verde · **578 testes, 0 falhas**. JDK 17 · AGP 8.9.2 · Kotlin 2.2.0 ·
+- `./gradlew build` verde · **579 testes, 0 falhas**. JDK 17 · AGP 8.9.2 · Kotlin 2.2.0 ·
   compileSdk 35 · minSdk 31 · NDK 27. Build offline após a primeira sincronização.
 - Três telas compostas atrás de permissões e login: guarnição (PTT por toque + botão do
   copiloto), mapa MapLibre acompanhando o portador, e perfil.
@@ -24,10 +24,14 @@ entra o que muda a próxima decisão: o que funciona, o que está quebrado, o qu
   implementação (`TelemetriaDoCicloDeVoz`) com os 4 estágios do ciclo + os 2 de **reprodução
   real** (marcados quando o PCM entra no `AudioTrack`, nunca no enfileiramento) + a preempção
   de P1. Os dois relatórios saem no `logcat` ao fechar o rádio.
-- **`DiagnosticsViewModel` quebrado**: 818 → **723** linhas. Saíram `SessaoDoAgente` (dono de
-  processo — era o bloqueio que impedia o corte, porque `MainActivity` precisava do ViewModel
-  só para o portão de login) e `MapaViewModel` (161 linhas). Verificado no emulador: mapa
-  mostra "RECEBENDO" e a seta do portador.
+- **`DiagnosticsViewModel` quebrado**: 769 → **205** linhas. Saíram `SessaoDoAgente` (dono de
+  processo — era o bloqueio do corte, porque `MainActivity` precisava do ViewModel só para o
+  portão de login), `MapaViewModel` (161) e `CopilotoViewModel` (534, com a evidência junto).
+  O que sobrou é diagnóstico de verdade: fachada do DAT, MockDeviceKit e eco.
+- **Keystore fora da Main**: o portão de login chamava `autenticado()` na composição e pagava
+  468 ms de `MasterKey.Builder.build()`. `SessaoDoAgente.estado` é um `StateFlow` com
+  `Verificando` — sem esse terceiro estado, tirar da Main faria a tela de login piscar na cara
+  de quem já tem sessão. Violações do StrictMode: 20 → 10.
 - **StrictMode limpou o que achou**: `SyncManager.outbox` na Main (965 ms) → **zero**. A causa
   era `context.filesDir` (o `ensurePrivateDirExists` do framework), não o `mkdirs` do
   `FileOutbox` — o primeiro conserto mirou a peça errada e o log mostrou isso.
@@ -37,32 +41,37 @@ entra o que muda a próxima decisão: o que funciona, o que está quebrado, o qu
 
 ## O que está quebrado, e nós sabemos
 
-1. **Meta de 120 ms não atingida no emulador:** toque→1º quadro p50 = 168 ms (melhor que os
-   245 ms da primeira medição, mas ainda acima). Falta medir em hardware real com fone HFP; o
-   emulador usa codec por software e o número embute isso.
-2. **`CofreDeSessaoCifrado.getPrefs` faz E/S de Keystore na Main** (`:26`) — próximo achado do
-   StrictMode, na fila do mesmo tratamento que o `SyncManager` acabou de receber.
-3. **O ciclo de voz não tem amostra de telemetria no emulador:** sem entrada de áudio real o
+1. **Aceite (d) da Fase 1 NÃO foi atingido:** "contagem de mensagens cai de ~50/s para ~17/s
+   medida em `TransporteRealtime`". Não caiu e não há contador — consequência direta da decisão
+   de não construir o `AgrupadorDeQuadros` (item 5). O ROADMAP e este arquivo chegaram a dizer
+   "aceite completo"; era falso. Ou o critério é reescrito, ou a fase tem uma pendência aberta.
+2. **Meta de 120 ms não atingida no emulador:** toque→1º quadro p50 = 168-221 ms. Falta medir em
+   hardware real com fone HFP; o emulador usa codec por software e o número embute isso.
+3. **A preempção de P1 tem instrumento mas nenhuma amostra em runtime:** provada por teste
+   (`PrioritySoundQueueTest`), medida por `aoInterromper`, e o relatório mostra "sem amostras"
+   porque no emulador o ciclo de voz nunca fecha janela de VAD. E o que ela mede é
+   chegada→`cancel`, não chegada→silêncio: é limite inferior do que o aceite descreve.
+4. **O ciclo de voz não tem amostra de telemetria no emulador:** sem entrada de áudio real o
    VAD nunca fecha janela, então as metas de earcon e resposta aparecem como "sem amostras" —
    que é o correto, e não zero.
-4. **A quebra do ViewModel parou no meio, e é deliberado:** `CopilotoViewModel` e
-   `EvidenciaViewModel` NÃO foram extraídos. `executor` e `gravacaoJob` são a exclusão mútua
-   entre os dois (o handle de gravação vive dentro do executor), e separá-los sem um dono
-   único do executor produziria manifesto aberto e vazio — a mentira que o KDoc do cofre diz
-   ter vindo corrigir.
-5. **`AgrupadorDeQuadros` continua não existindo** — decisão registrada, não esquecimento: são
+5. **`EvidenciaViewModel` não existe, e é decisão:** evidência é um MODO do copiloto, não um
+   vizinho. `executor` guarda o handle da gravação e `gravacaoJob` é a exclusão mútua entre os
+   dois — duplicar daria manifesto aberto e vazio. A auditoria propôs separar; está errada
+   nesse ponto. Alternativa não explorada: um `ExecutorDoAgente` dono de processo permitiria o
+   corte sem duplicar. Fica registrado.
+6. **`AgrupadorDeQuadros` continua não existindo** — decisão registrada, não esquecimento: são
    ~50 msg/s com ~274 B de envelope para ~30 B de voz (11% de aproveitamento). Agrupar quebra
    o receptor em 3 pontos (`sequencia` é quadro E mensagem), e o comentário mentiroso em
    `Transmissao.kt` foi corrigido para dizer a verdade.
-6. `WakeWordDetector` é interface sem implementação, e `PowerPolicy` declara `wakeWordAtiva =
+7. `WakeWordDetector` é interface sem implementação, e `PowerPolicy` declara `wakeWordAtiva =
    true`. O modo **Standby** é inalcançável.
-7. Metas de STT (≥92%), wake word (≤1 falso positivo/h) e bateria (≤12%/h) seguem **sem
+8. Metas de STT (≥92%), wake word (≤1 falso positivo/h) e bateria (≤12%/h) seguem **sem
    instrumento** — as duas primeiras dependem de peças da Fase 2.
-8. `Stream.errorStream` nunca é coletado: perdemos `PERMISSIONS_DENIED`, `HINGE_CLOSED`,
+9. `Stream.errorStream` nunca é coletado: perdemos `PERMISSIONS_DENIED`, `HINGE_CLOSED`,
    `THERMAL_HOT`, `BATTERY_LOW` tipados. `STOPPED` não é tratado como terminal.
-9. A permissão de câmera do DAT nunca é pedida em produção. Em hardware real, a leitura de
+10. A permissão de câmera do DAT nunca é pedida em produção. Em hardware real, a leitura de
    placa quebra no primeiro uso.
-10. `CopilotService`: `stopSelf()` antes de qualquer `startForeground()` (`:88`) e `parar()` usa
+11. `CopilotService`: `stopSelf()` antes de qualquer `startForeground()` (`:88`) e `parar()` usa
    `startService` em vez de `startForegroundService` (`:215`).
 
 ## O que vem a seguir

@@ -36,6 +36,13 @@ import com.claryon.net.Medicao
  * um "ciclo corrente" resolve sem precisar propagar identificador por cinco
  * camadas. Se um dia houver ciclos concorrentes, este é o ponto que quebra — e
  * quebra alto, com marcos atribuídos ao ciclo errado, não em silêncio.
+ *
+ * **Não existe `fecharCiclo`, e a ausência é deliberada.** Chegou a existir e
+ * era código morto: fechar o ciclo quando `runOnce` retorna descartaria os dois
+ * marcos que mais importam, porque a fala só é REPRODUZIDA depois — quando a
+ * fila chega nela. O ciclo fica corrente até o próximo [abrirCiclo] tomar o
+ * lugar; a guarda "o primeiro marco vence" em [mark] é o que impede um som
+ * posterior de outra fonte de corromper a medição.
  */
 class TelemetriaDoCicloDeVoz(private val capacidade: Int = CAPACIDADE) : Telemetry {
 
@@ -85,8 +92,6 @@ class TelemetriaDoCicloDeVoz(private val capacidade: Int = CAPACIDADE) : Telemet
             marcos.remove(maisAntigo)
         }
     }
-
-    fun fecharCiclo() = synchronized(trava) { cicloCorrente = null }
 
     /**
      * **O primeiro marco de cada estágio vence.**

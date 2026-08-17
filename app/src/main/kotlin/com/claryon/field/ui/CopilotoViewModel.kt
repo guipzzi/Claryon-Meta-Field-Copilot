@@ -418,12 +418,23 @@ class CopilotoViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.Default) {
             _copilotoOcupado.value = true
             try {
-            // Duas capturas simultâneas abririam dois AudioRecord na mesma fonte
-            // de comunicação — a segunda falha ao inicializar ou rouba o fluxo da
-            // primeira, e o que se perde é evidência. O caminho definitivo é uma
-            // fonte única com fan-out (evidência + STT + PTT bebendo do mesmo
-            // AudioRecord); é peça do C1 e será construída com o transporte.
-            // Até lá, o acesso é exclusivo e a recusa é audível.
+            // **O MOTIVO DESTA GUARDA MUDOU, e ela continua necessária.**
+            //
+            // Antes era limitação técnica: duas capturas abririam dois
+            // `AudioRecord` na mesma fonte. Isso acabou — `FonteUnicaDeMicrofone`
+            // existe e faz fan-out, e o pré-roll já divide o microfone com a
+            // captura ao vivo em todo PTT.
+            //
+            // O que sobrou é razão de CUSTÓDIA: a captura de evidência abaixo
+            // não filtra pelo supressor de saída própria (ver
+            // `iniciarCapturaDeEvidencia`), então rodar o ciclo de voz durante
+            // uma gravação gravaria a fala sintetizada do copiloto DENTRO da
+            // evidência. Um arquivo de custódia com a voz do próprio app
+            // misturada à do agente é pior que não ter o arquivo: não dá para
+            // separar depois, e a defesa tem argumento.
+            //
+            // Só sai daqui quando a evidência passar a filtrar pelo supressor —
+            // aí as duas podem coexistir de verdade.
             if (gravacaoJob?.isActive == true) {
                 saida.emitir(utteranceFor(ActionOutcome.Falhou(FalhaOperacional.GRAVACAO_JA_ATIVA)))
                 _commandStatus.value = "ciclo: gravação de evidência em curso — encerre antes"
