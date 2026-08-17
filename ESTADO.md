@@ -1,7 +1,6 @@
 # Onde estamos — 2026-08-17 · o STT passa a meta · o gargalo é a palavra de ativação
 
-**Reescrito a cada sessão, nunca acrescentado. Teto duro: 60 linhas.** O resto é história e
-vai para `DECISIONS.md`.
+**Reescrito a cada sessão, nunca acrescentado. Teto duro: 60 linhas.** O resto vai para `DECISIONS.md`.
 
 ## O que funciona hoje
 
@@ -26,16 +25,15 @@ vai para `DECISIONS.md`.
 ## O que está quebrado, e nós sabemos
 
 1. **`CaosDoDatTest` falha um teste por rodada, variando qual** (`Wearables SDK already
-   initialized`). Falha em `HEAD` limpo. Precisa isolamento de processo por classe.
+   initialized`); falha em `HEAD` limpo. Precisa isolamento de processo por classe.
 2. **`+dotprod` sem atribuição** (`ef5cd1b` afirmou 4× errado): `objdump` deu `sdot = 0`,
    as opções acumulam no alvo único `ggml-cpu`. Consertado (`sdot = 923`), falta máquina
    ociosa. **SIGILL latente sem FEAT_FP16:** o `libggml-cpu.so` tem 1765 instruções FP16 e o
    `libwhisper.so` (escolhido sem `fphp`) depende dele; piso agora declarado.
-3. **A régua de operação (21,2%) é contaminada e estatisticamente cega:** 20 das 52 palavras
-   estão no `initial_prompt`, e com `ΣN = 52` o IC95% é **[10,1%; 32,3%]**. Precisa de
-   `ΣN ≈ 500`. O prompt estava **sem acento** e o BPE difere — corrigido.
-   **A premissa do APK estava errada:** 372 MiB não excede o limite do Play (via AAB o base
-   admite 500 MB). Decisão: manter tudo no APK e cortar o x86_64 do release (→ ~295 MiB).
+3. **A régua de operação (21,2%) é contaminada e cega:** 20 das 52 palavras estão no
+   `initial_prompt` e com `ΣN = 52` o IC95% é **[10,1%; 32,3%]**; precisa de `ΣN ≈ 500`. O
+   prompt estava **sem acento** — corrigido. **A premissa do APK estava errada:** 372 MiB não
+   excede o limite do Play (AAB admite 500 MB); decisão: cortar só o x86_64 do release.
 4. **A palavra de ativação foi MEDIDA: `Aurora` 3/3 contra `Claryon` 0/3** (controle). O
    traço discriminativo **não pode estar na consoante inicial** — as três que falharam
    tiveram o *onset* corrompido; as duas que passaram começam por vogal. Falta o número que
@@ -48,8 +46,7 @@ vai para `DECISIONS.md`.
 7. `errorStream` não coletado · `STOPPED` não terminal · câmera do DAT nunca pedida ·
    transcrição na origem (P1) não existe · `WakeWordDetector` sem implementação.
 
-**Pendências:** `security-crypto` `1.1.0-alpha06` · conferir se o documento submetido cita
-WhatsApp (§14.1 veda mudar escopo) · isolar `CaosDoDatTest`.
+**Pendências:** `security-crypto` `1.1.0-alpha06` · conferir se o documento cita WhatsApp (§14.1).
 
 ## O que vem a seguir
 
