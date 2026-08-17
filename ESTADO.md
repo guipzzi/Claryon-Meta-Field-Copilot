@@ -1,4 +1,4 @@
-# Onde estamos — 2026-08-17 · Fase 1 fechada, os seis critérios de aceite atendidos
+# Onde estamos — 2026-08-17 · Fase 1 fechada · Fase 2 em curso
 
 Fonte única de "estado da conversa". **Reescrito ao fim de cada sessão, nunca acrescentado.**
 Teto duro: **60 linhas**. O que não couber é história e vai para `DECISIONS.md`. Aqui só
@@ -93,6 +93,26 @@ entra o que muda a próxima decisão: o que funciona, o que está quebrado, o qu
    placa quebra no primeiro uso.
 11. `CopilotService`: `stopSelf()` antes de qualquer `startForeground()` (`:88`) e `parar()` usa
    `startService` em vez de `startForegroundService` (`:215`).
+
+## Fase 2 — o que já entrou
+
+- **Verificação no artefato antes do diff**, e ela mudou o plano: são **dois** presets de KWS
+  (chinês + inglês), não um; **nenhum** preset *streaming* em pt existe, então KWS em português
+  não tem de onde sair; e os "320 ms do chunk-16" **não estão no artefato** — saíram do ROADMAP
+  como fato.
+- **Teto de 30 s fora do `collect`** (`withTimeout` descontando o decorrido). O dano do defeito
+  era pior que o descrito: sem o evento, `GatilhoPtt.pressionadoEm` ficava setado e **todo toque
+  seguinte era recusado** — o PTT morria até fechar a tela.
+- **`SpeechSegment.silencioFinalMs`**: a meta "fim da fala → earcon" media do fechamento da
+  janela, um hangover (600 ms) DEPOIS de o agente parar de falar. O número sairia otimista em
+  600 ms, internamente coerente, sem teste acusar.
+- **Whisper quente** (`EscutaDoAgente`) + a válvula que não existia: `Application.onTrimMemory`
+  devolve os ~78 MB sob pressão. Sem ela, quem escolheria o que morrer seria o LMK — e o que ele
+  mata é o serviço de rádio.
+- **`ClienteDePisoRemoto` ligado.** Estava escrito e nunca instanciado; sem ele a validação de
+  membership de `pedir_canal` (`0005:78-82`) jamais era alcançada. Sem sessão cai para local, e
+  a degradação é **declarada** em log — dois agentes achando que detêm o canal não pode ser
+  silencioso.
 
 ## O que vem a seguir
 

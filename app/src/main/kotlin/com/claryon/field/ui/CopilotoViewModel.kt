@@ -29,6 +29,7 @@ import com.claryon.field.audio.SaidaUnica
 import com.claryon.field.auth.SessaoDoAgente
 import com.claryon.field.local.ProvedorDeLocal
 import com.claryon.field.permissoes.PermissoesEssenciais
+import com.claryon.field.voice.EscutaDoAgente
 import com.claryon.field.voice.Modelos
 import com.claryon.field.voice.VoiceCycle
 import com.claryon.net.ConsultaDePosicao
@@ -451,8 +452,12 @@ class CopilotoViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 is Result.Success -> rota.value
             }
-            // Assets do APK primeiro, filesDir depois — ver [Modelos].
-            val whisper = Modelos.whisper(getApplication())
+            // **Quente entre invocações.** Antes era `Modelos.whisper()` aqui e
+            // `release()` no `finally`: todo ciclo que transcrevia recarregava
+            // 77 691 713 B pelo JNI, dentro de uma meta de 2,0 s. Agora o dono é
+            // de processo e quem devolve a memória é a pressão do sistema, não o
+            // fim do ciclo. Ver `EscutaDoAgente`.
+            val whisper = EscutaDoAgente.de(getApplication())
             val origem = Modelos.fonteDoWhisper(getApplication())?.toString() ?: "indisponível"
             _commandStatus.value = "ciclo: ouvindo… (STT=$origem)"
 
@@ -497,7 +502,9 @@ class CopilotoViewModel(app: Application) : AndroidViewModel(app) {
                 Resultado.Erro(e)
             } finally {
                 audio.liberar()
-                whisper?.release()
+                // **`whisper.release()` NÃO vai aqui.** Liberar no fim do ciclo é
+                // exatamente o que fazia o modelo recarregar toda vez. Quem
+                // libera é `Application.onTrimMemory` → `EscutaDoAgente.liberar`.
             }
             _commandStatus.value = when (resultado) {
                 is Resultado.Erro -> {

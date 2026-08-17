@@ -5,6 +5,11 @@ import android.os.StrictMode
 import android.util.Log
 import com.claryon.common.Result
 import com.claryon.field.auth.SessaoDoAgente
+import com.claryon.field.voice.EscutaDoAgente
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import com.claryon.glasses.GlassesRuntime
 import org.maplibre.android.MapLibre
 
@@ -84,6 +89,34 @@ class ClaryonApp : Application() {
                 .build(),
         )
     }
+
+    /**
+     * **A válvula que faltava.**
+     *
+     * O app não tinha `onTrimMemory` nenhum (`grep` devolvia zero), e a partir
+     * daqui ele segura o contexto do Whisper quente — ~78 MB nativos — somados ao
+     * Piper, ao runtime do sherpa-onnx e ao MapLibre, num processo que roda sob
+     * *foreground service* com microfone.
+     *
+     * Sem devolver isso sob pressão, quem decide o que morre é o *Low Memory
+     * Killer*, e o que ele mata é o serviço de rádio: a capacidade que não pode
+     * cair. Recarregar o modelo custa um ciclo de voz lento; perder o rádio custa
+     * a ocorrência.
+     */
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (!EscutaDoAgente.deveLiberar(level)) return
+        Log.i(TAG, "onTrimMemory($level): devolvendo o contexto do whisper")
+        escopoDeManutencao.launch { EscutaDoAgente.liberar() }
+    }
+
+    /**
+     * Escopo de manutenção do processo — trabalho que não pertence a nenhuma
+     * tela. `onTrimMemory` não é suspensa e a liberação do contexto nativo pega
+     * um mutex; fazê-la na Main travaria justamente quando o sistema já está sem
+     * memória.
+     */
+    private val escopoDeManutencao = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     companion object {
         private const val TAG = "ClaryonField"

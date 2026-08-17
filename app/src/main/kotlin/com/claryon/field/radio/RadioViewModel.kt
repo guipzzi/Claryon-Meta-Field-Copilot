@@ -13,7 +13,10 @@ import com.claryon.field.BuildConfig
 import com.claryon.field.ui.componentes.EstadoDoPtt
 import com.claryon.field.ui.telas.FalaNoGrupo
 import com.claryon.field.ui.telas.ParPresente
+import com.claryon.field.auth.SessaoDoAgente
+import com.claryon.net.ClienteDePiso
 import com.claryon.net.ClienteDePisoLocal
+import com.claryon.net.ClienteDePisoRemoto
 import com.claryon.net.CodecDeVoz
 import com.claryon.net.ConfigOpus
 import com.claryon.net.HistoricoDoCanal
@@ -186,7 +189,20 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
                 // demonstrável. Passar a taxa REAL da fonte faz o compilador
                 // sustentar o acordo: se o gerente mudar, isto muda junto.
                 sampleRateHz = audio.taxaDeAmostragemHz,
-                piso = ClienteDePisoLocal(),
+                // **O piso passa a ser arbitrado pelo servidor quando há sessão.**
+                //
+                // `ClienteDePisoRemoto` existia desde o M5, chamando a RPC
+                // `pedir_canal` — e NUNCA foi instanciado: `grep` devolvia só a
+                // própria definição. Era o padrão "escrito, não construído" que o
+                // `CLAUDE.md` §6 diz já ter acontecido seis vezes.
+                //
+                // O que se perdia com o local: `pedir_canal`
+                // (`0005_controle_de_piso.sql:78-82`) recusa quem não é membro do
+                // talk group. Com o piso resolvido em RAM do processo, essa
+                // validação nunca era alcançada — dois agentes podiam achar que
+                // detinham o canal ao mesmo tempo, e a seleção de grupo por voz
+                // (Fase 2) herdaria uma autorização que só existe no papel.
+                piso = pisoDoCanal(agenteId),
                 pcmDoMicrofone = { rotaValida -> audio.microfonePcm(rotaValida) },
                 abrirFluxoDeSaida = { taxa -> audio.abrirFluxoDeReproducao(taxa) },
                 registrarNoHistorico = { id, prio, dur ->
@@ -494,6 +510,42 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
      */
     private fun codec(): CodecDeVoz =
         MediaCodecOpus(ConfigOpus(sampleRateHz = audio.taxaDeAmostragemHz))
+
+    /**
+     * Escolhe o árbitro do piso, e **declara a degradação em vez de escondê-la**.
+     *
+     * Sem sessão não há JWT, e sem JWT o servidor recusa — mas o rádio precisa
+     * funcionar em túnel, subsolo e com a torre caída, que é justamente quando a
+     * ocorrência acontece. Então o local continua existindo como modo degradado.
+     *
+     * O que ele **não** pode ser é silencioso: com piso local, dois agentes podem
+     * achar que detêm o canal ao mesmo tempo e falar por cima. Quem opera precisa
+     * saber que está nesse modo — por isso o log e o estado, não só o `else`.
+     */
+    private fun pisoDoCanal(agenteId: String): ClienteDePiso {
+        val token = SessaoDoAgente.tokenCorrente
+        if (token == null) {
+            Log.w(TAG, "piso LOCAL: sem sessão. Sem arbitragem do servidor entre aparelhos.")
+            pisoRemoto = false
+            return ClienteDePisoLocal()
+        }
+        pisoRemoto = true
+        return ClienteDePisoRemoto(
+            config = ConfigRealtime(
+                projetoUrl = BuildConfig.SUPABASE_URL.trimEnd('/'),
+                apiKey = BuildConfig.SUPABASE_ANON_KEY,
+            ),
+            // Lê o cache validado a cada chamada: a sessão pode ser renovada
+            // durante o turno, e capturar o token de agora congelaria um que
+            // expira em uma hora.
+            jwt = { SessaoDoAgente.tokenCorrente.orEmpty() },
+            agenteIdLocal = agenteId,
+        )
+    }
+
+    /** `true` quando o piso é arbitrado pelo servidor. Diagnóstico e telemetria. */
+    var pisoRemoto: Boolean = false
+        private set
 
     private fun duracaoDoEarcon(earcon: Earcon): Long = when (earcon) {
         Earcon.GRAVANDO -> 2_000L
