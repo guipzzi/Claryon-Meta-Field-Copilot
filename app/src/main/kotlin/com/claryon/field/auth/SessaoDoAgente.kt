@@ -4,6 +4,13 @@ import android.content.Context
 import com.claryon.field.BuildConfig
 import com.claryon.net.AutenticacaoSupabase
 import com.claryon.net.ConfigRealtime
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 
 /**
  * **Dono único da sessão do agente no processo.**
@@ -67,6 +74,56 @@ object SessaoDoAgente {
                 cofre = CofreDeSessaoCifrado(context.applicationContext),
             ).also { instancia = it }
         }
+
+    // ── Estado da sessão: assíncrono porque a leitura É assíncrona ────────────
+
+    /**
+     * O que se sabe sobre a sessão **neste instante**.
+     *
+     * [Verificando] existe porque a resposta não é conhecida de imediato, e
+     * fingir que é foi o defeito: `MainActivity` chamava `autenticacao.autenticado()`
+     * direto na composição, e a primeira chamada dispara
+     * `MasterKey.Builder.build()` → `KeyStore.containsAlias` → **468 ms de E/S de
+     * Keystore na thread principal**, medidos pelo StrictMode. Meio segundo de
+     * tela congelada no portão de entrada do app.
+     *
+     * Sem [Verificando], mover a leitura para fora da Main teria custado pior:
+     * o portão veria "não autenticado" antes de a leitura terminar e piscaria a
+     * tela de login na cara de um agente que já tem sessão.
+     */
+    sealed interface EstadoDaSessao {
+        /** A leitura do cofre ainda não terminou. Não é "sem sessão". */
+        data object Verificando : EstadoDaSessao
+        data object Autenticado : EstadoDaSessao
+        data object Ausente : EstadoDaSessao
+    }
+
+    private val escopo = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    private val _estado = MutableStateFlow<EstadoDaSessao>(EstadoDaSessao.Verificando)
+    val estado: StateFlow<EstadoDaSessao> = _estado.asStateFlow()
+
+    /**
+     * Lê o cofre **fora da Main** e publica o resultado. Chamado uma vez, do
+     * `Application.onCreate`: é o ponto de entrada do processo, e adiantar a
+     * leitura ali é o que faz o portão de login já ter resposta quando a
+     * primeira composição acontecer.
+     */
+    fun aquecer(context: Context) {
+        escopo.launch {
+            val auth = de(context)
+            // `autenticado()` toca o Keystore; aqui isso é legítimo, porque
+            // estamos em Dispatchers.IO.
+            _estado.value =
+                if (auth.autenticado()) EstadoDaSessao.Autenticado else EstadoDaSessao.Ausente
+        }
+    }
+
+    /** Chamado ao entrar (login bem-sucedido) e ao encerrar o turno. */
+    fun anunciar(autenticado: Boolean) {
+        _estado.value =
+            if (autenticado) EstadoDaSessao.Autenticado else EstadoDaSessao.Ausente
+    }
 
     /**
      * Token válido, renovando se preciso, **e atualizando o cache**.

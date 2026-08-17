@@ -17,11 +17,13 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.ui.platform.LocalContext
 import com.claryon.agent.ModoOperacao
+import com.claryon.field.auth.SessaoDoAgente
 import com.claryon.field.permissoes.PermissoesEssenciais
 import com.claryon.field.service.CopilotService
 import com.claryon.field.radio.RadioViewModel
 import com.claryon.field.ui.CascoTatico
 import com.claryon.field.ui.Destino
+import com.claryon.field.ui.CopilotoViewModel
 import com.claryon.field.ui.DiagnosticsViewModel
 import com.claryon.field.ui.MapaViewModel
 import com.claryon.field.ui.telas.Capacidade
@@ -54,6 +56,10 @@ class MainActivity : ComponentActivity() {
                 val radio: RadioViewModel = viewModel()
                 // O mapa saiu do `DiagnosticsViewModel` — ver `MapaViewModel`.
                 val mapa: MapaViewModel = viewModel()
+                // Ciclo de voz + evidência saíram do `DiagnosticsViewModel`:
+                // eles compartilham o executor, que é a máquina de estado da
+                // gravação. Ver `CopilotoViewModel`.
+                val copiloto: CopilotoViewModel = viewModel()
 
                 // `tudoConcedido`, não `podeOperar`: com `podeOperar` o agente que
                 // concedesse o microfone e negasse a localização ia direto à
@@ -63,14 +69,26 @@ class MainActivity : ComponentActivity() {
                 var mostrarLogin by remember { mutableStateOf(true) }
                 var destino by remember { mutableStateOf(Destino.GUARNICAO) }
 
+                // O estado da sessão é OBSERVADO, não perguntado: `autenticado()`
+                // lê o cofre cifrado e a primeira leitura custa ~468 ms de
+                // Keystore. Ver `SessaoDoAgente`.
+                val sessao by SessaoDoAgente.estado.collectAsState()
+
                 when {
                     mostrarPermissoes ->
                         TelaDePermissoes(aoConcluir = { mostrarPermissoes = false })
 
-                    mostrarLogin && !diag.autenticacao.autenticado() -> TelaDeLogin(
+                    // Ainda lendo o cofre: NÃO mostrar login, senão a tela pisca
+                    // na cara de quem já tem sessão.
+                    sessao is SessaoDoAgente.EstadoDaSessao.Verificando -> Unit
+
+                    mostrarLogin && sessao is SessaoDoAgente.EstadoDaSessao.Ausente -> TelaDeLogin(
                         auth = diag.autenticacao,
                         configurado = diag.redeConfigurada,
-                        aoEntrar = { mostrarLogin = false },
+                        aoEntrar = {
+                            SessaoDoAgente.anunciar(true)
+                            mostrarLogin = false
+                        },
                         aoSeguirSemRede = { mostrarLogin = false },
                     )
 
@@ -78,12 +96,14 @@ class MainActivity : ComponentActivity() {
                         diag = diag,
                         radio = radio,
                         mapa = mapa,
+                        copiloto = copiloto,
                         destino = destino,
                         aoNavegar = { destino = it },
                         aoEncerrarTurno = {
                             CopilotService.parar(this@MainActivity)
                             radio.fechar()
                             diag.autenticacao.sair()
+                            SessaoDoAgente.anunciar(false)
                             mostrarLogin = true
                         },
                     )
@@ -113,6 +133,7 @@ private fun Operacao(
     diag: DiagnosticsViewModel,
     radio: RadioViewModel,
     mapa: MapaViewModel,
+    copiloto: CopilotoViewModel,
     destino: Destino,
     aoNavegar: (Destino) -> Unit,
     aoEncerrarTurno: () -> Unit,
@@ -121,11 +142,15 @@ private fun Operacao(
     val falas by radio.falas.collectAsState()
     val pares by radio.pares.collectAsState()
     val noAr by radio.noAr.collectAsState()
-    val copilotoOcupado by diag.copilotoOcupado.collectAsState()
+    val copilotoOcupado by copiloto.copilotoOcupado.collectAsState()
     val estadoMapa by mapa.estado.collectAsState()
     val registro by diag.registration.collectAsState()
 
-    LaunchedEffect(Unit) { diag.anunciarEstadoDegradado() }
+    LaunchedEffect(Unit) {
+        diag.anunciarEstadoDegradado()
+        // As permissões passaram a ser anunciadas por quem tem a fila de som.
+        copiloto.anunciarCapacidadesPerdidas()
+    }
 
     val contexto = LocalContext.current
     DisposableEffect(Unit) {
@@ -168,7 +193,7 @@ private fun Operacao(
                 // O ciclo de voz ganha porta de entrada. Estava pronto, testado e
                 // inalcançável desde o commit d888970: o único chamador vivia numa
                 // tela que não é composta.
-                aoAbrirCopiloto = diag::cicloDeVoz,
+                aoAbrirCopiloto = copiloto::cicloDeVoz,
                 copilotoOcupado = copilotoOcupado,
                 modifier = modifier,
             )

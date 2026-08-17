@@ -4,6 +4,7 @@ import android.app.Application
 import android.os.StrictMode
 import android.util.Log
 import com.claryon.common.Result
+import com.claryon.field.auth.SessaoDoAgente
 import com.claryon.glasses.GlassesRuntime
 import org.maplibre.android.MapLibre
 
@@ -31,6 +32,10 @@ class ClaryonApp : Application() {
     override fun onCreate() {
         super.onCreate()
         instalarStrictModeDeDesenvolvimento()
+        // Lê o cofre cifrado FORA da Main. Sem isto, a primeira composição
+        // chamava `autenticado()` na thread principal e pagava 468 ms de
+        // Keystore no portão de login. Ver `SessaoDoAgente.aquecer`.
+        SessaoDoAgente.aquecer(this)
         MapLibre.getInstance(this)
 
         val result = GlassesRuntime.initialize(this)

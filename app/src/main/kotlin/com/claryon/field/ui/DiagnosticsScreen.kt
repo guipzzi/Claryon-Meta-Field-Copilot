@@ -50,6 +50,7 @@ fun DiagnosticsScreen(
     modifier: Modifier = Modifier,
     aoAbrirMapa: () -> Unit = {},
     vm: DiagnosticsViewModel = viewModel(),
+    copiloto: CopilotoViewModel = viewModel(),
 ) {
     val registration by vm.registration.collectAsState()
 
@@ -63,7 +64,7 @@ fun DiagnosticsScreen(
     val devices by vm.deviceCount.collectAsState()
     val mockStatus by vm.mockStatus.collectAsState()
     val audioStatus by vm.audioStatus.collectAsState()
-    val commandStatus by vm.commandStatus.collectAsState()
+    val commandStatus by copiloto.commandStatus.collectAsState()
     var command by remember { mutableStateOf("") }
 
     Column(
@@ -155,13 +156,13 @@ fun DiagnosticsScreen(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Button(
-                onClick = { vm.runCommand(command) },
+                onClick = { copiloto.runCommand(command) },
                 enabled = command.isNotBlank(),
             ) { Text("Enviar comando") }
-            OutlinedButton(onClick = vm::falarComando) { Text("Falar comando (STT)") }
+            OutlinedButton(onClick = copiloto::falarComando) { Text("Falar comando (STT)") }
         }
         Button(
-            onClick = vm::cicloDeVoz,
+            onClick = copiloto::cicloDeVoz,
             modifier = Modifier.fillMaxWidth(),
         ) { Text("▶ Ciclo de voz completo (push-to-talk)") }
 
