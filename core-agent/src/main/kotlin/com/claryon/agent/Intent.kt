@@ -41,6 +41,23 @@ sealed interface Intent {
     data class TrocarModo(val modo: ModoOperacao) : Intent
 
     /**
+     * Trocar de talk group pelo **rótulo falado** — "guarnição três", não o UUID.
+     *
+     * O rótulo é dado, não vocabulário do código: vem de `rotulo_falado` no
+     * servidor, por agente (migração `0011`). Um município que chame suas unidades
+     * de "viatura" ou "setor" funciona sem recompilar — e é por isso que a coluna
+     * existe no banco em vez de um `enum` aqui.
+     *
+     * Carrega o rótulo **bruto**, como saiu do roteador. Quem normaliza e resolve
+     * é o executor, com a mesma função usada no lado do servidor — normalizar aqui
+     * faria a `Intent` mentir sobre o que o agente disse, e é a transcrição bruta
+     * que o diagnóstico precisa.
+     *
+     * Ver `specs/troca-de-grupo-por-voz.spec.md`.
+     */
+    data class TrocarDeGrupo(val rotuloFalado: String) : Intent
+
+    /**
      * Consultar a posição de um par pelo indicativo (C2).
      * A resposta sai como distância, rumo e estado — nunca coordenadas.
      */

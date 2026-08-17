@@ -31,6 +31,12 @@ class UtteranceTest {
         Restricao.entries.forEach { add(ActionOutcome.PlacaConsultada("ABC1D23", it)) }
         add(ActionOutcome.OcorrenciaRegistrada("oc-1"))
         ModoOperacao.entries.forEach { add(ActionOutcome.ModoTrocado(it)) }
+        add(ActionOutcome.GrupoTrocado("GTA-3 Alfa"))
+        // O nome vem do CADASTRO. Este é o caso que o teto de sete palavras
+        // realmente precisa sustentar — e ele não passaria sem o recorte em
+        // `nomeFalavelDeGrupo`.
+        add(ActionOutcome.GrupoTrocado("Grupamento Tático de Ações Especiais Três Bravo"))
+        add(ActionOutcome.GrupoNaoReconhecido("guarnicao 9"))
         add(ActionOutcome.NaoEntendi)
         FalhaOperacional.entries.forEach { add(ActionOutcome.Falhou(it)) }
     }
@@ -158,5 +164,61 @@ class UtteranceTest {
             com.claryon.common.Priority.EMERGENCIA,
             utteranceFor(ActionOutcome.ApoioEnfileirado).priority,
         )
+    }
+
+    // ── Troca de grupo ────────────────────────────────────────────────────────
+
+    /**
+     * **A recusa não pode repetir o rótulo pedido.**
+     *
+     * Repetir "não conheço guarnição nove" confirmaria, ao ouvido de quem está por
+     * perto, qual grupo o agente tentou abrir. É a mesma classe de vazamento que o
+     * servidor evita ao devolver grandezas em vez de coordenada de terceiro — e é
+     * fácil de reintroduzir por boa intenção de UX.
+     */
+    @Test
+    fun aRecusaDeGrupo_naoRepeteORotuloPedido() {
+        val fala = textoDe(utteranceFor(ActionOutcome.GrupoNaoReconhecido("guarnicao 9")))
+        assertTrue("deveria falar algo", fala != null)
+        assertFalse(
+            "a recusa não pode repetir o rótulo tentado: $fala",
+            fala!!.contains("9") || fala.lowercase().contains("nove"),
+        )
+    }
+
+    /**
+     * **A confirmação TEM de nomear o grupo.**
+     *
+     * O efeito da ação é redirecionar a voz do agente. "Pronto" ou "Trocado" o
+     * deixaria falando sem saber para quem — e o contra-teste é que a fala mude
+     * quando o grupo muda.
+     */
+    @Test
+    fun aConfirmacaoDeTroca_nomeiaOGrupo() {
+        val alfa = textoDe(utteranceFor(ActionOutcome.GrupoTrocado("GTA-3 Alfa")))!!
+        val bravo = textoDe(utteranceFor(ActionOutcome.GrupoTrocado("GTA-4 Bravo")))!!
+
+        assertTrue("deveria conter o nome: $alfa", alfa.contains("GTA-3 Alfa"))
+        assertTrue(
+            "a fala tem de MUDAR com o grupo, senão não nomeia nada",
+            alfa != bravo,
+        )
+    }
+
+    /**
+     * O recorte é o que sustenta o teto quando o cadastro é generoso. Sem ele o
+     * invariante de sete palavras dependeria da disciplina de quem cadastra.
+     */
+    @Test
+    fun nomeLongoDeCadastro_naoEstouraOTetoDeSetePalavras() {
+        val fala = textoDe(
+            utteranceFor(
+                ActionOutcome.GrupoTrocado("Grupamento Tático de Ações Especiais Três Bravo"),
+            ),
+        )!!
+        val palavras = fala.trim().split(Regex("\\s+")).size
+        assertTrue("veio com $palavras palavras: \"$fala\"", palavras <= 7)
+        // E o recorte não pode virar fala vazia: nomear ainda é obrigatório.
+        assertTrue("o recorte apagou o nome: $fala", fala.contains("Grupamento"))
     }
 }

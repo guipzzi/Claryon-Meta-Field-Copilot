@@ -27,6 +27,7 @@ import com.claryon.field.agent.Identidade
 import com.claryon.field.audio.AudioDoAgente
 import com.claryon.field.audio.SaidaUnica
 import com.claryon.field.auth.SessaoDoAgente
+import com.claryon.field.radio.CanaisDoAgente
 import com.claryon.field.local.ProvedorDeLocal
 import com.claryon.field.permissoes.PermissoesEssenciais
 import com.claryon.field.voice.EscutaDoAgente
@@ -227,6 +228,11 @@ class CopilotoViewModel(app: Application) : AndroidViewModel(app) {
 
         minhaPosicao = { local.ultimaPosicao() },
         permissaoDeLocal = { local.temPermissao() },
+
+        // Troca de talk group por voz. O dono de processo é quem sabe o léxico e o
+        // grupo corrente; quem sabe MEXER no socket é o `RadioViewModel`, que se
+        // registra em `CanaisDoAgente`. Ver `specs/troca-de-grupo-por-voz.spec.md`.
+        trocarDeGrupo = { rotulo -> CanaisDoAgente.trocar(rotulo) },
 
         // C2 fechado: sai por `ConsultaDePosicao` com o token da sessão. Sem
         // login, sem rede ou sem servidor configurado, devolve `Indisponivel` — o

@@ -119,4 +119,78 @@ class DeterministicIntentRouterTest {
         assertTrue(intent is Intent.ConsultarPlaca)
         assertEquals("ABC1D23", (intent as Intent.ConsultarPlaca).placa)
     }
+
+    // ── Troca de talk group por voz ───────────────────────────────────────────
+    // Ver `specs/troca-de-grupo-por-voz.spec.md`, aceite 1.
+
+    @Test
+    fun trocaDeGrupo_extraiORotuloFalado() {
+        val i = router.route("Claryon, mudar para guarnição três")
+        assertTrue("veio $i", i is Intent.TrocarDeGrupo)
+        // Normalizado do MESMO jeito que o léxico do servidor compara — sem acento,
+        // minúsculo. Normalizar diferente nos dois lados é como não normalizar.
+        assertEquals("guarnicao tres", (i as Intent.TrocarDeGrupo).rotuloFalado)
+    }
+
+    @Test
+    fun trocaDeGrupo_aceitaAsVariacoesNaturais() {
+        for (frase in listOf(
+            "trocar para guarnição três",
+            "muda pra guarnição três",
+            "troca para guarnição três",
+            "mudar pra guarnição três",
+        )) {
+            val i = router.route("Claryon, $frase")
+            assertTrue("'$frase' deveria virar troca, veio $i", i is Intent.TrocarDeGrupo)
+            assertEquals(frase, "guarnicao tres", (i as Intent.TrocarDeGrupo).rotuloFalado)
+        }
+    }
+
+    @Test
+    fun trocaDeGrupo_derrubaOsArtigos() {
+        // "mudar para a guarnição três" não pede o grupo chamado "a guarnição três".
+        val i = router.route("Claryon, mudar para a guarnição três")
+        assertEquals("guarnicao tres", (i as Intent.TrocarDeGrupo).rotuloFalado)
+    }
+
+    /**
+     * **O contra-teste do aceite 1.** Comando sem destino é comando incompleto, e
+     * adivinhar o destino é exatamente o que a spec proíbe: trocar para o grupo
+     * errado redireciona a voz do agente sem que ele saiba.
+     */
+    @Test
+    fun trocaDeGrupo_semRotulo_naoViraTroca() {
+        for (frase in listOf("Claryon, mudar para", "Claryon, trocar para ", "Claryon, mudar para a")) {
+            val i = router.route(frase)
+            assertTrue(
+                "'$frase' não tem destino e NÃO pode virar troca — veio $i",
+                i is Intent.NaoReconhecida,
+            )
+        }
+    }
+
+    /**
+     * **A ordem do roteador, e o risco aceito 2 da spec.**
+     *
+     * "mudar para" aparece em fala corrente. Quem disse o verbo explícito de ditado
+     * ganha — mesma lição que já protege "modo abordagem" de virar alerta de
+     * ocorrência. Se este teste falhar, o agente perde a narração dele e ainda troca
+     * de canal sem querer.
+     */
+    @Test
+    fun ditadoVenceATrocaDeGrupo() {
+        val i = router.route("Claryon, narrar ocorrência: o suspeito mudou para a rua Rui Barbosa")
+        assertTrue("ditado tem de vencer, veio $i", i is Intent.NarrarOcorrencia)
+    }
+
+    /**
+     * Trocar de modo também vence: "modo ativo" é comando fechado, e uma frase que
+     * contenha as duas coisas é ambígua — resolver em favor do comando mais
+     * específico é a política do roteador inteiro.
+     */
+    @Test
+    fun trocaDeModoVenceTrocaDeGrupo() {
+        val i = router.route("Claryon, modo ativo")
+        assertTrue("veio $i", i is Intent.TrocarModo)
+    }
 }

@@ -107,6 +107,28 @@ fun utteranceFor(outcome: ActionOutcome): Utterance = when (outcome) {
         )
     }
 
+    is ActionOutcome.GrupoTrocado ->
+        // Earcon ANTES da fala (aceite 8 da spec): o efeito aqui é redirecionar a
+        // voz do agente, e confirmação cega ("pronto") não serve — ele precisa
+        // ouvir PARA ONDE foi.
+        Utterance.SinalizarEFalar(
+            Earcon.ACAO_EXECUTADA,
+            "Agora na ${nomeFalavelDeGrupo(outcome.nome)}.",
+            Priority.RESPOSTA,
+        )
+
+    is ActionOutcome.GrupoNaoReconhecido ->
+        // **Não** distingue "não existe" de "existe e você não é membro": a
+        // distinção é informação sobre a estrutura da corporação. Mesmo princípio
+        // do servidor, que devolve grandezas e nunca coordenada de terceiro.
+        // O rótulo dito NÃO é repetido de volta — repetir confirmaria ao ouvido de
+        // quem está por perto qual grupo foi tentado.
+        Utterance.SinalizarEFalar(
+            Earcon.FALHA,
+            "Não conheço essa guarnição.",
+            Priority.RESPOSTA,
+        )
+
     ActionOutcome.NaoEntendi ->
         Utterance.SinalizarEFalar(Earcon.FALHA, "Não entendi, repita.", Priority.RESPOSTA)
 
@@ -133,3 +155,24 @@ private fun porExtenso(n: Int): String = when (n) {
     12 -> "Doze"
     else -> n.toString()
 }
+
+/**
+ * Recorta o nome de um talk group para caber no teto de sete palavras.
+ *
+ * O nome vem do **cadastro**, não do código: "GTA-3 Alfa" cabe, "Grupamento
+ * Tático de Ações Especiais Três" não. Deixar o teto depender de os cadastros
+ * serem curtos é confiar em disciplina de terceiro para sustentar um invariante do
+ * produto — e o invariante existe porque fala longa por HFP em viatura não é
+ * ouvida, é ruído.
+ *
+ * Quatro palavras: com "Agora na " na frente, o total fecha em seis.
+ *
+ * **Risco declarado, a medir com fone real:** nomes de unidade brasileiros são
+ * cheios de sigla ("GTA", "ROTAM", "GATE"), e sigla falada letra por letra vive
+ * acima do corte de 4 kHz do HFP em banda estreita — é o mesmo motivo pelo qual
+ * "Claryon" foi escolhida como palavra de ativação. Se em hardware real a sigla
+ * não for compreensível, a saída é uma coluna `nome_falado` no cadastro, e não
+ * mudar isto aqui. Fica registrado em `specs/troca-de-grupo-por-voz.spec.md`.
+ */
+private fun nomeFalavelDeGrupo(nome: String): String =
+    nome.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.take(4).joinToString(" ")

@@ -47,6 +47,24 @@ sealed interface ActionOutcome {
     /** Modo de operação trocado de fato (energia, câmera e rede já reconfiguradas). */
     data class ModoTrocado(val modo: ModoOperacao) : ActionOutcome
 
+    /**
+     * Grupo trocado. Carrega o **nome de exibição** ("GTA-3 Alfa"), nunca o UUID:
+     * a confirmação falada tem de nomear o grupo para o agente saber para onde a
+     * voz dele passou a ir, e UUID falado é chave primária vazando por áudio.
+     */
+    data class GrupoTrocado(val nome: String) : ActionOutcome
+
+    /**
+     * O rótulo falado não está na lista deste agente.
+     *
+     * **Um único resultado para dois casos**, de propósito: "grupo não existe" e
+     * "existe e você não é membro" produzem a mesma resposta. Distinguir vazaria a
+     * estrutura da corporação pelo texto da recusa — mesma classe de erro que o
+     * servidor evita ao devolver grandezas em vez de coordenada de terceiro.
+     * Ver a spec, § *A recusa não revela o que não é do agente*.
+     */
+    data class GrupoNaoReconhecido(val rotuloFalado: String) : ActionOutcome
+
     /** Par localizado (C2). A fala sai de [FalaDePosicao], nunca de coordenadas. */
     data class PosicaoEncontrada(val posicao: PosicaoRelativa) : ActionOutcome
 
@@ -115,5 +133,32 @@ enum class FalhaOperacional(val causaCurta: String) {
     /** Permissão de localização negada. Falha explícita, nunca degradação muda. */
     SEM_PERMISSAO_DE_LOCAL("Sem permissão de local."),
     NADA_A_REPETIR("Nada a repetir."),
+
+    /**
+     * Pediu troca de grupo com transmissão aberta.
+     *
+     * Trocar no meio de uma transmissão mandaria o fim da frase para a guarnição
+     * errada — e o agente não teria como saber, porque do lado dele o áudio
+     * continuou saindo. Recusar é a única resposta honesta.
+     */
+    TRANSMISSAO_EM_CURSO("Fale depois de encerrar."),
+
+    /**
+     * O léxico de canais não carregou (sem sessão, ou falha de rede no login).
+     *
+     * Falha explícita, e **nunca** cair para `CanalDoPiloto` em silêncio: um
+     * fallback muto faria o agente crer que trocou de guarnição enquanto continua
+     * falando na anterior. Ver a spec, aceite 6.
+     */
+    SEM_LEXICO_DE_CANAIS("Sem lista. Entre de novo."),
+
+    /**
+     * Pediu troca de grupo sem rádio no ar.
+     *
+     * Existe porque a alternativa é pior: dizer "Agora na guarnição três" com o
+     * rádio fechado faria o agente passar a falar acreditando estar em outro canal.
+     * Recusa audível, sempre.
+     */
+    RADIO_FECHADO("Abra o rádio primeiro."),
     INTERNA("Falha interna."),
 }

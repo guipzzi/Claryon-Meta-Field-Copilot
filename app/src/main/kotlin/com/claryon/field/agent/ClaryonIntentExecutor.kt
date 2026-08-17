@@ -113,7 +113,33 @@ class ClaryonIntentExecutor(
     /** Onde está um par, já relativo a mim. Ver [BuscaDePar]. */
     private val localizarPar: suspend (String) -> BuscaDePar = { BuscaDePar.Indisponivel },
     private val permissaoDeLocal: () -> Boolean = { true },
+    /**
+     * Troca de talk group. Devolve o **nome de exibição** do grupo em que ficamos,
+     * ou uma falha tipada.
+     *
+     * Injetado como lambda pelo mesmo motivo dos outros: `core-agent` não conhece
+     * `RadioTatico`, e não pode — o executor decide *o quê*, o app sabe *como*.
+     * Padrão que recusa tudo: um executor construído sem esta dependência não pode
+     * silenciosamente parecer capaz de trocar de canal.
+     */
+    private val trocarDeGrupo: suspend (String) -> TrocaDeGrupo =
+        { TrocaDeGrupo.Falhou(FalhaOperacional.SEM_LEXICO_DE_CANAIS) },
 ) : IntentExecutor {
+
+    /**
+     * O que o app devolve ao executor depois de tentar a troca.
+     *
+     * Tipo próprio em vez de `Boolean`: "não trocou" tem três causas com
+     * recuperações diferentes (não conheço o grupo / sem lista / transmissão em
+     * curso), e um booleano as colapsaria numa só — que é como se constrói uma
+     * mensagem de erro que não ajuda ninguém.
+     */
+    sealed interface TrocaDeGrupo {
+        /** [nome] é o de exibição, para a fala. Nunca o UUID. */
+        data class Trocado(val nome: String) : TrocaDeGrupo
+        data object NaoReconhecido : TrocaDeGrupo
+        data class Falhou(val falha: FalhaOperacional) : TrocaDeGrupo
+    }
 
     private val mutex = Mutex()
     private var gravacaoAtual: RecordingHandle? = null
@@ -168,6 +194,12 @@ class ClaryonIntentExecutor(
         is Intent.TrocarModo -> {
             aoTrocarModo(intent.modo)
             ActionOutcome.ModoTrocado(intent.modo)
+        }
+
+        is Intent.TrocarDeGrupo -> when (val r = trocarDeGrupo(intent.rotuloFalado)) {
+            is TrocaDeGrupo.Trocado -> ActionOutcome.GrupoTrocado(r.nome)
+            TrocaDeGrupo.NaoReconhecido -> ActionOutcome.GrupoNaoReconhecido(intent.rotuloFalado)
+            is TrocaDeGrupo.Falhou -> ActionOutcome.Falhou(r.falha)
         }
 
         is Intent.NaoReconhecida -> ActionOutcome.NaoEntendi

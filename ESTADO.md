@@ -23,8 +23,9 @@ couber é história e vai para `DECISIONS.md`. Aqui só o que muda a próxima de
   o `tiny` erra palavra rara ("guarnição" → "agora nisso são") e acerta o resto.
 - Posição: `consultar_posicao` tira o solicitante do JWT e `private.posicao_relativa` está
   revogada de `authenticated`. Garantia do servidor, não do cliente.
-- Migração `0011` aplicada: `rotulo_falado` + `public.meus_rotulos_falados()`, léxico
-  fechado de canais por agente. `RotulosFalados` carrega no login.
+- **Troca de grupo por voz ligada de ponta a ponta:** VAD → Whisper → roteador →
+  `CanaisDoAgente` → `RadioTatico.trocarDeGrupo`, com chamador alcançável em runtime.
+  `RotulosFalados` tinha **zero chamadores** e este arquivo afirmava o contrário.
 - Verificado por `javap`: o DAT 0.9.0 **não** expõe microfone, e o MockDeviceKit não simula
   áudio nem alimenta a câmera emulada. Óculos e fone reais: única bancada honesta.
 

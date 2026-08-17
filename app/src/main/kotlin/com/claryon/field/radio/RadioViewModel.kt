@@ -238,6 +238,24 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
             novo.entrarEmModoAtivo(r)
             radio = novo
             transporteAtual = transporte
+
+            // **O registro que torna a troca por voz alcançável em runtime.**
+            //
+            // Sem esta linha, `Intent.TrocarDeGrupo` compila, tem teste e recusa
+            // toda troca com "Abra o rádio primeiro." — construído no sentido de
+            // "escrito", que é o que o `CLAUDE.md` §6 chama de mentira.
+            //
+            // `transmitindoAgora` é lambda e não valor: a transmissão começa e
+            // termina entre o registro e o comando falado.
+            CanaisDoAgente.registrarRadio(
+                trocar = { id -> novo.trocarDeGrupo(id) },
+                transmitindoAgora = { novo.transmitindo },
+            )
+
+            // O léxico é do processo e carrega uma vez. Aqui e não no login porque
+            // é aqui que existe escopo suspenso com sessão garantida — e é
+            // idempotente, então reabrir a tela não vai à rede de novo.
+            viewModelScope.launch { CanaisDoAgente.carregar(getApplication()) }
             indicativoProprio = indicativo
             nomeDoCanalAtual = nomeDoCanal
             vigiaDeRede = viewModelScope.launch { vigiarRede(nomeDoCanal, transporte) }
@@ -553,6 +571,9 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     override fun onCleared() {
+        // ANTES de `fechar()`: o lambda registrado segura este ViewModel, e um
+        // ViewModel morto que ainda sabe trocar de canal é pior que nenhum.
+        CanaisDoAgente.esquecerRadio()
         fechar()
         super.onCleared()
     }

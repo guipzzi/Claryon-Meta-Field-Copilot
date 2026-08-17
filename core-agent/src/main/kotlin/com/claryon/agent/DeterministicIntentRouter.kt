@@ -48,6 +48,18 @@ class DeterministicIntentRouter : IntentRouter {
                 extrairIndicativo(texto)?.let { Intent.ConsultarPosicao(it) }
                     ?: Intent.NaoReconhecida(transcricao)
 
+            // Troca de grupo DEPOIS de NARRAR e dos modos, e a ordem é a mesma
+            // lição de "modo abordagem": "narrar ocorrência: o suspeito mudou para
+            // a rua tal" é ditado, não comando de canal. Quem disse o verbo
+            // explícito de ditado ganha.
+            //
+            // Rótulo vazio NÃO vira troca: "claryon mudar para" sem destino é
+            // comando incompleto, e adivinhar o destino é exatamente o que a spec
+            // proíbe. Cai em `NaoReconhecida`, que pede repetição.
+            matches(texto, TROCAR_DE_GRUPO) ->
+                extrairRotuloDeGrupo(texto)?.let { Intent.TrocarDeGrupo(it) }
+                    ?: Intent.NaoReconhecida(transcricao)
+
             // NARRAR antes do léxico: "narrar ocorrência: abordagem na rua X" é
             // ditado para o boletim, não alerta. O verbo explícito do agente
             // vence a classificação automática — ele disse o que queria.
@@ -117,6 +129,33 @@ class DeterministicIntentRouter : IntentRouter {
         return null
     }
 
+    /**
+     * Tira o rótulo falado de depois do verbo de troca.
+     *
+     * Devolve o rótulo **normalizado do jeito que o léxico compara** — o executor
+     * confronta por igualdade contra `rotulo_falado`, e normalizar de formas
+     * diferentes nos dois lados é como não normalizar: a comparação falha em
+     * silêncio e a conclusão vira "o servidor está errado".
+     *
+     * Sem `take(n)`: rótulo é dado do servidor e pode ter qualquer número de
+     * palavras ("guarnição três alfa", "setor centro sul"). Truncar aqui limitaria
+     * o cadastro a partir do cliente.
+     */
+    private fun extrairRotuloDeGrupo(texto: String): String? {
+        for (g in TROCAR_DE_GRUPO) {
+            val i = texto.indexOf(g)
+            if (i < 0) continue
+            val resto = texto.substring(i + g.length)
+                .split(" ")
+                .filter { it.isNotBlank() }
+                // "mudar para a guarnição três" não pede o grupo "a guarnição três".
+                .dropWhile { it in ARTIGOS }
+                .joinToString(" ")
+            if (resto.isNotBlank()) return resto
+        }
+        return null
+    }
+
     private fun matches(texto: String, padroes: List<String>): Boolean =
         padroes.any { texto.contains(it) }
 
@@ -149,6 +188,16 @@ class DeterministicIntentRouter : IntentRouter {
         val MODO_ATIVO = listOf("modo ativo", "modo patrulha")
 
         val CONSULTAR_POSICAO = listOf("onde esta", "onde ta", "posicao de", "localizar", "cade a", "cade o")
+
+        /**
+         * Troca de talk group. **Verbo + preposição**, não o verbo solto: "mudar"
+         * e "trocar" aparecem em fala corrente ("o suspeito mudou de rua"), e o
+         * comando é a locução inteira. Ver `specs/troca-de-grupo-por-voz.spec.md`.
+         */
+        val TROCAR_DE_GRUPO = listOf(
+            "mudar para", "trocar para", "mudar pra", "trocar pra",
+            "muda para", "troca para", "muda pra", "troca pra",
+        )
 
         val ARTIGOS = setOf("o", "a", "os", "as", "do", "da", "de")
 
