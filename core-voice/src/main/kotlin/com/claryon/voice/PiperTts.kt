@@ -24,6 +24,22 @@ import kotlinx.coroutines.withContext
  * Assinaturas confirmadas na API oficial do sherpa-onnx (`OfflineTts`,
  * `getOfflineTtsConfig`, `generate` → `GeneratedAudio(samples: FloatArray,
  * sampleRate)`).
+ *
+ * ## ⚠️ Modelo ausente **aborta o processo** — e nenhum `catch` salva
+ *
+ * Se o `.onnx` não estiver no caminho, o sherpa-onnx não lança exceção: ele
+ * escreve `Read binary file: ... failed` e chama `abort()` no nativo. O
+ * `runCatching` abaixo e o [ultimaFalha] cobrem falha de *configuração*; contra
+ * um `abort()` **nada em Kotlin roda** — nem `catch`, nem `finally`, nem
+ * relatório de crash do app. O processo simplesmente morre.
+ *
+ * Verificado no emulador: construir esta classe com um `modelDir` inexistente
+ * derruba o processo inteiro, levando junto o teste que estava rodando.
+ *
+ * Por isso [existeModelo] confere o asset **antes** de entregá-lo ao nativo. A
+ * mesma verificação já existia em `Modelos.piper()`, mas morar só no chamador
+ * significa que ela protege quem lembra dela — e este projeto tem por regra que
+ * a garantia é da classe, não da disciplina de quem a usa.
  */
 class PiperTts(
     private val assetManager: AssetManager?,
@@ -42,7 +58,30 @@ class PiperTts(
     var ultimaFalha: Throwable? = null
         private set
 
+    /**
+     * O asset do modelo abre? Ver o aviso no KDoc da classe: esta pergunta tem de
+     * ser respondida **antes** do construtor nativo, porque depois dele não há
+     * mais linha de execução para responder nada.
+     *
+     * Só cobre o caminho de asset. Com [assetManager] nulo o modelo vem de
+     * arquivo e a checagem equivalente é do chamador — declarado, não esquecido.
+     */
+    private fun existeModelo(): Boolean {
+        val am = assetManager ?: return true
+        return runCatching { am.open("$modelDir/$modelName").use { it.read() >= 0 } }
+            .getOrDefault(false)
+    }
+
     private suspend fun engine(): OfflineTts? = mutex.withLock {
+        if (tts == null && !existeModelo()) {
+            val causa = IllegalStateException(
+                "Modelo Piper ausente em assets/$modelDir/$modelName — " +
+                    "entregá-lo ao sherpa-onnx abortaria o processo.",
+            )
+            ultimaFalha = causa
+            Log.e(TAG, causa.message, causa)
+            return@withLock null
+        }
         tts ?: runCatching {
             val config = getOfflineTtsConfig(
                 modelDir = modelDir,

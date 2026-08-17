@@ -31,13 +31,13 @@ import com.claryon.field.local.ProvedorDeLocal
 import com.claryon.field.permissoes.PermissoesEssenciais
 import com.claryon.field.voice.EscutaDoAgente
 import com.claryon.field.voice.Modelos
+import com.claryon.field.voice.SileroVoiceActivityDetector
 import com.claryon.field.voice.VoiceCycle
 import com.claryon.net.ConsultaDePosicao
 import com.claryon.sync.SemTransporteGateway
 import com.claryon.sync.SyncManager
 import com.claryon.sync.TacticalDispatcher
 import com.claryon.voice.AndroidOnDeviceStt
-import com.claryon.voice.EnergyVoiceActivityDetector
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -467,7 +467,15 @@ class CopilotoViewModel(app: Application) : AndroidViewModel(app) {
 
             val cycle = VoiceCycle(
                 pcmInput = { audio.microfonePcm(prova) },
-                vad = EnergyVoiceActivityDetector(sampleRateHz = 16_000),
+                // **Silero no lugar do limiar de energia.** Numa viatura com
+                // sirene e rádio da corporação tocando, o RMS abre janela o
+                // tempo todo — e cada janela é uma invocação do Whisper sobre
+                // ruído. O modelo (629 KB, `assets/models/silero_vad.onnx`) foi
+                // treinado para distinguir VOZ de som.
+                vad = SileroVoiceActivityDetector(
+                    assets = getApplication<Application>().assets,
+                    sampleRateHz = 16_000,
+                ),
                 sttFn = { pcm, sr ->
                     (whisper?.transcribe(pcm, sr) as? Result.Success)?.value?.text.orEmpty()
                 },
