@@ -14,7 +14,9 @@ import com.claryon.common.Result
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -273,6 +275,14 @@ class GlassesAudioManagerImpl(
                 track.play()
                 var offset = 0
                 while (offset < pcm.size) {
+                    // **Confere cancelamento a cada bloco escrito.** Sem isto, um
+                    // P1 que chega no meio de uma frase longa não interrompia a
+                    // escrita: o laço seguia empurrando o PCM inteiro para o
+                    // buffer nativo e só o `finally` cortava. O `flush()` ainda
+                    // descartava o som, mas o intervalo entre "cancelou" e
+                    // "calou" ficava proporcional ao tamanho da frase — e é
+                    // justamente esse intervalo que o aceite (b) mede.
+                    currentCoroutineContext().ensureActive()
                     val n = track.write(pcm, offset, pcm.size - offset)
                     if (n < 0) {
                         return@withContext Result.failure(

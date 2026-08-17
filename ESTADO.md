@@ -24,12 +24,19 @@ entra o que muda a próxima decisão: o que funciona, o que está quebrado, o qu
   foi não mexer em `sequencia`: ela continua **por quadro**, a mensagem só os carrega juntos, e
   `ProtocoloRealtime.interpretar` explode o grupo de volta em N eventos — `BufferDeJitter` não
   mudou uma linha. Custo declarado: +40 ms de empacotamento.
-- **Meta de 120 ms atingida.** O custo não era do emulador: o `MediaCodec` era criado,
-  configurado e iniciado na PRIMEIRA codificação, dentro do caminho crítico do PTT.
-  `CodecDeVoz.preparar()` aquece no `entrarEmModoAtivo`. Medido em três rodadas:
-  **192 ms (1ª após instalar), 94 ms, 103 ms**.
-- **Aceite (b) medido no aparelho: 1 ms** (meta ≤ 200 ms), por `PreempcaoNoAparelhoTest` —
-  instrumentado, com `VoiceOutput`/`PrioritySoundQueue`/`AudioTrack` reais.
+- **Meta de 120 ms: p50 dentro, p95 na fronteira.** O custo não era do emulador — o
+  `MediaCodec` era criado, configurado e iniciado na PRIMEIRA codificação, dentro do caminho
+  crítico do PTT. `CodecDeVoz.preparar()` aquece no `entrarEmModoAtivo`. Medido com n=5 por
+  rodada (`scripts/bancada.sh`): **p50 31 e 48 ms · p95 82 e 126 ms**. Antes: 168-245 ms.
+- **Aceite (b) medido no aparelho** por `PreempcaoNoAparelhoTest`, instrumentado, com
+  `VoiceOutput`/`PrioritySoundQueue`/`AudioTrack` reais. E o número passou a ser
+  **chegada→silêncio**, não chegada→`cancel`: a fila agora dá `join()` no job cortado (o
+  `finally` da reprodução é quem faz `pause()`+`flush()`), e o laço de `write` confere
+  cancelamento a cada bloco.
+- **`scripts/bancada.sh`** — bancada reprodutível que **aborta com mensagem** se o rádio não
+  abrir em 25 s, em vez de medir o nada. Nasceu de um erro concreto: três rodadas saíram
+  vazias porque `connectedAndroidTest` reinstala o APK e a reinstalação revoga permissões e
+  apaga a sessão; eu quase reportei como regressão do próprio diff.
 - **Diagnóstico fora do release.** `DiagnosticoViewModel` e `DiagnosticsScreen` vivem em
   `app/src/debug`. Verificado por `dexdump` no APK: presentes no debug, **ausentes no release**;
   `OculosViewModel` (produção) presente nos dois.

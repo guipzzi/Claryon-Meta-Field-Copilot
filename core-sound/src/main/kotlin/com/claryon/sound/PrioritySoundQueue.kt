@@ -31,11 +31,18 @@ class PrioritySoundQueue(
     private val play: suspend (Sound, ShortArray) -> Unit,
     /**
      * Chamado quando uma emergência **de fato corta** um som em curso, com o
-     * tempo entre o `enqueue` da emergência e o cancelamento do job que tocava.
+     * tempo entre o `enqueue` da emergência e o instante em que a reprodução
+     * anterior **terminou de parar**.
      *
      * É o instrumento do aceite "um P1 chegando durante fala do copiloto corta a
      * fala em ≤ 200 ms". Sem ele, a preempção era demonstrável por teste
      * unitário e **não mensurável** — e meta sem número é aspiração.
+     *
+     * **Mede até o job encerrar, não até o `cancel` ser chamado.** A primeira
+     * versão media chegada→`cancel` e era um limite inferior desonesto: o
+     * `cancel` é cooperativo, e quem de fato silencia o alto-falante é o
+     * `pause()`/`flush()` do `finally` da reprodução. O `join` abaixo espera
+     * exatamente isso, então o número passou a ser chegada→silêncio.
      */
     private val aoInterromper: (atrasoMs: Long) -> Unit = {},
     private val agoraMs: () -> Long = { System.currentTimeMillis() },
@@ -65,16 +72,21 @@ class PrioritySoundQueue(
             // dois passos fazia a emergência cancelar um job JÁ CONCLUÍDO,
             // deixando o som de menor prioridade tocar até o fim — quebrando
             // "nível 1 interrompe tudo".
-            var interrompeu = false
+            var cortado: Job? = null
             mutex.withLock {
                 if (!scheduler.offer(sound)) return@launch
                 if (scheduler.deveInterromper(sound.priority, playingPriority)) {
+                    cortado = playing
                     playing?.cancel()
-                    interrompeu = true
                 }
             }
-            // Fora do lock: o observador é do chamador e não pode segurar a fila.
-            if (interrompeu) aoInterromper(agoraMs() - chegada)
+            // Fora do lock, e por dois motivos: o `join` espera o `finally` da
+            // reprodução (pause + flush = silêncio de verdade), e o observador é
+            // do chamador — nenhum dos dois pode segurar a fila.
+            cortado?.let {
+                it.join()
+                aoInterromper(agoraMs() - chegada)
+            }
             wake.trySend(Unit)
         }
     }
