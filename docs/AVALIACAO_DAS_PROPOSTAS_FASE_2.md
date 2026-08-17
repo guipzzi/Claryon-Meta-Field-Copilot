@@ -288,3 +288,61 @@ E o número é do **melhor caso** — Piper, sem sotaque, sem hesitação, sem A
    com 0/8 de falso positivo há orçamento para aceitar também `atenção agora`. Ela
    precisa ser medida contra fala operacional antes de entrar — "atenção, agora
    vamos" é frase plausível, e seria trocar um eixo pelo outro.
+
+---
+
+## ⚠️ A lista de variantes: metade funciona, e a outra metade refuta a premissa
+
+A revisão pediu para manter `Hey Claryon` e "treinar" o sistema a reconhecer as
+grafias que o decodificador produz. Eu disse que os erros eram **sistemáticos** — em
+6 amostras, `Eclareon` aparecia 2 vezes e `Clarion` de forma consistente.
+
+Com **10 amostras e comandos mais variados**, a premissa cai:
+
+```
+recall só com a grafia canônica .. 0,0%   (0/10)  ← "hey claryon" literal NUNCA aparece
+recall com 7 variantes ........... 40,0%  (4/10)
+meta ............................. 90%
+falso positivo ................... 0/10   ✅
+```
+
+### O que funcionou, e está validado
+
+**Falso positivo zero**, mesmo com sete variantes e mesmo contra armadilhas
+deliberadas: *"ele clareou a situação"*, *"a claridade do dia"*, *"é clara a
+necessidade de apoio"*. A lista ancorada no início da transcrição **não dispara**
+em fala operacional. O eixo que matou `Aurora` está resolvido pelo desenho.
+
+### O que refutou a premissa
+
+As grafias não cobertas são **todas diferentes entre si**:
+
+```
+ecarion · e carao · e carion · eca o
+```
+
+Não há um conjunto pequeno e estável para listar. Cada amostra nova tende a
+produzir uma grafia nova, e o motivo é estrutural: **para uma palavra fora do
+vocabulário, não existe sequência de tokens "certa" para o decodificador
+convergir.** Ele improvisa uma aproximação fonética a cada vez, e a aproximação
+**deriva com o contexto seguinte** — que é justamente o que varia entre comandos.
+
+Perseguir essas grafias é uma lista que cresce sem convergir — a "peneira" que a
+spec já alertava, e cada entrada nova é superfície de falso positivo. Os 0/10 de
+hoje não sobreviveriam a uma lista de trinta entradas.
+
+### A saída que preserva o que a revisão quer
+
+**A marca não precisa ser a palavra de ativação.** A marca da Alexa é Amazon; a da
+Siri é Apple. São coisas diferentes, e confundi-las é o que está custando aqui.
+
+- **`Claryon` continua sendo o nome do produto** — na tela, no documento, no deck.
+- **O gatilho falado passa a ser um par que sobrevive** — `Atenção Aurora` mediu
+  **83,3%** com 0/8 de falso positivo, contra 40% do `Hey Claryon` com lista.
+
+O que se perde é a marca *dita em voz alta*. O que se ganha é o dobro do recall e
+uma lista que não cresce.
+
+Se a decisão for manter `Hey Claryon` falado assim mesmo, o número honesto para o
+`ROADMAP` é **40%**, não 90% — e a meta precisa ser reescrita, porque meta
+inalcançável é pior que meta revisada.
