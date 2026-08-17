@@ -68,6 +68,23 @@ class TransporteRealtime(
 
     override suspend fun conectar(talkGroupId: String): Result<Unit> {
         if (aberto && talkGroup == talkGroupId) return Result.success(Unit)
+
+        // **Fecha o anterior antes de abrir o novo.** O guard acima só pega
+        // "mesmo grupo, já aberto"; TROCAR de grupo caía direto em `abrir()`, que
+        // reatribui `socket` sem fechar — e o WebSocket antigo continuava vivo,
+        // inscrito no tópico do grupo antigo. As consequências não são de
+        // recurso, são operacionais: o agente que trocou para a guarnição 5
+        // continuaria RECEBENDO a guarnição 3, e o `_eventos` misturaria as duas
+        // sem nada no evento dizendo de qual canal veio.
+        //
+        // Só descobrível com dois grupos, que é justamente o que a seleção por
+        // voz destrava — por isso o conserto vem antes dela, não depois.
+        if (talkGroup != null && talkGroup != talkGroupId) {
+            runCatching { socket?.close(1000, "troca de talk group") }
+            socket = null
+            aberto = false
+        }
+
         talkGroup = talkGroupId
         abrir()
         return Result.success(Unit)

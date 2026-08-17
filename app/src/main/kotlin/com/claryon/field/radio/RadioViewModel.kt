@@ -482,7 +482,7 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun canalAtual(): String =
-        nomeDoCanalAtual.ifBlank { TALK_GROUP_PADRAO }
+        nomeDoCanalAtual.ifBlank { CanalDoPiloto.NOME }
 
     // ── Telemetria ────────────────────────────────────────────────────────────
 
@@ -566,7 +566,6 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
          */
         const val PREFIXO_LOCAL = "local-"
 
-        const val TALK_GROUP_PADRAO = "demo"
 
         /**
          * 2 s. A queda de rede não precisa ser detectada em milissegundos — mas

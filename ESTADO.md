@@ -109,6 +109,18 @@ entra o que muda a próxima decisão: o que funciona, o que está quebrado, o qu
 - **Whisper quente** (`EscutaDoAgente`) + a válvula que não existia: `Application.onTrimMemory`
   devolve os ~78 MB sob pressão. Sem ela, quem escolheria o que morrer seria o LMK — e o que ele
   mata é o serviço de rádio.
+- **Seleção de talk group, a fundação.** Migração `0011` aplicada e verificada no servidor:
+  coluna `rotulo_falado` com único parcial por `unit_id`, e `public.meus_rotulos_falados()`
+  `SECURITY DEFINER` cujo ACL tem só `authenticated` e `service_role` — `anon` fora. O
+  solicitante sai do JWT, nunca de parâmetro. `RotulosFalados` carrega o léxico no cliente;
+  `RadioTatico.trocarDeGrupo` troca **sem tocar em `AudioDoAgente`** (a rota SCO é estado
+  global; trocar de canal é operação de rede e tem de custar só rede).
+  **Defeito real consertado no caminho:** `TransporteRealtime.conectar` reatribuía o socket
+  sem fechar o anterior ao trocar de grupo — o aparelho seguiria inscrito no tópico antigo e
+  receberia as duas guarnições misturadas. Só descobrível com dois grupos, que é justamente o
+  que a seleção por voz destrava.
+  O UUID do canal, que estava escrito em **três** arquivos sem import cruzado, agora aparece
+  **uma vez** (`CanalDoPiloto`).
 - **`ClienteDePisoRemoto` ligado.** Estava escrito e nunca instanciado; sem ele a validação de
   membership de `pedir_canal` (`0005:78-82`) jamais era alcançada. Sem sessão cai para local, e
   a degradação é **declarada** em log — dois agentes achando que detêm o canal não pode ser

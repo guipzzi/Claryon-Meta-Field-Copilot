@@ -20,6 +20,7 @@ import com.claryon.agent.ModoOperacao
 import com.claryon.field.auth.SessaoDoAgente
 import com.claryon.field.permissoes.PermissoesEssenciais
 import com.claryon.field.service.CopilotService
+import com.claryon.field.radio.CanalDoPiloto
 import com.claryon.field.radio.RadioViewModel
 import com.claryon.field.ui.CascoTatico
 import com.claryon.field.ui.Destino
@@ -168,8 +169,8 @@ private fun Operacao(
         CopilotService.publicador = mapa.publicadorDePosicao
         CopilotService.iniciar(contexto, ModoOperacao.ATIVO)
         radio.abrir(
-            canal = CANAL_DEMO,
-            nomeDoCanal = NOME_DO_CANAL,
+            canal = CanalDoPiloto.ID,
+            nomeDoCanal = CanalDoPiloto.NOME,
             agenteId = AGENTE_DEMO,
             indicativo = INDICATIVO_DEMO,
         )
@@ -184,7 +185,7 @@ private fun Operacao(
     CascoTatico(destino = destino, aoNavegar = aoNavegar, noAr = noAr) { modifier ->
         when (destino) {
             Destino.GUARNICAO -> TelaDeGuarnicao(
-                canal = NOME_DO_CANAL,
+                canal = CanalDoPiloto.NOME,
                 pares = pares,
                 falas = falas,
                 estadoDoPtt = estadoPtt,
@@ -209,7 +210,7 @@ private fun Operacao(
                 indicativo = INDICATIVO_DEMO,
                 matricula = AGENTE_DEMO,
                 unidade = "GTA-3",
-                canal = NOME_DO_CANAL,
+                canal = CanalDoPiloto.NOME,
                 capacidades = capacidadesDe(estadoPtt, registro.name, estadoMapa.assinado),
                 aoSair = aoEncerrarTurno,
                 modifier = modifier,
@@ -266,18 +267,11 @@ private fun capacidadesDe(
 }
 
 /**
- * Identidade de demonstração, casada com `servidor/seed_piloto.sql`.
+ * Identidade de demonstração do agente. O canal saiu daqui: ver [CanalDoPiloto],
+ * que é a fonte única — o mesmo UUID chegou a estar escrito em três arquivos sem
+ * import cruzado, e mapa e rádio apontavam para o mesmo grupo por digitação.
  *
- * No produto isto vem do cadastro junto da sessão — o servidor já impõe o
- * vínculo por RLS, e o `agent_id` das RPCs sai do JWT. Aqui é constante porque a
- * tela de seleção de talk group ainda não existe.
- *
- * **O identificador e o nome são coisas separadas.** A consulta usa o UUID; a
- * tela mostra "GTA-3 Alfa". Mostrar o UUID seria vazar chave primária para o
- * agente, e usar o nome na consulta quebraria no dia em que dois grupos se
- * chamassem igual.
+ * No produto isto vem do cadastro junto da sessão.
  */
-private const val CANAL_DEMO = "22222222-0000-0000-0000-000000000001"
-private const val NOME_DO_CANAL = "GTA-3 Alfa"
 private const val AGENTE_DEMO = "41882"
 private const val INDICATIVO_DEMO = "Alfa Um"

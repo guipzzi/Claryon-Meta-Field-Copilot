@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.claryon.agent.FalaDePosicao
 import com.claryon.field.auth.SessaoDoAgente
 import com.claryon.field.local.ProvedorDeLocal
+import com.claryon.field.radio.CanalDoPiloto
 import com.claryon.field.mapa.EstadoDoMapa
 import com.claryon.field.mapa.MapaDePares
 import com.claryon.net.HistoricoDoCanal
@@ -84,7 +85,7 @@ class MapaViewModel(app: Application) : AndroidViewModel(app) {
             publicarPosicao()
 
             while (true) {
-                val r = historico.posicoesDoGrupo(TALK_GROUP_DEMO)
+                val r = historico.posicoesDoGrupo(CanalDoPiloto.ID)
                 _estado.value = r.fold(
                     onSuccess = { lista -> montarMapa(lista) },
                     onFailure = {
@@ -153,7 +154,6 @@ class MapaViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private companion object {
-        const val TALK_GROUP_DEMO = "22222222-0000-0000-0000-000000000001"
 
         /** 5 s: o esmaecimento por idade precisa de relógio, não só de dado novo. */
         const val INTERVALO_DE_REDESENHO_MS = 5_000L

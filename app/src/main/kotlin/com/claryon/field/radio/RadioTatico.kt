@@ -218,7 +218,7 @@ class RadioTatico(
      * pré-roll continuamente.
      */
     fun entrarEmModoAtivo(rota: GlassesAudioRoute) {
-        escopo.launch { transporte.conectar(talkGroupId) }
+        escopo.launch { transporte.conectar(talkGroupCorrente) }
 
         // **Aquece o codec agora, não no primeiro toque.**
         // `MediaCodec.createEncoderByType` + `configure` + `start` aconteciam na
@@ -271,6 +271,69 @@ class RadioTatico(
         }
     }
 
+    /**
+     * Troca o talk group **sem derrubar o áudio**.
+     *
+     * ## Por que não é "fechar e abrir de novo"
+     *
+     * `RadioViewModel.fechar()` termina em `audio.liberar()`, que solta a rota
+     * SCO. Reabrir custa a renegociação do HFP — centenas de milissegundos em que
+     * o agente não ouve nem fala — e, pior, a rota é **estado global do
+     * aparelho**: derrubá-la para trocar de canal afeta qualquer outro caminho
+     * que esteja capturando. Trocar de grupo é operação de REDE, e tem de custar
+     * só rede.
+     *
+     * Por isso este método toca `transporte` e `receptor`, e nada mais. A captura
+     * segue viva: `alimentacao` continua alimentando o pré-roll pelo mesmo
+     * `AudioRecord`, e a `GlassesAudioRoute` nunca é devolvida.
+     *
+     * ## O que é descartado, e por quê
+     *
+     * O pré-roll é **limpo**. Ele contém a fala que o agente disse enquanto o
+     * rádio estava no grupo ANTERIOR; deixá-la sobreviver faria a primeira
+     * transmissão no grupo novo começar com áudio dito para outra guarnição.
+     * Áudio não sobrevive à troca de contexto.
+     *
+     * A recepção em curso também morre: `fecharFluxoDeSaida` fecha o track e
+     * drena a fila. Terminar de tocar a voz do grupo antigo depois de trocar
+     * seria confundir quem escuta sobre de onde vem o quê.
+     *
+     * @return `false` se já estamos neste grupo — o chamador decide se avisa.
+     */
+    suspend fun trocarDeGrupo(novoTalkGroupId: String): Boolean {
+        if (novoTalkGroupId == talkGroupCorrente) return false
+
+        // Ordem que importa: parar de receber ANTES de reconectar, senão o
+        // primeiro evento do grupo novo pode chegar enquanto o jitter ainda
+        // carrega quadros do antigo.
+        receptor.parar()
+        fecharFluxoDeSaida()
+        transmissao?.cancel()
+        preRoll.limpar()
+        supressor.limpar()
+
+        talkGroupCorrente = novoTalkGroupId
+        // `conectar` fecha o socket anterior quando o grupo muda — ver
+        // `TransporteRealtime.conectar`. Sem isso o aparelho seguiria inscrito no
+        // tópico antigo e receberia as duas guarnições misturadas.
+        transporte.conectar(novoTalkGroupId)
+        receptor.iniciar { evento -> tratarRecepcao(evento) }
+        Log.i(TAG, "talk group trocado para $novoTalkGroupId")
+        return true
+    }
+
+    /**
+     * O grupo em que estamos agora.
+     *
+     * `var` privado e não o parâmetro do construtor: o `talkGroupId` de
+     * construção é só o inicial, e `SessaoPtt` precisa do **corrente** para não
+     * pedir piso ao grupo errado depois de uma troca.
+     */
+    private var talkGroupCorrente: String = talkGroupId
+
+    /** Para diagnóstico e para a tela dizer em que canal o agente está. */
+    val grupoAtual: String get() = talkGroupCorrente
+
     fun sairDeModoAtivo() {
         fecharFluxoDeSaida()
         alimentacao?.cancel()
@@ -308,7 +371,11 @@ class RadioTatico(
             else -> 3
         }
         val sessao = SessaoPtt(
-            talkGroupId = talkGroupId,
+            // **Corrente, não o do construtor.** Depois de uma troca de
+            // grupo, pedir o piso com o id inicial mandaria a concessão
+            // para a guarnição errada — e o servidor recusaria por
+            // membership, ou pior, concederia num canal que ninguém ouve.
+            talkGroupId = talkGroupCorrente,
             agenteId = agenteId,
             preRoll = preRoll,
             codec = codec,
