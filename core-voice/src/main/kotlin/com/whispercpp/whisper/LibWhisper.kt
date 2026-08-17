@@ -144,7 +144,6 @@ private class WhisperLib {
             Log.d(LOG_TAG, "Primary ABI: ${Build.SUPPORTED_ABIS[0]}")
             var loadVfpv4 = false
             var loadV8fp16 = false
-            var loadDotprod = false
             if (isArmEabiV7a()) {
                 // armeabi-v7a needs runtime detection support
                 val cpuInfo = cpuInfo()
@@ -160,26 +159,17 @@ private class WhisperLib {
                 val cpuInfo = cpuInfo()
                 cpuInfo?.let {
                     Log.d(LOG_TAG, "CPU info: $cpuInfo")
-                    // **dotprod e a variante preferida, e a ordem importa.**
+                    // **A variante "_dotprod" foi removida: ela nao mudava uma
+                    // instrucao.** Os kernels moram no `libggml-cpu.so`, que e UM
+                    // e compartilhado — `llvm-objdump` mostrou `sdot = 0` mesmo
+                    // com o alvo dotprod carregado. Ver o CMakeLists.
                     //
-                    // "asimddp" e como o /proc/cpuinfo do Linux nomeia a feature que
-                    // o compilador chama de "dotprod". Os kernels quantizados do
-                    // ggml (55 usos de __ARM_FEATURE_DOTPROD) sao onde o tempo e
-                    // gasto com modelo q5_1, e sem a flag eles compilam no caminho
-                    // de fallback.
-                    //
-                    // Sem a feature, cair para v8fp16_va e correto. Carregar um .so
-                    // com dotprod num aparelho que nao tem daria SIGILL — nao ha
-                    // degradacao suave possivel, e por isso a escolha e por
-                    // biblioteca e nao por flag.
+                    // Hoje o piso e declarado (ARMv8.2 + FP16 + DotProd) e este
+                    // ramo so escolhe entre `libwhisper` e `libwhisper_v8fp16_va`,
+                    // que diferem no codigo do proprio whisper.cpp, nao do ggml.
                     if (cpuInfo.contains("fphp")) {
-                        if (cpuInfo.contains("asimddp")) {
-                            Log.d(LOG_TAG, "CPU supports fp16 + dotprod")
-                            loadDotprod = true
-                        } else {
-                            Log.d(LOG_TAG, "CPU supports fp16 arithmetic (sem dotprod)")
-                            loadV8fp16 = true
-                        }
+                        Log.d(LOG_TAG, "CPU supports fp16 arithmetic")
+                        loadV8fp16 = true
                     }
                 }
             }
@@ -187,9 +177,6 @@ private class WhisperLib {
             if (loadVfpv4) {
                 Log.d(LOG_TAG, "Loading libwhisper_vfpv4.so")
                 System.loadLibrary("whisper_vfpv4")
-            } else if (loadDotprod) {
-                Log.d(LOG_TAG, "Loading libwhisper_v8fp16_va_dotprod.so")
-                System.loadLibrary("whisper_v8fp16_va_dotprod")
             } else if (loadV8fp16) {
                 Log.d(LOG_TAG, "Loading libwhisper_v8fp16_va.so")
                 System.loadLibrary("whisper_v8fp16_va")

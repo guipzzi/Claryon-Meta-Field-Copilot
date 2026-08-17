@@ -103,7 +103,7 @@ function(build_library target_name)
         FetchContent_Declare(ggml SOURCE_DIR ${WHISPER_LIB_DIR}/ggml)
     endif()
     FetchContent_MakeAvailable(ggml)
-    # ── E os alvos do ggml, que sao TRES e nao um ────────────────────────────
+    # ── E os alvos do ggml ───────────────────────────────────────────────────
     #
     # O `ggml` do FetchContent nao herda nada do alvo do whisper, e — pior — ele
     # proprio e so a casca: `ggml/src/CMakeLists.txt` cria `ggml-base` (linha 192),
@@ -119,22 +119,57 @@ function(build_library target_name)
     # alvo ausente derrubaria o configure inteiro em vez de degradar.
     foreach (ggml_alvo ggml ggml-base ggml-cpu)
         if (TARGET ${ggml_alvo})
-            target_compile_options(${ggml_alvo} PRIVATE ${GGML_COMPILE_OPTIONS} -O3 -DNDEBUG)
-        else ()
-            message(WARNING " alvo do ggml ausente, sem otimizacao: ${ggml_alvo}")
+            target_compile_options(${ggml_alvo} PRIVATE -O3 -DNDEBUG)
         endif ()
     endforeach ()
     target_link_libraries(${target_name} ${LOG_LIB} android ggml)
 endfunction()
 
 if (${ANDROID_ABI} STREQUAL "arm64-v8a")
-    build_library("whisper_v8fp16_va_dotprod")
     build_library("whisper_v8fp16_va")
 elseif (${ANDROID_ABI} STREQUAL "armeabi-v7a")
     build_library("whisper_vfpv4")
 endif ()
 
 build_library("whisper") # alvo padrão
+
+# ── A arquitetura do ggml, UMA vez e no fim ──────────────────────────────────
+#
+# **O esquema de multiplas variantes de `libwhisper` e ficcao, e a medicao
+# provou.** `FetchContent_MakeAvailable(ggml)` e idempotente: as tres chamadas a
+# `build_library` compartilham UM alvo `ggml-cpu`, e os kernels de matmul moram
+# nele. `target_compile_options` ACUMULA, entao a linha de comando de
+# `arch/arm/quants.c` saia com dois `-march` e o ULTIMO vence.
+#
+# Verificado em 2026-08-17, tres camadas:
+#   - `compile_commands.json`: dois `-march` em `quants.c`, o ultimo sem dotprod
+#   - `llvm-objdump -d libggml-cpu.so`: **sdot = 0, smmla = 0**
+#   - o APK traz **um** `libggml-cpu.so`, e os dois `libwhisper*` variam 16 bytes
+#
+# Ou seja: a variante "_dotprod" existia, era escolhida em runtime, e nao mudava
+# uma instrucao. Ela foi removida.
+#
+# **E o esquema ja era inseguro antes disto.** O mesmo `libggml-cpu.so` tem 1765
+# instrucoes FP16 vetoriais, e `libwhisper.so` — que `LibWhisper` escolhe
+# justamente quando `/proc/cpuinfo` NAO tem `fphp` — depende dele. O "fallback"
+# para aparelho sem FP16 executaria FP16: SIGILL. Nao aparece no emulador Apple
+# Silicon nem em celular moderno; apareceria no aparelho de campo barato.
+#
+# Portanto a escolha honesta e **declarar o piso** em vez de fingir degradacao:
+# ARMv8.2 + FEAT_FP16 + FEAT_DotProd. Todo arm64 Android de 2018 em diante
+# atende, e o `minSdk 31` (Android 12, 2021) ja e mais restritivo que isso.
+#
+# O caminho para degradacao de verdade existe e nao foi tomado agora:
+# `GGML_CPU_ALL_VARIANTS` (`ggml/CMakeLists.txt:183`) constroi um backend por
+# nivel de ISA e despacha em runtime — mas exige `GGML_BACKEND_DL` e
+# `BUILD_SHARED_LIBS`, que mudam como o `.so` e carregado. Fica registrado.
+if (${ANDROID_ABI} STREQUAL "arm64-v8a")
+    foreach (ggml_alvo ggml ggml-base ggml-cpu)
+        if (TARGET ${ggml_alvo})
+            target_compile_options(${ggml_alvo} PRIVATE -march=armv8.2-a+fp16+dotprod)
+        endif ()
+    endforeach ()
+endif ()
 
 include_directories(${WHISPER_LIB_DIR})
 include_directories(${WHISPER_LIB_DIR}/src)
