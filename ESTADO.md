@@ -6,7 +6,7 @@ couber é história e vai para `DECISIONS.md`. Aqui só o que muda a próxima de
 ## O que funciona hoje
 
 - `./gradlew build` verde. **640 testes JVM, 0 falhas.** Instrumentados: 1 falha conhecida
-  (item 1) e o bench de STT reprovando de propósito (item 2).
+  (item 1); o bench de STT reprova de propósito (item 2).
 - **PTT ponta a ponta:** toque→1º quadro **31–48 ms** (meta 120) · 50 msg/s → ~17 ·
   `transmit`/`ack` deployadas, fio do canal populado.
 - **Fonte única de microfone** com fan-out e **dono único de saída**. P1 corta a fala do
@@ -57,5 +57,4 @@ couber é história e vai para `DECISIONS.md`. Aqui só o que muda a próxima de
 3. **Portão da palavra de ativação**, depois que o item 2 fechar.
 4. **Transcrição na origem** (Pilar 1) · **Entregáveis da Etapa 5 — prazo 22/08.**
 
-**Pendências:** `security-crypto` `1.1.0-alpha06` · isolar `CaosDoDatTest` · conferir se o
-documento submetido menciona WhatsApp (§14.1 veda mudar escopo).
+**Pendências:** `security-crypto` `1.1.0-alpha06` · isolar `CaosDoDatTest` · conferir se o documento submetido menciona WhatsApp (§14.1 veda mudar escopo).
