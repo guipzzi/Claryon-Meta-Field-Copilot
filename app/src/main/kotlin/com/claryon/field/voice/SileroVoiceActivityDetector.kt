@@ -56,8 +56,40 @@ class SileroVoiceActivityDetector(
     private val sampleRateHz: Int = 16_000,
     /** Acima disto o quadro é considerado voz. Padrão do modelo. */
     private val limiar: Float = 0.5f,
-    /** **Segundos.** Silêncio contíguo que fecha a janela. */
-    private val silencioParaFecharS: Float = 0.6f,
+    /**
+     * **Segundos.** Silêncio contíguo que fecha a janela.
+     *
+     * ## 0,3 e não 0,6, e o 0,6 nunca teve fundamento
+     *
+     * O valor anterior veio de `EnergyVoiceActivityDetector(hangoverMs = 600)` —
+     * parâmetro de um detector por RMS, copiado para um detector neural quando o
+     * Silero entrou. Nem o commit nem o `DECISIONS.md` justificam 600 ms; o default
+     * do próprio binding é **0,25 f** (*verificado por `javap -c` no construtor
+     * sintético de `SileroVadModelConfig`, AAR 1.13.5*).
+     *
+     * E ele custava caro: medido no aparelho, este hangover é **31,5% do ciclo de
+     * voz inteiro** e **99% da métrica de earcon** — dos ~605 ms de "fim da fala →
+     * earcon", 600 eram esta constante e ~5 ms era o caminho do earcon.
+     *
+     * ## Por que 0,3 e não 0,25
+     *
+     * O piso é fonético, não arbitrário. A juntura intra-frase em pt-BR tem medida
+     * mínima de **250 ms** (Oliveira, 2002; Cotes, 2007 separa pausa curta de 50 a
+     * 250 ms da longa acima de 250). Abaixo disso o VAD fecha a janela no meio da
+     * frase e a transcrição sai partida — que é falha pior que latência.
+     *
+     * 300 ms fica acima do piso com margem, e casa com o *endpointer transacional*
+     * da Alexa (P50 = 300 ms, Amazon Alexa AI, ICASSP 2024). Comando de rádio é
+     * transacional, não conversa — a própria Alexa usa 570 ms no modo conversacional
+     * e 300 no de comando.
+     *
+     * **O que isto NÃO cobre, declarado:** pausa de hesitação vive na faixa de 200 a
+     * 1000 ms, e 600 ms também não a cobria inteira. Quem hesita no meio do comando
+     * tem a frase cortada nos dois valores; a diferença é que agora acontece antes.
+     * Se em campo isso incomodar, o conserto é desacoplar earcon e transcrição em
+     * dois limiares — não voltar a 0,6.
+     */
+    private val silencioParaFecharS: Float = 0.3f,
     /** **Segundos.** Abaixo disto o segmento é descartado como ruído curto. */
     private val falaMinimaS: Float = 0.25f,
     /** **Segundos.** Teto de uma janela — ver o KDoc sobre as duas instâncias. */

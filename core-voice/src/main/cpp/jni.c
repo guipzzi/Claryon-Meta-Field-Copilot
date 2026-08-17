@@ -239,8 +239,16 @@ Java_com_whispercpp_whisper_WhisperLib_00024Companion_fullTranscribe(
     // Curto de propósito: os tokens do prompt entram no KV cache e são
     // recomputados a cada iteração (há um `// TODO: do not recompute the prompt`
     // em `whisper.cpp:7123`). Uma dezena de palavras, as que o domínio exige.
+    // **COM acento, e isso e defeito consertado, nao preferencia.**
+    //
+    // O prompt entra como TOKENS antes do `<|sot|>` (whisper.cpp:7133-7149), e o
+    // BPE de "guarnicao" NAO e o BPE de "guarnicao" com til e cedilha. Escrito sem
+    // acento, o prior enviesava uma sequencia de tokens que o modelo nao deve
+    // emitir — e ainda empurrava o registro operacional para a grafia errada.
+    //
+    // A saida desejada e "guarnicao" acentuada; o prior tem de ser ela.
     params.initial_prompt =
-        "Central, guarnicao, ocorrencia, viatura, deslocamento, apoio, Sargento, Claryon.";
+        "Central, guarnição, ocorrência, viatura, deslocamento, apoio, Sargento.";
 
     // Tokens de não-fala suprimidos. O campo é `suppress_nst` (`whisper.h:538`) —
     // o nome `suppress_non_speech_tokens` NÃO existe neste vendorizado e não
