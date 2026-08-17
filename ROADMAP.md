@@ -126,7 +126,17 @@ reproduzida em tom e duração corretos — verificável por espectrograma compa
 e saída, com o pico de F0 dentro de 5% do original. (b) Um toque no botão "Copiloto"
 produz resposta falada sem outro toque. (c) O fio do canal exibe a fala vinda de
 `transmissions` **depois de recarregar a tela** — prova de que a Edge Function foi
-chamada. (d) `grep -r "locate" supabase/functions/` não devolve arquivo. (e) `grep -rn
+chamada. (d) **⚠️ PROPOSTA de correção do critério (17/08) — espera decisão humana.**
+~~`grep -r "locate" supabase/functions/` não devolve arquivo.~~ Passa a ser: `find
+supabase/functions -name "locate*"` não devolve nada, **e** `grep -rn "solicitante_id"
+supabase/functions/` não devolve linha de **código**. *Motivo:* a função **está
+apagada** — só existem `transmit/` e `ack/`. O critério antigo reprova por causa de
+dois **comentários** que explicam por que ela foi apagada (`transmit/index.ts:18,20`,
+`ack/index.ts:11,13`), e um `grep` por substring não distingue função de comentário.
+O conserto óbvio — reescrever o comentário para não conter a palavra — seria **fazer o
+teste passar** em vez de consertar algo: aquele comentário é o que impede alguém de
+reintroduzir `solicitante_id` no corpo, que é a trilateração que a migração `0006`
+fechou. O critério novo testa o que o antigo queria dizer. (e) `grep -rn
 "Cores.NoAr" app/src/main` só aparece em código de transmissão. (f) Documento e deck
 enviados até 22/08, cada afirmação de capacidade correspondendo a um caminho alcançável.
 
