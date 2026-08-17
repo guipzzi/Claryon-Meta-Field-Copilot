@@ -10,16 +10,14 @@ couber é história e vai para `DECISIONS.md`. Aqui só o que muda a próxima de
 - **PTT ponta a ponta:** toque→1º quadro **31–48 ms** (meta 120) · 50 msg/s → ~17 ·
   `transmit`/`ack` deployadas, fio do canal populado.
 - **Fonte única de microfone** com fan-out e **dono único de saída**. P1 corta a fala do
-  copiloto em **11 ms** (aceite ≤200) — era 286 ms, e os 204 ms eram desmonte de rota SCO
-  dentro do caminho crítico. `RotaSustentada` mantém a rota através da rajada de fala.
-- **VAD Silero** (629 KB) no lugar do RMS: silêncio → 0 segmentos, senoide **alta** → 0,
-  fala real → 1 segmento cobrindo 98%.
+  copiloto em **11 ms** (aceite ≤200) — era 286 ms, dos quais 204 eram desmonte de rota SCO
+  dentro do caminho crítico; `RotaSustentada` mantém a rota pela rajada de fala.
+- **VAD Silero** (629 KB) no lugar do RMS: silêncio → 0, senoide **alta** → 0, fala → 98%.
 - **Troca de grupo por voz ligada**, chamador verificado por `grep` elo por elo:
   `VoiceCycle:92` → executor → `CanaisDoAgente` → `RadioTatico:303`. Sem casamento
   aproximado (proibição de spec), recusa que não revela existência de grupo (13 testes).
-- **Régua de WER honesta** (`Wer.kt`, 10 testes): `(S+D+I)/N` com N da referência, então
-  alucinação passa de 100%; corpus agrega `ΣE/ΣN`, não média de taxas.
-- **Verificador da corrente**: Piper → Silero → roteador → política real → rádio → fala.
+- **Régua de WER** (`Wer.kt`, 10 testes): `(S+D+I)/N` com N da referência, então alucinação
+  passa de 100%; corpus agrega `ΣE/ΣN`. **Verificador da corrente** de ponta a ponta.
 
 ## O que está quebrado, e nós sabemos
 
