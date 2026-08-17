@@ -376,15 +376,15 @@ class VerificadorDoGatilhoTest {
      * que decide, não a impressão de quem ouviu.
      */
     @org.junit.Ignore(
-        "REPROVA HOJE, e é o estado honesto do produto. Medido em 2026-08-17 com " +
-            "ggml-base-q5_1 + initial_prompt, 8 amostras agregadas por ΣE/ΣN: " +
-            "WER 38,5% (61,5% de acurácia) contra a meta de >=92% do ROADMAP. " +
-            "Era 62,5-100% com ggml-tiny. Detalhamento dos 20 erros: 7 são ruído de " +
-            "artigo (o roteador já derruba artigos, logo inócuos), 6 são a palavra de " +
-            "ativação, 4 são 'guarnição' (que agora acerta em 4 de 8, contra 0 de 8 " +
-            "antes) e 2 são o sobrenome 'Paiva'. Registrado no ESTADO.md e em " +
-            "specs/stt-portugues.spec.md. Tire este @Ignore para validar qualquer " +
-            "melhoria de STT — é ele que decide, não a impressão de quem ouviu.",
+        "REPROVA HOJE, e o motivo mudou de natureza. Medido em 2026-08-17 com " +
+            "ggml-small-q5_1 + initial_prompt, 8 amostras por ΣE/ΣN: WER 21,2% " +
+            "(78,8% de acurácia) contra a meta de >=92%. A escada foi tiny 62,5-100% " +
+            "-> base 38,5% -> small 21,2%. Dos 11 erros restantes, 6 são a palavra de " +
+            "ativação, 4 são artigo inserido (inócuo: o roteador derruba artigos) e " +
+            "1 é 'guarnição'->'guernicom'. Descontando artigo: 13,5%; descontando " +
+            "também a ativação: 1,9%. 'guarnição' acerta 7/8 e 'Paiva' 2/2. " +
+            "O bloqueio agora é a PALAVRA DE ATIVAÇÃO, não o modelo — ver " +
+            "specs/gatilho-por-voz.spec.md. Tire este @Ignore para validar melhorias.",
     )
     @Test
     fun qualidadeDoSttNoComando(): Unit = runBlocking {

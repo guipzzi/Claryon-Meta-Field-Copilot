@@ -114,22 +114,48 @@ nada. O caminho de comando entra primeiro e independe desta revisão humana.
 Medido no aparelho com `ggml-base-q5_1`, 8 amostras: a palavra de ativação falhou em
 **6** delas — `clarion` (3×), `varion` (1×) e **omitida por completo** (2×).
 
-O caso `clarion` é de natureza diferente dos outros, e a distinção decide o
-conserto: **"Claryon" com "y" não é padrão grafêmico do português.** Um
-decodificador fixado em `pt` que ouve /klaɾiˈõ/ escreve "Clarion" — ele acertou o
-som e grafou à portuguesa. Isso **não** é o mesmo que "guarnição" virar "nissan",
-onde o modelo errou o som.
+**⚠️ CORREÇÃO de 2026-08-17, com mais amostras: não é ortografia.** A primeira
+leitura desta seção dizia que `clarion` era só grafia portuguesa de /klaɾiˈõ/ — o
+modelo acertando o som e escrevendo à portuguesa. Com o conjunto completo de
+amostras, essa explicação **cai**:
+
+| grafia observada | consoante inicial |
+|---|---|
+| clarion | /k/ |
+| **varyon** | /v/ |
+| **farion** | /f/ |
+| **parion**, parão | /p/ |
+| **marcarion** | /m/ |
+| clarão | /k/ |
+
+A plosiva inicial **troca de lugar de articulação e de modo** entre rodadas do
+mesmo áudio. Isso não é escolha de grafia: é o *onset* não sobrevivendo. E
+contradiz frontalmente o critério que escolheu a palavra (`DECISIONS.md`
+2026-08-14: *"plosiva + líquida + vogais abertas + nasal, tudo abaixo do corte de
+4 kHz"*) — a plosiva é exatamente a parte que se perde.
+
+Consequência: **aceitar uma lista de variantes ortográficas não resolve.** Uma
+lista que cubra clarion, varyon, farion, parion e marcarion aceita praticamente
+qualquer dissílabo terminado em nasal — deixa de ser palavra de ativação e passa a
+ser um portão aberto, com o custo que a própria spec atribui a um falso positivo:
+o piso da guarnição.
 
 Consequência para o aceite A1/A2, que exige a transcrição **começar por "claryon"**:
 a comparação exata reprova uma escuta correta. As saídas, em ordem de preferência:
 
-1. **Aceitar um conjunto declarado de variantes ortográficas** — `claryon`,
-   `clarion`, `claryom`, `clarium`. Lista **explícita e curta**, escrita à mão, não
-   distância de edição: aceitar grafias conhecidas do mesmo fonema é diferente de
-   casar por similaridade, que segue proibido em `troca-de-grupo-por-voz.spec.md`
-   por converter erro de transcrição em erro de despacho.
-2. **Renomear a palavra de ativação** para uma grafia que o português escreva de um
-   jeito só. Custa marca e custa a análise fonética do `DECISIONS.md` 2026-08-14.
+1. **Trocar a palavra de ativação**, e escolher a nova por **medição**, não por
+   análise fonética a priori. O método já existe: sintetizar candidatas com o Piper,
+   transcrever com o modelo real, e exigir que a primeira palavra sobreviva em N de
+   N amostras. O critério passa a ser empírico — foi a análise a priori que produziu
+   "Claryon".
+2. **Aceitar variantes ortográficas** — descartado como solução isolada pela tabela
+   acima, mas ainda necessário como complemento: mesmo a palavra vencedora vai ter
+   grafia alternativa, e a lista tem de ser **explícita e curta**, nunca distância
+   de edição (que segue proibida em `troca-de-grupo-por-voz.spec.md`).
+3. **Não depender da palavra de ativação para o caminho de COMANDO.** O botão
+   "Perguntar ao copiloto" já existe e é confiável. A palavra de ativação é
+   requisito só do caminho mãos-livres — e vale perguntar se ela precisa existir
+   antes de o resto estar sólido.
 
 As **duas omissões** são falha de verdade e nenhuma lista de variantes resolve: o
 modelo não produziu nada no lugar. Com 2 em 8, o portão de ativação recusaria uma em

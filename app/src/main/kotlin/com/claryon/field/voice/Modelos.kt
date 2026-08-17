@@ -42,8 +42,8 @@ object Modelos {
      * O que a troca NÃO resolve: o front-end continua sendo 80 mel bins até 8 kHz
      * treinado em banda cheia, então áudio HFP segue fora do domínio de treino.
      */
-    const val WHISPER_ASSET = "models/ggml-base-q5_1.bin"
-    const val WHISPER_ARQUIVO = "ggml-base-q5_1.bin"
+    const val WHISPER_ASSET = "models/ggml-small-q5_1.bin"
+    const val WHISPER_ARQUIVO = "ggml-small-q5_1.bin"
 
     /** Diretório do Piper dentro de `assets/` (o TTS carrega a pasta inteira). */
     const val PIPER_ASSET_DIR = "models/vits-piper-pt_BR-faber-medium-int8"

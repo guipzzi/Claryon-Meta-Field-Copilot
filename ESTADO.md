@@ -1,23 +1,23 @@
-# Onde estamos — 2026-08-17 · Fase 2 · latência resolvida, acerto é o gargalo
+# Onde estamos — 2026-08-17 · Fase 2 · latência resolvida · o gargalo é a palavra de ativação
 
-**Reescrito ao fim de cada sessão, nunca acrescentado. Teto duro: 60 linhas.** O que não
-couber é história e vai para `DECISIONS.md`. Aqui só o que muda a próxima decisão.
+**Reescrito a cada sessão, nunca acrescentado. Teto duro: 60 linhas.** O resto é história e
+vai para `DECISIONS.md`.
 
 ## O que funciona hoje
 
 - `./gradlew build` verde. **648 testes JVM, 0 falhas** · 17 instrumentados OK. O bench de
   STT reprova de propósito (item 2).
-- **A crise de latência era uma flag de build.** O `CMakeLists` só aplicava `-O3` fora do
-  Debug, e os testes instrumentados rodam no Debug: o ggml compilava sem otimização e com
-  asserções ativas. **STT de 42 s → 1,0–1,5 s.** Os alvos do ggml são **três** e só
-  `ggml-cpu` tem os kernels — achado pelo `compile_commands.json`.
-- **As duas metas do ciclo têm amostra**, e a decomposição achou custo escondido: earcon
-  **606 ms** (meta 500) · resposta **2014 ms** (meta 2000) · whisper 1021–1461 · ação ~1 ·
-  **TTS + rota + fila 552 ms**, que era **1218** antes de aquecer o Piper.
-- **PTT:** toque→1º quadro **31–48 ms** (meta 120) · 50 msg/s → ~17 · fio do canal populado.
-- **Fonte única de microfone** e **dono único de saída**. P1 corta a fala do copiloto em
-  **11 ms** (aceite ≤200); `RotaSustentada` mantém a rota SCO pela rajada de fala.
-- **VAD Silero** (629 KB) no lugar do RMS: silêncio → 0, senoide **alta** → 0, fala → 98%.
+- **A latência era build, não tecnologia.** O `CMakeLists` só aplicava `-O3` fora do Debug, e
+  os testes rodam no Debug: o ggml compilava sem otimização e com asserções. Somando
+  `+dotprod` (55 kernels que estavam compilados fora): **STT de 42 s → 245 ms quente.**
+  Os alvos do ggml são **três** e só `ggml-cpu` tem os kernels — achado no
+  `compile_commands.json`, nada no CMakeLists sugeria.
+- **As duas metas do ciclo têm amostra** (era "sem amostras" por fiação, não por bancada):
+  earcon **~605 ms** (meta 500) · resposta **1905 ms** (meta 2000) · **TTS + rota + fila
+  552 ms**, que era **1218** antes de `SaidaUnica.aquecer()` — mais que o whisper inteiro.
+- **PTT:** toque→1º quadro **31–48 ms** (meta 120) · 50 msg/s → ~17. P1 corta a fala do
+  copiloto em **11 ms** (aceite ≤200); `RotaSustentada` mantém a rota SCO pela rajada.
+- **VAD Silero** no lugar do RMS: silêncio → 0, senoide **alta** → 0, fala → 98%.
 - **Troca de grupo por voz ligada**, chamador verificado por `grep` elo por elo:
   `VoiceCycle:92` → executor → `CanaisDoAgente` → `RadioTatico:303`. Sem casamento
   aproximado (proibição de spec), recusa que não revela existência de grupo (13 testes).
@@ -25,39 +25,38 @@ couber é história e vai para `DECISIONS.md`. Aqui só o que muda a próxima de
 
 ## O que está quebrado, e nós sabemos
 
-1. **`CaosDoDatTest` falha um teste por rodada, e varia qual.** Mock do DAT, que já precisava
-   rodar isolado (`Wearables SDK already initialized`). Falha em `HEAD` limpo — não é
-   regressão. Precisa de isolamento de processo por classe.
-2. **O STT não atende a própria meta, e é o item que decide a Fase 2.** Medido no aparelho,
-   fala do Piper em banda cheia (o melhor caso), 8 amostras agregadas por `ΣE/ΣN`:
-   `ggml-tiny` dava WER de 62,5–100%; com **`base-q5_1` + `initial_prompt` está em 38,5%**
-   (61,5% de acurácia) contra a meta de ≥92%. O APK **encolheu 17,2 MiB** na troca.
-   Dos 20 erros: **7 são ruído de artigo** (o roteador já derruba artigos — inócuos),
-   **6 são a palavra de ativação**, 4 são "guarnição" (que agora acerta 4/8, contra 0/8) e
-   2 são o sobrenome "Paiva", que nunca sobrevive.
-   **Ver [`specs/stt-portugues.spec.md`](specs/stt-portugues.spec.md) — há decisão de licença
-   que é humana:** o modelo que resolve (NeMo FastConformer pt do sherpa, "guarnição" 4/4 e
-   texto idêntico a 8 e 16 kHz) é **CC BY-NC 4.0, não comercial**.
-3. **A meta de earcon (≤500 ms) é inalcançável por construção.** Medido 606 ms, dos quais
-   **600 são o hangover do Silero** (`minSilenceDuration`) — o caminho do earcon custa ~6 ms.
-   Ou a meta muda, ou o hangover cai. Reduzi-lo corta fala em pausa intra-frase: é decisão de
-   produto, não de código. `audio_ctx` dimensionado pela fala segue valendo.
-4. **A banda de 8 kHz NÃO é a causa** — refutada (1,2× de WER, não 3×). Não construir
-   *bandwidth extension*: no mesmo experimento publicado ela piorou.
-5. **A palavra de ativação não sobrevive à ORTOGRAFIA, e o portão dela não existe.** O STT
-   escreve **"Clarion"** (3/8), "varion" (1/8) ou **omite** (2/8) — e "Clarion" não é erro de
-   som: "Claryon" com "y" não é padrão grafêmico do português. Comparação exata reprovaria
-   escuta correta. Saídas na spec do gatilho; as 2 omissões nenhuma lista resolve.
-6. **`fim da fala → earcon` e `→ resposta falada` seguem sem amostra.** Os marcos saem de
-   `SaidaUnica` e o bench usa telemetria própria — instrumento existe, não está ligado ali.
-7. `Stream.errorStream` nunca coletado; `STOPPED` não é terminal; permissão de câmera do DAT
-   nunca é pedida. Transcrição na origem (P1) não existe. `WakeWordDetector` sem implementação.
+1. **`CaosDoDatTest` falha um teste por rodada, variando qual** (`Wearables SDK already
+   initialized`). Falha em `HEAD` limpo. Precisa isolamento de processo por classe.
+2. **O acerto subiu muito e o bloqueio mudou de lugar.** Escada medida no aparelho, 8
+   amostras por `ΣE/ΣN`: `tiny` 62,5–100% → `base-q5_1` 38,5% → **`small-q5_1` 21,2%**
+   (78,8% de acurácia) contra a meta de ≥92%. `guarnição` acerta **7/8** (era 0/8) e
+   `Paiva` **2/2**. Dos 11 erros restantes, **6 são a palavra de ativação**, 4 são artigo
+   inserido (inócuo — o roteador derruba artigos) e 1 é `guernicom`. Descontando artigo:
+   13,5%; descontando também a ativação: **1,9%**.
+   Custo: APK de **372 MiB** (modelo de 181 MiB). Acima do limite de APK do Play — para
+   produto exige *asset delivery*; para o hackathon com `adb install`, serve.
+3. **A palavra de ativação é o gargalo, e não é ortografia.** Grafias medidas: clarion ·
+   **varyon** · **farion** · **parion** · **marcarion** · clarão. A plosiva inicial troca de
+   modo e lugar (/k/→/v/,/f/,/p/,/m/) no mesmo áudio, o que **contradiz** o critério que a
+   escolheu (`DECISIONS.md` 2026-08-14). Lista de variantes **não resolve** — cobrir essas
+   cinco aceitaria qualquer dissílabo nasal. Saídas em
+   [`specs/gatilho-por-voz.spec.md`](specs/gatilho-por-voz.spec.md): escolher **por medição**.
+4. **A meta de earcon (≤500 ms) é inalcançável por construção:** dos ~605 ms medidos, **600
+   são o hangover do Silero** — o caminho do earcon custa ~5 ms. Ou a meta muda, ou o
+   hangover cai, e reduzi-lo corta fala em pausa intra-frase. É decisão de produto.
+5. **A banda de 8 kHz não é a causa** (1,2× de WER, não 3×) e *bandwidth extension* piorou.
+6. **O portão da palavra de ativação não existe.** A spec exige descartar em silêncio o que
+   não começa por "claryon" (aceite A2); hoje qualquer fala com "mudar para X" trocaria de
+   grupo. Depende do item 3.
+7. `Stream.errorStream` não coletado · `STOPPED` não terminal · permissão de câmera do DAT
+   nunca pedida · transcrição na origem (P1) não existe · `WakeWordDetector` sem impl.
 
 ## O que vem a seguir
 
-1. **Decidir a licença do STT** (item 2). Bloqueio humano, não técnico.
-2. **Medir em arm64 real** — óculos + fone HFP. Sem isso, itens 2 e 3 são de emulador.
-3. **Portão da palavra de ativação**, depois que o item 2 fechar.
-4. **Transcrição na origem** (Pilar 1) · **Entregáveis da Etapa 5 — prazo 22/08.**
+1. **Escolher a palavra de ativação por medição** (item 3) — é o gargalo agora.
+2. **Medir em arm64 real** — óculos + fone HFP. Falta o número de campo.
+3. **Decidir o tamanho do APK** (372 MiB) e **a licença** de `specs/stt-portugues.spec.md`.
+4. **Portão da ativação** · **Transcrição na origem** · **Etapa 5, prazo 22/08.**
 
-**Pendências:** `security-crypto` `1.1.0-alpha06` · isolar `CaosDoDatTest` · conferir se o documento submetido menciona WhatsApp (§14.1 veda mudar escopo).
+**Pendências:** `security-crypto` `1.1.0-alpha06` · conferir se o documento submetido cita
+WhatsApp (§14.1 veda mudar escopo) · APK de 372 MiB precisa *asset delivery* para produto.

@@ -38,7 +38,29 @@ function(build_library target_name)
     target_compile_definitions(${target_name} PUBLIC GGML_USE_CPU)
     target_compile_definitions(${target_name} PRIVATE WHISPER_VERSION="${WHISPER_VERSION}")
 
-    if (${target_name} STREQUAL "whisper_v8fp16_va")
+    if (${target_name} STREQUAL "whisper_v8fp16_va_dotprod")
+        # ── +dotprod: os kernels quantizados que estavam sendo compilados fora ──
+        #
+        # O ggml vendorizado tem **55** usos de `__ARM_FEATURE_DOTPROD` e o
+        # `ggml_vdotq_s32` aparece direto nos kernels de
+        # ggml/src/ggml-cpu/arch/arm/quants.c. Sem `+dotprod` na linha de comando,
+        # esse macro nao e definido e o caminho compilado e o de fallback — e o
+        # modelo deste projeto e QUANTIZADO (q5_1), ou seja, e exatamente ali que o
+        # tempo e gasto. *Contagem obtida por grep no artefato em 2026-08-17.*
+        #
+        # `i8mm` ficou de FORA de proposito: o /proc/cpuinfo do aparelho anuncia
+        # `asimddp` e `bf16`, mas **nao** `i8mm` (o que aparece e `svei8mm`/
+        # `smei8i32`, que sao SVE e SME, features diferentes). Habilitar i8mm aqui
+        # geraria instrucao que o aparelho nao executa.
+        #
+        # Alvo SEPARADO e nao uma flag no existente porque `dotprod` e armv8.2
+        # OPCIONAL: um `.so` unico com dotprod trava com SIGILL em aparelho sem a
+        # feature. `LibWhisper` escolhe por /proc/cpuinfo, que e o mesmo padrao que
+        # o projeto ja usa para `fphp`. Custo: mais um alvo nativo por ABI, e o
+        # build nativo do whisper ja e a parte lenta.
+        target_compile_options(${target_name} PRIVATE -march=armv8.2-a+fp16+dotprod)
+        set(GGML_COMPILE_OPTIONS                      -march=armv8.2-a+fp16+dotprod)
+    elseif (${target_name} STREQUAL "whisper_v8fp16_va")
         target_compile_options(${target_name} PRIVATE -march=armv8.2-a+fp16)
         set(GGML_COMPILE_OPTIONS                      -march=armv8.2-a+fp16)
     elseif (${target_name} STREQUAL "whisper_vfpv4")
@@ -106,6 +128,7 @@ function(build_library target_name)
 endfunction()
 
 if (${ANDROID_ABI} STREQUAL "arm64-v8a")
+    build_library("whisper_v8fp16_va_dotprod")
     build_library("whisper_v8fp16_va")
 elseif (${ANDROID_ABI} STREQUAL "armeabi-v7a")
     build_library("whisper_vfpv4")
