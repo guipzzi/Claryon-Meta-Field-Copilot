@@ -164,7 +164,7 @@ Java_com_whispercpp_whisper_WhisperLib_00024Companion_freeContext(
 JNIEXPORT void JNICALL
 Java_com_whispercpp_whisper_WhisperLib_00024Companion_fullTranscribe(
         JNIEnv *env, jobject thiz, jlong context_ptr, jint num_threads, jint audio_ctx,
-        jfloatArray audio_data) {
+        jstring initial_prompt, jfloatArray audio_data) {
     UNUSED(thiz);
     struct whisper_context *context = (struct whisper_context *) context_ptr;
     jfloat *audio_data_arr = (*env)->GetFloatArrayElements(env, audio_data, NULL);
@@ -239,21 +239,28 @@ Java_com_whispercpp_whisper_WhisperLib_00024Companion_fullTranscribe(
     // Curto de propósito: os tokens do prompt entram no KV cache e são
     // recomputados a cada iteração (há um `// TODO: do not recompute the prompt`
     // em `whisper.cpp:7123`). Uma dezena de palavras, as que o domínio exige.
-    // **COM acento, e isso e defeito consertado, nao preferencia.**
+    // **O prior do dominio, agora PARAMETRO e nao literal.**
     //
-    // O prompt entra como TOKENS antes do `<|sot|>` (whisper.cpp:7133-7149), e o
-    // BPE de "guarnicao" NAO e o BPE de "guarnicao" com til e cedilha. Escrito sem
-    // acento, o prior enviesava uma sequencia de tokens que o modelo nao deve
-    // emitir — e ainda empurrava o registro operacional para a grafia errada.
+    // Enquanto era literal C, era impossivel medir quanto ele vale: o braco de
+    // controle "com prompt contra sem prompt" nao existia, e o numero de WER do
+    // projeto ficava sem como ser atribuido.
     //
-    // A saida desejada e "guarnicao" acentuada; o prior tem de ser ela.
-    params.initial_prompt =
-        "Central, guarnição, ocorrência, viatura, deslocamento, apoio, Sargento.";
+    // E ha um defeito no proprio tokenizador que torna a medicao urgente: o regex
+    // de whisper.cpp:3288 usa [[:alpha:]] sob locale "C", que NAO casa byte
+    // multibyte. "guarnicao" com til e cedilha e partida nos acentos, e o prior
+    // acaba enviesando bytes soltos que o decoder praticamente nunca emite.
+    // Qual grafia funciona melhor — com acento, sem acento, ou prompt nenhum — e
+    // pergunta empirica, e agora ela e respondivel.
+    //
+    // NULL ou string vazia = sem prompt. O whisper trata NULL como ausencia.
+    const char *prompt_utf8 = NULL;
+    if (initial_prompt != NULL) {
+        prompt_utf8 = (*env)->GetStringUTFChars(env, initial_prompt, NULL);
+        if (prompt_utf8 != NULL && prompt_utf8[0] != '\0') {
+            params.initial_prompt = prompt_utf8;
+        }
+    }
 
-    // Tokens de não-fala suprimidos. O campo é `suppress_nst` (`whisper.h:538`) —
-    // o nome `suppress_non_speech_tokens` NÃO existe neste vendorizado e não
-    // compila. Em viatura com sirene e vento, o decoder tende a produzir "(música)"
-    // e "♪", que estão justamente nessa lista.
     params.suppress_nst = true;
 
     whisper_reset_timings(context);
@@ -263,6 +270,9 @@ Java_com_whispercpp_whisper_WhisperLib_00024Companion_fullTranscribe(
         LOGI("Failed to run the model");
     } else {
         whisper_print_timings(context);
+    }
+    if (prompt_utf8 != NULL) {
+        (*env)->ReleaseStringUTFChars(env, initial_prompt, prompt_utf8);
     }
     (*env)->ReleaseFloatArrayElements(env, audio_data, audio_data_arr, JNI_ABORT);
 }

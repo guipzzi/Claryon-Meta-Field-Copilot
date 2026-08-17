@@ -47,6 +47,33 @@ Isso não invalida a *escada* (tiny → base → small foi medida com o mesmo pr
 todas, então a comparação relativa vale). Invalida o **valor absoluto** contra a
 meta de ≥92%.
 
+## ⚠️ MEDIDO em 2026-08-17: o prompt não ajuda, e talvez atrapalhe
+
+Com `initial_prompt` virando parâmetro do JNI, o braço de controle que este
+documento prescrevia finalmente rodou (`BracosDoPromptTest`, 8 amostras por braço,
+o **mesmo áudio** nos três):
+
+| Braço | WER geral | frases que colidem com o prior | frases limpas |
+|---|---|---|---|
+| **A0 — sem prompt** | **12,5%** | 19,2% | 6,7% |
+| A1 — sem acento | 14,3% | 23,1% | 6,7% |
+| A2 — com acento | 14,3% | 23,1% | 6,7% |
+
+Três leituras, e as três importam:
+
+1. **O prior custa 1,8 ponto em vez de render.** Não ajudou nem nas frases cujas
+   palavras estão literalmente dentro dele.
+2. **Acento é irrelevante: A1 e A2 são idênticos.** A hipótese do tokenizador
+   (`whisper.cpp:3288` parte palavra acentuada no acento) pode até ser verdadeira,
+   mas **não muda o resultado** — e portanto não justifica mexer no prompt.
+3. Uma "correção" que eu havia feito — trocar o prompt para acentuado — não teve
+   efeito nenhum. Foi mudança escrita com confiança e valor zero.
+
+**Ressalva de tamanho, e ela é séria:** são 8 amostras por braço. Com `ΣN` desta
+ordem o intervalo de confiança é largo demais para *provar* que o prompt prejudica.
+O que estes números sustentam é mais modesto e ainda assim decisivo: **não há
+evidência de que ele ajude**, e o ônus da prova é de quem quiser mantê-lo.
+
 ## Como descontaminar
 
 Duas medições, sempre reportadas juntas:

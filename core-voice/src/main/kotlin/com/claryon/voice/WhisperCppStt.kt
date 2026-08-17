@@ -41,6 +41,13 @@ class WhisperCppStt(private val fonte: ModelSource) : SttEngine {
 
     override suspend fun isAvailable(): Boolean = fonte.existe()
 
+    /**
+     * Prior do domínio usado por esta instância. Parâmetro para permitir o braço de
+     * controle (com prompt × sem prompt) que `docs/LEXICO_DO_INITIAL_PROMPT.md`
+     * prescreve e que era impossível enquanto a string vivia em `jni.c`.
+     */
+    var promptDeDominio: String? = com.whispercpp.whisper.PROMPT_DE_DOMINIO
+
     override suspend fun transcribe(pcm: ShortArray, sampleRateHz: Int): Result<Transcript> {
         if (!fonte.existe()) {
             return Result.failure(
@@ -68,7 +75,7 @@ class WhisperCppStt(private val fonte: ModelSource) : SttEngine {
                 if (sampleRateHz != TARGET_HZ) PcmResampler.resample(pcm, sampleRateHz, TARGET_HZ) else pcm
             // Whisper espera PCM float normalizado em [-1, 1], mono, 16 kHz.
             val floats = FloatArray(pcm16k.size) { pcm16k[it] / 32768.0f }
-            val texto = ctx.transcribeData(floats, printTimestamp = false).trim()
+            val texto = ctx.transcribeData(floats, printTimestamp = false, initialPrompt = promptDeDominio).trim()
             if (texto.isEmpty()) {
                 // Texto vazio NÃO é sucesso.
                 //

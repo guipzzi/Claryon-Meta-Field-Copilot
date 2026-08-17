@@ -21,6 +21,27 @@ private const val AUDIO_CTX_MINIMO = 256
 /** `n_audio_ctx` do modelo (`whisper.cpp:592`). Acima disto o whisper retorna -5. */
 private const val AUDIO_CTX_MAXIMO = 1500
 
+/**
+ * **O prior do domínio, e a única fonte dele.**
+ *
+ * Estava literal em `jni.c`, inalcançável do Kotlin — e por isso nenhum braço de
+ * controle era possível. As palavras aqui têm de estar espelhadas em
+ * `docs/LEXICO_DO_INITIAL_PROMPT.md`, e palavra que entra aqui sai das frases da
+ * régua limpa.
+ *
+ * **Sem acento, e isso é hipótese a medir, não preferência.** O tokenizador do
+ * whisper (`whisper.cpp:3288`) usa `[[:alpha:]]` sob locale "C", que não casa byte
+ * multibyte: a palavra acentuada é partida no acento e o prior acaba enviesando
+ * bytes soltos que o decoder quase nunca emite. A forma sem acento tokeniza limpa.
+ * Qual das duas funciona melhor é pergunta empírica — e agora ela é respondível,
+ * que é o ponto de este valor ser parâmetro.
+ */
+const val PROMPT_DE_DOMINIO =
+    "Central, guarnicao, ocorrencia, viatura, deslocamento, apoio, Sargento."
+
+/** Braço de controle: sem prior nenhum. `null` é o valor; a constante nomeia o braço. */
+val SEM_PROMPT: String? = null
+
 private const val LOG_TAG = "LibWhisper"
 
 class WhisperContext private constructor(private var ptr: Long) {
@@ -64,12 +85,23 @@ class WhisperContext private constructor(private var ptr: Long) {
         return comMargem.coerceIn(AUDIO_CTX_MINIMO, AUDIO_CTX_MAXIMO)
     }
 
-    suspend fun transcribeData(data: FloatArray, printTimestamp: Boolean = true): String = withContext(scope.coroutineContext) {
+    suspend fun transcribeData(
+        data: FloatArray,
+        printTimestamp: Boolean = true,
+        /**
+         * Prior do domínio. `null` = sem prompt.
+         *
+         * Parâmetro e não constante porque **sem isto não há braço de controle**: o
+         * projeto reportava WER sem poder atribuir quanto vinha do modelo e quanto
+         * vinha da dica que ele mesmo deu. Ver `docs/LEXICO_DO_INITIAL_PROMPT.md`.
+         */
+        initialPrompt: String? = PROMPT_DE_DOMINIO,
+    ): String = withContext(scope.coroutineContext) {
         require(ptr != 0L)
         val numThreads = WhisperCpuConfig.preferredThreadCount
         val audioCtx = audioCtxPara(data.size)
         Log.d(LOG_TAG, "Selecting $numThreads threads, audio_ctx=$audioCtx")
-        WhisperLib.fullTranscribe(ptr, numThreads, audioCtx, data)
+        WhisperLib.fullTranscribe(ptr, numThreads, audioCtx, initialPrompt, data)
         val textCount = WhisperLib.getTextSegmentCount(ptr)
         return@withContext buildString {
             for (i in 0 until textCount) {
@@ -195,6 +227,7 @@ private class WhisperLib {
             contextPtr: Long,
             numThreads: Int,
             audioCtx: Int,
+            initialPrompt: String?,
             audioData: FloatArray,
         )
         external fun getTextSegmentCount(contextPtr: Long): Int
