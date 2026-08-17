@@ -51,6 +51,24 @@ interface CodecDeVoz {
     suspend fun codificar(pcm: ShortArray): Result<List<ByteArray>>
 
     /**
+     * Constrói o codificador **antes** de ele ser necessário.
+     *
+     * Medido no emulador: a meta "toque → primeiro quadro ≤ 120 ms" batia em
+     * 168–221 ms, e o custo não era do rádio nem da rede — era
+     * `MediaCodec.createEncoderByType` + `configure` + `start`, que aconteciam na
+     * PRIMEIRA chamada de [codificar], ou seja **dentro do caminho crítico do
+     * PTT**, com o dedo já no botão.
+     *
+     * Aquecer ao entrar em modo ativo tira esse custo de onde não há folga e o
+     * põe onde há: o rádio abre quando a tela da guarnição aparece, segundos
+     * antes do primeiro toque.
+     *
+     * Idempotente e sem efeito observável além do tempo — quem não implementa
+     * segue correto, só continua pagando o custo no primeiro quadro.
+     */
+    suspend fun preparar(): Result<Unit> = Result.success(Unit)
+
+    /**
      * Decodifica um quadro.
      *
      * @param payload `null` sinaliza **perda**: o decodificador deve gerar o

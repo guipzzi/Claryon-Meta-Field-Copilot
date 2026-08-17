@@ -25,21 +25,14 @@ enum class PrioridadeTransmissao {
 /**
  * Um quadro de áudio codificado, pronto para a rede.
  *
- * **Cada quadro sai como UMA mensagem — `AgrupadorDeQuadros` não existe.** Este
- * comentário chegou a afirmar o contrário; a classe nunca foi escrita. Hoje são
- * ~50 mensagens/s por locutor ativo, cada uma com ~274 B de envelope JSON/base64
- * do Realtime para ~30 B de Opus útil — a auditoria de Fase 1 mediu ~11% de
- * aproveitamento.
+ * **Três quadros viajam numa mensagem** — ver [AgrupadorDeQuadros]. Antes era um
+ * por mensagem: ~50 mensagens/s por locutor, cada uma com ~274 B de envelope
+ * JSON/base64 do Realtime para ~30 B de Opus útil (~11% de aproveitamento).
  *
- * **Por que não construir agora, e não é só falta de tempo.** Agrupar 3 quadros
- * de 20 ms quebra o receptor em pelo menos três pontos que hoje assumem
- * mensagem == quadro: [QuadroAudio.sequencia] é ao mesmo tempo "quadro" e
- * "mensagem" para o jitter buffer, e as duas deixam de coincidir; o buffer
- * inicial do jitter precisaria crescer (~+200 ms escondidos, por cima dos ~+40 ms
- * de empacotamento); e o quadro `ultimo` (linha abaixo) precisaria decidir se
- * marca o fim de um agrupamento parcial. Construir isso sem tocar no receptor
- * pareceria funcionar em teste e cortar áudio em campo — pior que o estado
- * atual, que ao menos é honesto sobre o custo.
+ * O agrupamento **não muda o significado de [sequencia]**, e é isso que o tornou
+ * possível sem tocar no receptor: cada quadro mantém a própria, a mensagem só os
+ * carrega juntos, e `ProtocoloRealtime.interpretar` explode o grupo de volta em N
+ * eventos. `BufferDeJitter` continua raciocinando em quadros de 20 ms.
  *
  * @param sequencia contador monotônico **por transmissão**, a partir de 0. É o que
  *   permite ao receptor detectar perda e ordenar — sem ele, o buffer de jitter não
@@ -120,6 +113,18 @@ interface TransporteAoVivo {
 
     /** Empurra um quadro. Falha aqui **não** interrompe a captura. */
     suspend fun enviar(quadro: QuadroAudio): Result<Unit>
+
+    /**
+     * Empurra vários quadros numa mensagem só — ver [AgrupadorDeQuadros].
+     *
+     * Padrão que cai em [enviar] um a um: um transporte que não sabe agrupar
+     * continua correto, só não colhe a economia de envelope.
+     */
+    suspend fun enviarGrupo(grupo: List<QuadroAudio>): Result<Unit> {
+        var falhou = false
+        for (q in grupo) if (enviar(q) !is Result.Success) falhou = true
+        return if (falhou) Result.failure(com.claryon.common.ClaryonError.Sync("net.grupo", "quadro não entregue")) else Result.success(Unit)
+    }
 
     /** Marca o fim da transmissão e libera o canal. */
     suspend fun encerrar(transmissaoId: String): Result<Unit>

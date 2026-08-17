@@ -220,6 +220,14 @@ class RadioTatico(
     fun entrarEmModoAtivo(rota: GlassesAudioRoute) {
         escopo.launch { transporte.conectar(talkGroupId) }
 
+        // **Aquece o codec agora, não no primeiro toque.**
+        // `MediaCodec.createEncoderByType` + `configure` + `start` aconteciam na
+        // primeira `codificar()`, ou seja com o dedo já no PTT — e era isso, não
+        // a rede, que punha a meta "toque → 1º quadro ≤ 120 ms" em 168-221 ms no
+        // emulador. Aqui há folga: o rádio abre quando a tela da guarnição
+        // aparece, segundos antes de alguém falar.
+        escopo.launch { codec.preparar() }
+
         receptor.iniciar { evento -> tratarRecepcao(evento) }
 
         alimentacao?.cancel()

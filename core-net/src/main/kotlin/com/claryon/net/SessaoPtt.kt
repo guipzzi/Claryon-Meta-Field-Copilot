@@ -92,6 +92,11 @@ class SessaoPtt(
      * tinha teste próprio, e não tinha nenhum chamador em `src/main`.
      */
     private val telemetria: TelemetriaDoRadio? = null,
+    /**
+     * Junta quadros antes de sair. Ver [AgrupadorDeQuadros] para o custo
+     * declarado (+40 ms de empacotamento em troca de 1/3 das mensagens).
+     */
+    private val agrupador: AgrupadorDeQuadros = AgrupadorDeQuadros(),
 ) {
 
     /**
@@ -263,11 +268,17 @@ class SessaoPtt(
         var naoEntregues = 0
         for (payload in pacotes) {
             val quadro = QuadroAudio(transmissaoId, sequencia(), agoraMs(), payload)
-            if (transporte.enviar(quadro) !is Result.Success) {
-                naoEntregues++
-                telemetria?.contar(TelemetriaDoRadio.QUADROS_NAO_ENTREGUES)
+            // O agrupador segura os dois primeiros e devolve a mensagem no
+            // terceiro. Os contadores são POR QUADRO mesmo assim: a métrica que
+            // interessa é "quanto da voz do agente chegou", e ela não muda
+            // porque o envelope passou a levar três de cada vez.
+            val grupo = agrupador.oferecer(quadro) ?: continue
+            if (transporte.enviarGrupo(grupo) !is Result.Success) {
+                naoEntregues += grupo.size
+                telemetria?.contar(TelemetriaDoRadio.QUADROS_NAO_ENTREGUES, grupo.size.toLong())
             } else {
-                telemetria?.contar(TelemetriaDoRadio.QUADROS_ENVIADOS)
+                telemetria?.contar(TelemetriaDoRadio.QUADROS_ENVIADOS, grupo.size.toLong())
+                telemetria?.contar(MENSAGENS_ENVIADAS)
             }
         }
         return naoEntregues
@@ -276,9 +287,11 @@ class SessaoPtt(
     /** Último quadro, fim de transmissão e devolução do canal. Nunca lança. */
     private suspend fun encerrar(transmissaoId: String, sequencia: Int, concessao: Concessao) {
         runCatching {
-            transporte.enviar(
-                QuadroAudio(transmissaoId, sequencia, agoraMs(), ByteArray(0), ultimo = true),
-            )
+            // O `ultimo` fecha o grupo mesmo incompleto — segurá-lo esperando
+            // companhia deixaria o receptor aguardando uma fala que já acabou, e
+            // levaria junto os quadros pendentes: a última sílaba.
+            val ultimo = QuadroAudio(transmissaoId, sequencia, agoraMs(), ByteArray(0), ultimo = true)
+            agrupador.oferecer(ultimo)?.let { transporte.enviarGrupo(it) }
             transporte.encerrar(transmissaoId)
             piso.liberar(concessao)
         }
@@ -294,5 +307,11 @@ class SessaoPtt(
 
         /** Teto para o encerramento — um socket morto não pode travar o PTT. */
         const val ENCERRAMENTO_MS = 2_000L
+
+        /**
+         * Mensagens de fato postas no socket. Com o agrupamento, é ~1/3 de
+         * `QUADROS_ENVIADOS` — e é este o número que o aceite (d) pede.
+         */
+        const val MENSAGENS_ENVIADAS = "mensagens_enviadas"
     }
 }

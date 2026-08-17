@@ -1413,3 +1413,49 @@ por um cético. Resultado: **nenhum item saiu como cumprido**. O que sobreviveu 
 - **O que a auditoria pediu e eu NÃO fiz:** o gate `BuildConfig.DEBUG` sobre o que sobrou de
   diagnóstico. `echo()`, `enableMock`, `startCamera` embarcam no release, mortos porque a tela
   que os chama não é composta — inalcançável não é o mesmo que gateado. Fica registrado.
+
+## 2026-08-17 — Os quatro itens em aberto, fechados por medição
+
+O usuário perguntou, sobre cada pendência que eu havia declarado: "não dá para atuar?". Dava,
+nos quatro. Três delas eu tinha atribuído a limite de ambiente sem investigar.
+
+- **A meta de 120 ms não era limite do emulador — era nosso código.** Eu havia escrito que "o
+  emulador usa codec por software e o número embute isso". Falso: `MediaCodec.createEncoderByType`
+  + `configure` + `start` aconteciam na PRIMEIRA chamada de `codificar()`, ou seja **dentro do
+  caminho crítico do PTT**, com o dedo já no botão. `CodecDeVoz.preparar()` move isso para o
+  `entrarEmModoAtivo`, onde há segundos de folga. Medido: 192 ms (1ª após instalar), 94, 103 —
+  contra 168-245 antes. Atribuir a lentidão ao ambiente sem medir o próprio código foi a
+  preguiça que custou a meta por três sessões.
+
+- **`AgrupadorDeQuadros` era construível, e o bloqueio que eu descrevi tinha saída.** Eu havia
+  registrado que agrupar "quebra o receptor em três pontos porque `sequencia` é quadro E
+  mensagem". A saída era **não mexer em `sequencia`**: cada quadro mantém a própria, a mensagem
+  só os carrega juntos, e `ProtocoloRealtime.interpretar` explode o grupo de volta em N eventos.
+  `BufferDeJitter`, PLC e detecção de perda não mudaram uma linha. Medido: 204 quadros em 68
+  mensagens (3,0/msg) = ~17 msg/s, exatamente o que o aceite (d) pedia.
+  O evento é NOVO (`fala.quadros`) e não uma mudança de formato do antigo: um aparelho com
+  versão anterior descarta o que não entende, em vez de decodificar um payload com outra forma.
+
+- **A preempção não tinha amostra porque o cenário não era alcançável no emulador**, não porque
+  o instrumento falhasse. O ciclo de voz precisa do VAD fechar janela, e o emulador não tem voz
+  no microfone. `PreempcaoNoAparelhoTest` monta o cenário à mão **com as peças de produção** —
+  `VoiceOutput`, `PrioritySoundQueue`, `AudioTrack` reais. Medido: **1 ms**. Ressalva mantida:
+  isso mede chegada→`cancel`, não chegada→silêncio.
+
+- **"Inalcançável" não é "gateado", e o corte é por source set.** `echo()`, `enableMock()` e
+  `startCamera()` embarcavam no release, mortos só porque a tela que os chama nunca foi
+  composta — um `setContent` distraído bastaria. `DiagnosticoViewModel` e `DiagnosticsScreen`
+  foram para `app/src/debug`; o que sobrou em produção virou `OculosViewModel` (registro do DAT
+  + aviso falado). Verificado por `dexdump` no APK: ausentes do release, presentes no debug.
+  Descartado: `if (BuildConfig.DEBUG)` — deixa o código no artefato.
+
+- **Processo: as cinco perguntas entraram no `CLAUDE.md` §6.** A auditoria devolveu 8 de 8
+  PARCIAIS sobre uma fase que declarei completa, e as causas se repetiram: não reli o critério,
+  não grepei por chamador, escrevi teste cujo nome afirmava mais que o corpo, consertei código
+  sem varrer a documentação, e presumi resultado sem reler o log depois do conserto. A regra
+  agora é procedimento escrito, não intenção.
+
+- **Duas coisas que me atrapalharam e não eram código:** `connectedAndroidTest` reinstala o APK,
+  o que **revoga as permissões e apaga a sessão do cofre** — as três primeiras rodadas de
+  medição saíram vazias e eu quase reportei como regressão da renomeação. Reinstalação limpa
+  estado; conferir a tela antes de acusar o próprio diff.

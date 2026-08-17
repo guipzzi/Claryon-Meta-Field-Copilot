@@ -49,15 +49,15 @@ import com.claryon.glasses.StreamStatus
 fun DiagnosticsScreen(
     modifier: Modifier = Modifier,
     aoAbrirMapa: () -> Unit = {},
-    vm: DiagnosticsViewModel = viewModel(),
+    vm: DiagnosticoViewModel = viewModel(),
     copiloto: CopilotoViewModel = viewModel(),
 ) {
     val registration by vm.registration.collectAsState()
 
-    // Anuncia em voz alta o que está degradado — permissão faltando, óculos não
-    // conectados. Uma vez por abertura do painel, no nível informativo (o Modo
-    // Tático suprime durante ocorrência, que é quando mais atrapalharia).
-    LaunchedEffect(Unit) { vm.anunciarEstadoDegradado() }
+    // O anúncio falado do estado degradado é de PRODUÇÃO e mora no
+    // `OculosViewModel` — `MainActivity` já o chama na abertura. O painel de
+    // diagnóstico não repete: dois avisos para o mesmo fato viram ruído que o
+    // agente aprende a ignorar.
     val session by vm.session.collectAsState()
     val stream by vm.streamState.collectAsState()
     val frame by vm.frameInfo.collectAsState()

@@ -24,7 +24,7 @@ import com.claryon.field.radio.RadioViewModel
 import com.claryon.field.ui.CascoTatico
 import com.claryon.field.ui.Destino
 import com.claryon.field.ui.CopilotoViewModel
-import com.claryon.field.ui.DiagnosticsViewModel
+import com.claryon.field.ui.OculosViewModel
 import com.claryon.field.ui.MapaViewModel
 import com.claryon.field.ui.telas.Capacidade
 import com.claryon.field.ui.telas.TelaDeGuarnicao
@@ -52,7 +52,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             TemaClaryon {
-                val diag: DiagnosticsViewModel = viewModel()
+                val oculos: OculosViewModel = viewModel()
                 val radio: RadioViewModel = viewModel()
                 // O mapa saiu do `DiagnosticsViewModel` — ver `MapaViewModel`.
                 val mapa: MapaViewModel = viewModel()
@@ -83,8 +83,8 @@ class MainActivity : ComponentActivity() {
                     sessao is SessaoDoAgente.EstadoDaSessao.Verificando -> Unit
 
                     mostrarLogin && sessao is SessaoDoAgente.EstadoDaSessao.Ausente -> TelaDeLogin(
-                        auth = diag.autenticacao,
-                        configurado = diag.redeConfigurada,
+                        auth = oculos.autenticacao,
+                        configurado = oculos.redeConfigurada,
                         aoEntrar = {
                             SessaoDoAgente.anunciar(true)
                             mostrarLogin = false
@@ -93,7 +93,7 @@ class MainActivity : ComponentActivity() {
                     )
 
                     else -> Operacao(
-                        diag = diag,
+                        oculos = oculos,
                         radio = radio,
                         mapa = mapa,
                         copiloto = copiloto,
@@ -102,7 +102,7 @@ class MainActivity : ComponentActivity() {
                         aoEncerrarTurno = {
                             CopilotService.parar(this@MainActivity)
                             radio.fechar()
-                            diag.autenticacao.sair()
+                            oculos.autenticacao.sair()
                             SessaoDoAgente.anunciar(false)
                             mostrarLogin = true
                         },
@@ -130,7 +130,7 @@ class MainActivity : ComponentActivity() {
  */
 @Composable
 private fun Operacao(
-    diag: DiagnosticsViewModel,
+    oculos: OculosViewModel,
     radio: RadioViewModel,
     mapa: MapaViewModel,
     copiloto: CopilotoViewModel,
@@ -144,10 +144,10 @@ private fun Operacao(
     val noAr by radio.noAr.collectAsState()
     val copilotoOcupado by copiloto.copilotoOcupado.collectAsState()
     val estadoMapa by mapa.estado.collectAsState()
-    val registro by diag.registration.collectAsState()
+    val registro by oculos.registration.collectAsState()
 
     LaunchedEffect(Unit) {
-        diag.anunciarEstadoDegradado()
+        oculos.anunciarEstadoDegradado()
         // As permissões passaram a ser anunciadas por quem tem a fila de som.
         copiloto.anunciarCapacidadesPerdidas()
     }
@@ -156,7 +156,7 @@ private fun Operacao(
     DisposableEffect(Unit) {
         // O rádio lê o histórico com o token do agente; quem o guarda é o cofre
         // cifrado, que vive no ViewModel de diagnóstico.
-        radio.tokenDeSessao = { diag.autenticacao.tokenValido() }
+        radio.tokenDeSessao = { oculos.autenticacao.tokenValido() }
 
         // **Coleta de posição em segundo plano.**
         //

@@ -87,6 +87,16 @@ class TelemetriaDoRadio(private val capacidade: Int = CAPACIDADE) {
                 appendLine("  contadores:")
                 contadores.toSortedMap().forEach { (k, v) -> appendLine("    $k = $v") }
             }
+            // O aceite (d) pede a contagem de MENSAGENS, não de quadros: com o
+            // agrupamento de 3, uma mensagem carrega três quadros de 20 ms.
+            val msgs = contador(SessaoPtt.MENSAGENS_ENVIADAS)
+            val quadrosEnv = contador(QUADROS_ENVIADOS)
+            if (msgs > 0) {
+                appendLine(
+                    "  agrupamento: $quadrosEnv quadros em $msgs mensagens " +
+                        "(${"%.1f".format(quadrosEnv.toDouble() / msgs)} quadros/mensagem)",
+                )
+            }
             val perdidos = contador(QUADROS_PERDIDOS)
             val recebidos = contador(QUADROS_RECEBIDOS)
             if (recebidos + perdidos > 0) {

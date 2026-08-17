@@ -1,4 +1,4 @@
-# Onde estamos — 2026-08-17 · Fase 1 fechada, com UM critério de aceite não atingido
+# Onde estamos — 2026-08-17 · Fase 1 fechada, os seis critérios de aceite atendidos
 
 Fonte única de "estado da conversa". **Reescrito ao fim de cada sessão, nunca acrescentado.**
 Teto duro: **60 linhas**. O que não couber é história e vai para `DECISIONS.md`. Aqui só
@@ -6,7 +6,7 @@ entra o que muda a próxima decisão: o que funciona, o que está quebrado, o qu
 
 ## O que funciona hoje
 
-- `./gradlew build` verde · **579 testes, 0 falhas**. JDK 17 · AGP 8.9.2 · Kotlin 2.2.0 ·
+- `./gradlew build` verde · **593 testes JVM, 0 falhas** + instrumentado no emulador. JDK 17 · AGP 8.9.2 · Kotlin 2.2.0 ·
   compileSdk 35 · minSdk 31 · NDK 27. Build offline após a primeira sincronização.
 - Três telas compostas atrás de permissões e login: guarnição (PTT por toque + botão do
   copiloto), mapa MapLibre acompanhando o portador, e perfil.
@@ -19,8 +19,21 @@ entra o que muda a próxima decisão: o que funciona, o que está quebrado, o qu
 - **Opus fora da Main** (`MediaCodecOpus(dispatcher)`): medido p50=22 ms por quadro, que na
   Main seriam ~50 bloqueios de 22 ms por segundo. StrictMode instalado em `ClaryonApp`:
   **zero violações durante as transmissões**.
-- **Telemetria com chamador real, as DUAS classes.** `TelemetriaDoRadio`: toque→1º quadro
-  p50 **168 ms**, codificação p50 23 / p95 26 ms. `Telemetry.mark` ganhou a primeira
+- **Aceite (d) atingido: `AgrupadorDeQuadros` existe.** 3 quadros por mensagem, medido no
+  emulador: **204 quadros em 68 mensagens (3,0/msg) = ~17 msg/s**, contra ~50/s antes. A chave
+  foi não mexer em `sequencia`: ela continua **por quadro**, a mensagem só os carrega juntos, e
+  `ProtocoloRealtime.interpretar` explode o grupo de volta em N eventos — `BufferDeJitter` não
+  mudou uma linha. Custo declarado: +40 ms de empacotamento.
+- **Meta de 120 ms atingida.** O custo não era do emulador: o `MediaCodec` era criado,
+  configurado e iniciado na PRIMEIRA codificação, dentro do caminho crítico do PTT.
+  `CodecDeVoz.preparar()` aquece no `entrarEmModoAtivo`. Medido em três rodadas:
+  **192 ms (1ª após instalar), 94 ms, 103 ms**.
+- **Aceite (b) medido no aparelho: 1 ms** (meta ≤ 200 ms), por `PreempcaoNoAparelhoTest` —
+  instrumentado, com `VoiceOutput`/`PrioritySoundQueue`/`AudioTrack` reais.
+- **Diagnóstico fora do release.** `DiagnosticoViewModel` e `DiagnosticsScreen` vivem em
+  `app/src/debug`. Verificado por `dexdump` no APK: presentes no debug, **ausentes no release**;
+  `OculosViewModel` (produção) presente nos dois.
+- **Telemetria com chamador real, as DUAS classes.** `Telemetry.mark` ganhou a primeira
   implementação (`TelemetriaDoCicloDeVoz`) com os 4 estágios do ciclo + os 2 de **reprodução
   real** (marcados quando o PCM entra no `AudioTrack`, nunca no enfileiramento) + a preempção
   de P1. Os dois relatórios saem no `logcat` ao fechar o rádio.

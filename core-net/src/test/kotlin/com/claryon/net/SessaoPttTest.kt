@@ -48,15 +48,28 @@ class SessaoPttTest {
         var anuncios = 0
         var encerramentos = 0
 
+        /** Quantas MENSAGENS foram postas no socket — o número do aceite (d). */
+        var mensagens = 0
+
         override suspend fun conectar(talkGroupId: String) = Result.success(Unit)
         override suspend fun anunciar(anuncio: AnuncioDeFala): Result<Unit> {
             anuncios++; log.add("anuncio"); return Result.success(Unit)
+        }
+
+        override suspend fun enviarGrupo(grupo: List<QuadroAudio>): Result<Unit> {
+            if (falharEnvio && grupo.none { it.ultimo }) {
+                return Result.failure(ClaryonError.Sync("net", "sem rede"))
+            }
+            mensagens++
+            quadros.addAll(grupo)
+            return Result.success(Unit)
         }
 
         override suspend fun enviar(quadro: QuadroAudio): Result<Unit> {
             if (falharEnvio && !quadro.ultimo) {
                 return Result.failure(ClaryonError.Sync("net", "sem rede"))
             }
+            mensagens++
             quadros.add(quadro)
             return Result.success(Unit)
         }
@@ -321,6 +334,42 @@ class SessaoPttTest {
     }
 
     // ── Privacidade ───────────────────────────────────────────────────────────
+
+    @Test
+    fun oAgrupamento_derrubaAContagemDeMensagens_aUmTerco() = runTest {
+        // **Aceite (d) da Fase 1.** Antes: uma mensagem por quadro. Agora: uma a
+        // cada três. O que este teste mede é o número que o critério cita —
+        // mensagens no socket, não quadros de voz, que continuam os mesmos.
+        val log = mutableListOf<String>()
+        val transporte = TransporteFake(log = log)
+
+        sessao(preRollCom(0), CodecFake(), transporte, concede(log))
+            .transmitir("tx1", PrioridadeTransmissao.P2_APOIO, "Alfa", blocosDeFala(9)) {}
+
+        val quadros = transporte.quadros.count { !it.ultimo }
+        assertTrue("a bancada precisa transmitir para o teste valer", quadros >= 9)
+        assertTrue(
+            "com 3 por mensagem, as mensagens têm de ficar perto de 1/3 dos quadros " +
+                "(quadros=$quadros, mensagens=${transporte.mensagens})",
+            transporte.mensagens <= quadros / 2,
+        )
+    }
+
+    @Test
+    fun aUltimaSilaba_saiMesmoComGrupoIncompleto() = runTest {
+        // O `ultimo` fecha o grupo mesmo com 1 ou 2 pendentes. Sem isso, o resto
+        // ficaria preso no agrupador e o receptor esperaria para sempre.
+        val log = mutableListOf<String>()
+        val transporte = TransporteFake(log = log)
+
+        sessao(preRollCom(0), CodecFake(), transporte, concede(log))
+            .transmitir("tx1", PrioridadeTransmissao.P2_APOIO, "Alfa", blocosDeFala(4)) {}
+
+        assertTrue(
+            "o quadro `ultimo` precisa chegar ao transporte",
+            transporte.quadros.any { it.ultimo },
+        )
+    }
 
     @Test
     fun aoFim_oPreRollFicaVazio() = runTest {

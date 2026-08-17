@@ -1,5 +1,6 @@
 package com.claryon.net
 
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Base64
 
@@ -29,6 +30,18 @@ object ProtocoloRealtime {
 
     const val EVENTO_ANUNCIO = "fala.anuncio"
     const val EVENTO_QUADRO = "fala.quadro"
+
+    /**
+     * Vários quadros numa mensagem só. Ver [quadros].
+     *
+     * Evento NOVO em vez de mudar o formato do [EVENTO_QUADRO]: um aparelho com
+     * versão antiga simplesmente não entende `fala.quadros` e descarta (o `else`
+     * de [interpretar] devolve lista vazia), em vez de decodificar um payload
+     * com forma diferente da que espera. Trocar o significado de um evento
+     * existente seria a receita para dois agentes na mesma guarnição ouvirem
+     * ruído durante uma migração.
+     */
+    const val EVENTO_QUADROS = "fala.quadros"
     const val EVENTO_FIM = "fala.fim"
 
     fun topico(talkGroupId: String): String = "realtime:tg-$talkGroupId"
@@ -66,6 +79,40 @@ object ProtocoloRealtime {
             .put("opus", Base64.getEncoder().encodeToString(q.payload)),
     )
 
+    /**
+     * **Vários quadros numa mensagem — o agrupamento.**
+     *
+     * Cada quadro mantém a **própria** `sequencia`. É a decisão que faz o
+     * agrupamento não tocar no receptor: `BufferDeJitter` continua raciocinando
+     * em quadros de 20 ms, detectando perda e ordenando exatamente como antes, e
+     * [interpretar] só explode a mensagem de volta em N eventos. A alternativa —
+     * numerar por mensagem — obrigaria a reescrever o jitter, o PLC e a
+     * detecção de perda de uma vez, que é o que tornava este item arriscado.
+     *
+     * `transmissaoId` e `ultimo` sobem para o envelope porque são iguais em
+     * todos os quadros do grupo; repeti-los por quadro seria pagar 36 bytes de
+     * UUID três vezes, e o ponto do agrupamento é justamente o envelope.
+     */
+    fun quadros(talkGroupId: String, grupo: List<QuadroAudio>, ref: Int): String {
+        require(grupo.isNotEmpty()) { "grupo vazio não vira mensagem" }
+        val itens = JSONArray()
+        for (q in grupo) {
+            itens.put(
+                JSONObject()
+                    .put("seq", q.sequencia)
+                    .put("t", q.capturadoEmMs)
+                    .put("opus", Base64.getEncoder().encodeToString(q.payload)),
+            )
+        }
+        return broadcast(
+            talkGroupId, EVENTO_QUADROS, ref,
+            JSONObject()
+                .put("transmissaoId", grupo.first().transmissaoId)
+                .put("ultimo", grupo.any { it.ultimo })
+                .put("q", itens),
+        )
+    }
+
     fun fim(talkGroupId: String, transmissaoId: String, ref: Int): String = broadcast(
         talkGroupId, EVENTO_FIM, ref,
         JSONObject().put("transmissaoId", transmissaoId),
@@ -78,38 +125,69 @@ object ProtocoloRealtime {
      * **Nunca lança:** uma mensagem malformada não pode derrubar o canal de voz
      * inteiro. Mensagem que não entendemos é descartada, e o rádio segue.
      */
-    fun interpretar(texto: String): EventoDeRede? = runCatching {
+    fun interpretar(texto: String): List<EventoDeRede> = runCatching {
         val raiz = JSONObject(texto)
-        val payload = raiz.optJSONObject("payload") ?: return null
+        val payload = raiz.optJSONObject("payload") ?: return emptyList()
         val evento = payload.optString("event").ifEmpty { raiz.optString("event") }
-        val dados = payload.optJSONObject("payload") ?: return null
+        val dados = payload.optJSONObject("payload") ?: return emptyList()
 
         when (evento) {
-            EVENTO_ANUNCIO -> EventoDeRede.Anuncio(
+            EVENTO_ANUNCIO -> listOf(
+                EventoDeRede.Anuncio(
                 AnuncioDeFala(
                     transmissaoId = dados.getString("transmissaoId"),
                     autorIndicativo = dados.optString("indicativo"),
                     prioridade = runCatching {
                         PrioridadeTransmissao.valueOf(dados.optString("prioridade"))
                     }.getOrDefault(PrioridadeTransmissao.P2_APOIO),
+                    ),
                 ),
             )
 
-            EVENTO_QUADRO -> EventoDeRede.Quadro(
-                QuadroAudio(
-                    transmissaoId = dados.getString("transmissaoId"),
-                    sequencia = dados.getInt("seq"),
-                    capturadoEmMs = dados.optLong("t"),
-                    payload = Base64.getDecoder().decode(dados.optString("opus")),
-                    ultimo = dados.optBoolean("ultimo", false),
+            EVENTO_QUADRO -> listOf(
+                EventoDeRede.Quadro(
+                    QuadroAudio(
+                        transmissaoId = dados.getString("transmissaoId"),
+                        sequencia = dados.getInt("seq"),
+                        capturadoEmMs = dados.optLong("t"),
+                        payload = Base64.getDecoder().decode(dados.optString("opus")),
+                        ultimo = dados.optBoolean("ultimo", false),
+                    ),
                 ),
             )
 
-            EVENTO_FIM -> EventoDeRede.FimDeTransmissao(dados.getString("transmissaoId"))
+            // Explode o grupo em N eventos de quadro. O resto do receptor não
+            // sabe — nem precisa saber — que eles vieram juntos.
+            EVENTO_QUADROS -> {
+                val id = dados.getString("transmissaoId")
+                val ultimoDoGrupo = dados.optBoolean("ultimo", false)
+                val itens = dados.getJSONArray("q")
+                val saida = ArrayList<EventoDeRede>(itens.length())
+                for (i in 0 until itens.length()) {
+                    val q = itens.getJSONObject(i)
+                    saida.add(
+                        EventoDeRede.Quadro(
+                            QuadroAudio(
+                                transmissaoId = id,
+                                sequencia = q.getInt("seq"),
+                                capturadoEmMs = q.optLong("t"),
+                                payload = Base64.getDecoder().decode(q.optString("opus")),
+                                // Só o ÚLTIMO item do grupo carrega o fim: marcar
+                                // todos faria o jitter encerrar a fala no primeiro
+                                // quadro do grupo e cortar os dois seguintes.
+                                ultimo = ultimoDoGrupo && i == itens.length() - 1,
+                            ),
+                        ),
+                    )
+                }
+                saida
+            }
 
-            else -> null
+            EVENTO_FIM -> listOf(EventoDeRede.FimDeTransmissao(dados.getString("transmissaoId")))
+
+            else -> emptyList()
         }
-    }.getOrNull()
+    }.getOrDefault(emptyList())
 
     private fun broadcast(talkGroupId: String, evento: String, ref: Int, dados: JSONObject): String =
         envelope(

@@ -119,6 +119,30 @@ class MediaCodecOpus(
     // ── Codificação ───────────────────────────────────────────────────────────
 
     /**
+     * Constrói codificador e decodificador fora do caminho crítico. Ver o KDoc
+     * de [CodecDeVoz.preparar].
+     *
+     * Os DOIS: o decodificador paga o mesmo preço na primeira transmissão
+     * RECEBIDA, e ali o atraso aparece como início de fala cortado.
+     */
+    override suspend fun preparar(): Result<Unit> = withContext(dispatcher) {
+        mutex.withLock {
+            runCatching {
+                encoderPronto()
+                decoderPronto()
+                Result.success(Unit)
+            }.getOrElse { e ->
+                // Falhar ao aquecer não pode derrubar o rádio: o caminho normal
+                // reconstrói sob demanda. Só se perde o ganho de latência.
+                Result.failure(
+                    ClaryonError.Unexpected("opus.preparar", e.message ?: "falha ao aquecer"),
+                    e,
+                )
+            }
+        }
+    }
+
+    /**
      * Enfileira o quadro e **drena tudo o que estiver pronto**.
      *
      * Devolver lista vazia no aquecimento é o comportamento correto, não uma

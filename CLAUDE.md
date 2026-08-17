@@ -109,6 +109,34 @@ não ligar já aconteceu **seis** vezes neste projeto — a última descoberta e
 produção. "Construído" significa **tem chamador em `src/main` alcançável em
 runtime**. Classe testada sem chamador é *escrita*, não construída.
 
+### As cinco perguntas — responder POR ESCRITO, uma por uma
+
+Em 17/08 uma auditoria com um agente por item devolveu **8 de 8 PARCIAIS** sobre uma
+fase que eu tinha declarado completa. As quatro causas se repetiram, e todas são
+evitáveis por leitura, não por esforço. Antes de escrever "pronto":
+
+1. **Reli o critério de aceite, agora, no `ROADMAP.md`?** Não a lembrança dele — o
+   texto. Foi assim que "aceite completo" foi escrito com o critério (d) intacto e
+   não atingido, contradito pelo próprio `ESTADO.md` trinta linhas abaixo.
+
+2. **`grep` do símbolo: quem chama isto em `src/main`?** Zero chamador = escrito, não
+   construído. Vale para função pública que "exporta" métrica: `fecharCiclo()` e
+   `relatorioDeTelemetria()` nasceram mortos e davam a impressão de capacidade.
+
+3. **O corpo do teste prova o que o NOME dele afirma?** `oPtt_transmiteQuadros_naTaxaConfigurada`
+   asseria só `quadros.isNotEmpty()` — que o código defeituoso, a 8 kHz, também
+   satisfazia. Se o teste passaria com o defeito de volta, ele não testa o defeito.
+   O contra-teste é o padrão: rode as duas configurações e exija que difiram.
+
+4. **O que eu acabei de consertar era descrito em algum lugar?** `grep` do conceito
+   nos KDoc e em `docs/`. Consertar código sem varrer o que o descrevia **cria** a
+   próxima mentira: dois KDoc sobre reconferência de rota passaram a mentir no mesmo
+   dia em que a reconferência foi corrigida.
+
+5. **Rodei no aparelho e li o log — depois do conserto?** Medir antes e presumir
+   depois foi o que quase fechou o achado do `SyncManager`: o `mkdirs()` saiu do
+   construtor e os 965 ms continuaram, porque a E/S era do `context.filesDir`.
+
 Ao fechar o bloco: reescreva `ESTADO.md` e **`git push origin master`**.
 
 ---

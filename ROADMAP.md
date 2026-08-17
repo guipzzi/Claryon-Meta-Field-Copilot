@@ -136,7 +136,7 @@ falha é total.
 
 ---
 
-### FASE 1 — Barramento de áudio único e o que mede as metas · itens feitos, aceite (d) em aberto
+### FASE 1 — Barramento de áudio único e o que mede as metas ✅ CONCLUÍDA (aceite (a)-(f) medido em 17/08)
 
 **Objetivo.** Uma fonte de microfone, um destino de áudio, uma fila de prioridade, e
 instrumentação que transforma meta em número. É a janela do Segundo Filtro: não há

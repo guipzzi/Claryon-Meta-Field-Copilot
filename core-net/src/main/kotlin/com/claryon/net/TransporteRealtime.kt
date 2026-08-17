@@ -93,7 +93,9 @@ class TransporteRealtime(
                 override fun onMessage(webSocket: WebSocket, text: String) {
                     // Mensagem que não entendemos é descartada; uma malformada
                     // não pode derrubar o canal de voz inteiro.
-                    ProtocoloRealtime.interpretar(text)?.let { _eventos.tryEmit(it) }
+                    // `interpretar` devolve LISTA: uma mensagem agrupada vira N
+                    // eventos de quadro. Ver `ProtocoloRealtime.quadros`.
+                    for (e in ProtocoloRealtime.interpretar(text)) _eventos.tryEmit(e)
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
@@ -140,6 +142,11 @@ class TransporteRealtime(
 
     override suspend fun enviar(quadro: QuadroAudio): Result<Unit> =
         enviarTexto { tg -> ProtocoloRealtime.quadro(tg, quadro, ref.getAndIncrement()) }
+
+    override suspend fun enviarGrupo(grupo: List<QuadroAudio>): Result<Unit> {
+        if (grupo.isEmpty()) return Result.success(Unit)
+        return enviarTexto { tg -> ProtocoloRealtime.quadros(tg, grupo, ref.getAndIncrement()) }
+    }
 
     override suspend fun encerrar(transmissaoId: String): Result<Unit> =
         enviarTexto { tg -> ProtocoloRealtime.fim(tg, transmissaoId, ref.getAndIncrement()) }
