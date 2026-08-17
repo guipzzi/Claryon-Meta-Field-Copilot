@@ -107,7 +107,34 @@ nada. O caminho de comando entra primeiro e independe desta revisão humana.
 
 | Papel | Frase | Justificativa |
 |---|---|---|
-| Ativação | **"Claryon"** | Decidido em `DECISIONS.md` 2026-08-14: plosiva + líquida + vogais abertas + nasal, tudo abaixo do corte de 4 kHz do HFP em banda estreita |
+| Ativação | **"Claryon"** | Decidido em `DECISIONS.md` 2026-08-14: plosiva + líquida + vogais abertas + nasal, tudo abaixo do corte de 4 kHz do HFP em banda estreita. **⚠️ Medido em 2026-08-17: o STT escreve "Clarion", não "Claryon" — ver abaixo** |
+
+#### ⚠️ A palavra de ativação não sobrevive à ORTOGRAFIA, e isso não é falha de reconhecimento
+
+Medido no aparelho com `ggml-base-q5_1`, 8 amostras: a palavra de ativação falhou em
+**6** delas — `clarion` (3×), `varion` (1×) e **omitida por completo** (2×).
+
+O caso `clarion` é de natureza diferente dos outros, e a distinção decide o
+conserto: **"Claryon" com "y" não é padrão grafêmico do português.** Um
+decodificador fixado em `pt` que ouve /klaɾiˈõ/ escreve "Clarion" — ele acertou o
+som e grafou à portuguesa. Isso **não** é o mesmo que "guarnição" virar "nissan",
+onde o modelo errou o som.
+
+Consequência para o aceite A1/A2, que exige a transcrição **começar por "claryon"**:
+a comparação exata reprova uma escuta correta. As saídas, em ordem de preferência:
+
+1. **Aceitar um conjunto declarado de variantes ortográficas** — `claryon`,
+   `clarion`, `claryom`, `clarium`. Lista **explícita e curta**, escrita à mão, não
+   distância de edição: aceitar grafias conhecidas do mesmo fonema é diferente de
+   casar por similaridade, que segue proibido em `troca-de-grupo-por-voz.spec.md`
+   por converter erro de transcrição em erro de despacho.
+2. **Renomear a palavra de ativação** para uma grafia que o português escreva de um
+   jeito só. Custa marca e custa a análise fonética do `DECISIONS.md` 2026-08-14.
+
+As **duas omissões** são falha de verdade e nenhuma lista de variantes resolve: o
+modelo não produziu nada no lugar. Com 2 em 8, o portão de ativação recusaria uma em
+quatro tentativas legítimas do agente — e recusar quem falou certo é o modo de falhar
+que faz o produto ser desligado.
 | Abertura de canal | **"Claryon, abrir canal"** | Não é locução de protocolo — operador diz "câmbio", "cópia", "prossiga", "QAP", "na escuta"; nunca "abrir canal". Sem sibilante: /b/, /ɾ/, /k/, /n/, /l/ sobrevivem ao corte de banda |
 | Fecho | **"câmbio"** | **Não é detectada por modelo nenhum.** Ver item 12 |
 
