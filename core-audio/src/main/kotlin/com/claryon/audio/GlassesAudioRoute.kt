@@ -87,6 +87,25 @@ value class GlassesAudioRoute private constructor(val deviceId: Int) {
                 )
             return Result.success(GlassesAudioRoute(atual.id))
         }
+
+        /**
+         * Prova falsa. **Não existe no build de release** — ver
+         * `core-audio/src/debug/.../RotaDeTeste.kt`, que é o único chamador.
+         *
+         * `internal` mantém a garantia de compilação para o resto do projeto:
+         * fora de `core-audio` continua sendo impossível fabricar uma rota, e é
+         * fora daqui que vivem os caminhos que capturam. Aqui dentro a garantia
+         * nunca existiu — é este arquivo que a constrói.
+         *
+         * Existe porque a política que ela destrava é **regra de compliance** e
+         * precisa de teste que rode em toda máquina, não só na que tem fone
+         * Bluetooth pareado: quantos `AudioRecord` abrem, em que intervalo a rota
+         * é reconferida, quem perde quadro ao atrasar. `acquire` exige um
+         * `AudioManager`, e em unit test do Android ele lança "not mocked" antes
+         * da primeira linha do que se quer testar.
+         */
+        internal fun fabricarSemRotear(deviceId: Int): GlassesAudioRoute =
+            GlassesAudioRoute(deviceId)
     }
 }
 

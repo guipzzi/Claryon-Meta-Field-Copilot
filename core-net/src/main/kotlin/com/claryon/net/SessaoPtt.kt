@@ -84,6 +84,14 @@ class SessaoPtt(
     private val amostrasPorQuadro: Int,
     private val duracaoMaximaMs: Long = DURACAO_MAXIMA_MS,
     private val renovarACadaMs: Long = RENOVAR_MS,
+    /**
+     * `null` por padrão: instrumentação é opt-in, não um parâmetro que toda
+     * chamada de teste precisa aprender a passar. Duas das seis metas do
+     * projeto (`TOQUE_ATE_PRIMEIRO_QUADRO`, `CONCESSAO_DE_CANAL`) só existem
+     * como número quando isto é passado — antes, `TelemetriaDoRadio` compilava,
+     * tinha teste próprio, e não tinha nenhum chamador em `src/main`.
+     */
+    private val telemetria: TelemetriaDoRadio? = null,
 ) {
 
     /**
@@ -106,17 +114,23 @@ class SessaoPtt(
         // A rede é consultada aqui, mas nada do que vem abaixo espera por ela
         // além do necessário para saber se pode falar.
         val resultado = piso.pedir(talkGroupId, agenteId, transmissaoId, prioridade)
+        // Meta declarada: concessão de canal ≤ 150 ms.
+        telemetria?.registrar(TelemetriaDoRadio.Metrica.CONCESSAO_DE_CANAL, agoraMs() - inicio)
 
         val concessao = when (resultado) {
             is ResultadoDoPedido.Ocupado -> {
                 // Tom de ocupado e descarte: o que foi capturado até aqui não vai
                 // a lugar nenhum, e o pré-roll é limpo para não vazar na próxima.
                 preRoll.limpar()
+                telemetria?.contar(TelemetriaDoRadio.CANAL_NEGADO)
                 aoEvento(EventoPtt.CanalOcupado(resultado.detentor.agenteId))
                 return
             }
             is ResultadoDoPedido.Concedido -> resultado.concessao
-            is ResultadoDoPedido.Tomado -> resultado.concessao
+            is ResultadoDoPedido.Tomado -> {
+                telemetria?.contar(TelemetriaDoRadio.CANAL_TOMADO)
+                resultado.concessao
+            }
         }
 
         aoEvento(EventoPtt.Transmitindo(transmissaoId))
@@ -126,10 +140,38 @@ class SessaoPtt(
         var naoEntregues = 0
         var ultimaRenovacao = inicio
 
+        /**
+         * Marca a meta "toque → primeiro quadro entregue à rede" (≤ 120 ms) na
+         * primeira vez em que a sequência de fato avança.
+         *
+         * É por sequência e não por chamada de [enviar] porque o codec é um
+         * pipeline: as primeiras chamadas consomem PCM sem emitir pacote, e medir
+         * ali cravaria um número que não corresponde a nenhum áudio tendo saído
+         * do aparelho.
+         *
+         * **Bandeira, e não `sequencia == 1`.** A primeira versão comparava com 1
+         * e perdia a medição sempre que a primeira chamada de [enviar] rendia
+         * dois pacotes de uma vez — o que acontece de verdade a partir da segunda
+         * transmissão, com o `MediaCodec` já aquecido. Medido no emulador: duas
+         * transmissões, `n=1`. Erro de poste que só apareceu porque a métrica foi
+         * lida, e não só escrita.
+         */
+        var jaMarcouPrimeiroQuadro = false
+        fun marcarPrimeiroQuadroSePreciso() {
+            if (!jaMarcouPrimeiroQuadro && sequencia > 0) {
+                jaMarcouPrimeiroQuadro = true
+                telemetria?.registrar(
+                    TelemetriaDoRadio.Metrica.TOQUE_ATE_PRIMEIRO_QUADRO,
+                    agoraMs() - inicio,
+                )
+            }
+        }
+
         try {
             // 1) Pré-roll: a fala que começou antes do dedo chegar ao botão.
             for (quadro in fatiar(preRoll.desdeOInicioDaFala())) {
                 naoEntregues += enviar(transmissaoId, { sequencia++ }, quadro)
+                marcarPrimeiroQuadroSePreciso()
             }
             preRoll.limpar()
 
@@ -150,6 +192,7 @@ class SessaoPtt(
 
                 for (quadro in fatiar(bloco)) {
                     naoEntregues += enviar(transmissaoId, { sequencia++ }, quadro)
+                    marcarPrimeiroQuadroSePreciso()
                 }
             }
         } catch (e: LimiteDeDuracaoAtingido) {
@@ -203,14 +246,29 @@ class SessaoPtt(
      * sobre áudio que nunca existiu.
      */
     private suspend fun enviar(transmissaoId: String, sequencia: () -> Int, pcm: ShortArray): Int {
+        val antesDaCodificacao = agoraMs()
         val pacotes = when (val c = codec.codificar(pcm)) {
             is Result.Success -> c.value
             is Result.Failure -> return 0
         }
+        // Só mede quando o pipeline de fato emitiu: no aquecimento o codec
+        // consome sem produzir, e contar isso como "codificação instantânea"
+        // enviesaria o p50 para baixo justamente no início de cada fala.
+        if (pacotes.isNotEmpty()) {
+            telemetria?.registrar(
+                TelemetriaDoRadio.Metrica.CODIFICACAO,
+                agoraMs() - antesDaCodificacao,
+            )
+        }
         var naoEntregues = 0
         for (payload in pacotes) {
             val quadro = QuadroAudio(transmissaoId, sequencia(), agoraMs(), payload)
-            if (transporte.enviar(quadro) !is Result.Success) naoEntregues++
+            if (transporte.enviar(quadro) !is Result.Success) {
+                naoEntregues++
+                telemetria?.contar(TelemetriaDoRadio.QUADROS_NAO_ENTREGUES)
+            } else {
+                telemetria?.contar(TelemetriaDoRadio.QUADROS_ENVIADOS)
+            }
         }
         return naoEntregues
     }

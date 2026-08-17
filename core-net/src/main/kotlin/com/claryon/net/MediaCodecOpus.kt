@@ -4,10 +4,13 @@ import android.media.MediaCodec
 import android.media.MediaFormat
 import com.claryon.common.ClaryonError
 import com.claryon.common.Result
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import kotlin.coroutines.CoroutineContext
 
 /**
  * [CodecDeVoz] sobre o `MediaCodec` do Android, MIME `audio/opus`.
@@ -40,8 +43,26 @@ import java.nio.ByteOrder
  * já existe (NDK 27 + CMake, do whisper), então a troca é localizada.
  *
  * Não é thread-safe por dentro do `MediaCodec`; o `Mutex` serializa.
+ *
+ * ## Fora da Main, e não é preciosismo
+ *
+ * `dequeueInputBuffer`/`dequeueOutputBuffer` esperam até [TIMEOUT_US] (20 ms)
+ * quando não há buffer pronto — e `drenarEncoder` chama `dequeueOutputBuffer`
+ * em loop até a última chamada devolver negativo, o que significa que **toda**
+ * chamada de [codificar] paga até 20 ms de bloqueio, não só a primeira. Com um
+ * quadro de microfone a cada 20 ms durante o PTT inteiro, isso é ~50 bloqueios
+ * de até 20 ms por segundo — na prática, a Main **saturada** enquanto o agente
+ * fala. `decodificar` tem o mesmo formato e o mesmo custo, na recepção.
+ *
+ * `dispatcher` é parâmetro e não `Dispatchers.Default` fixo pelo mesmo motivo
+ * de `VoiceOutput.dispatcherDeAudio`: um dispatcher fixo escapa do
+ * escalonador de teste (`UnconfinedTestDispatcher` nunca veria a corrotina
+ * terminar).
  */
-class MediaCodecOpus(private val config: ConfigOpus = ConfigOpus()) : CodecDeVoz {
+class MediaCodecOpus(
+    private val config: ConfigOpus = ConfigOpus(),
+    private val dispatcher: CoroutineContext = Dispatchers.Default,
+) : CodecDeVoz {
 
     private val mutex = Mutex()
 
@@ -104,26 +125,28 @@ class MediaCodecOpus(private val config: ConfigOpus = ConfigOpus()) : CodecDeVoz
      * falha: o codificador ainda não tem o que emitir. Tratar isso como erro
      * derrubaria a transmissão nos primeiros 40 ms de toda fala.
      */
-    override suspend fun codificar(pcm: ShortArray): Result<List<ByteArray>> = mutex.withLock {
-        runCatching {
-            val codec = encoderPronto()
+    override suspend fun codificar(pcm: ShortArray): Result<List<ByteArray>> = withContext(dispatcher) {
+        mutex.withLock {
+            runCatching {
+                val codec = encoderPronto()
 
-            val entrada = codec.dequeueInputBuffer(TIMEOUT_US)
-            if (entrada < 0) {
-                // Sem buffer livre: o pipeline está cheio. Ainda assim vale drenar
-                // a saída — provavelmente é ela que está segurando a fila.
-                return@runCatching Result.success(drenarEncoder(codec))
-            }
-            codec.getInputBuffer(entrada)!!.apply {
-                clear()
-                order(ByteOrder.LITTLE_ENDIAN)
-                asShortBuffer().put(pcm)
-            }
-            codec.queueInputBuffer(entrada, 0, pcm.size * 2, proximaApresentacaoUs(), 0)
+                val entrada = codec.dequeueInputBuffer(TIMEOUT_US)
+                if (entrada < 0) {
+                    // Sem buffer livre: o pipeline está cheio. Ainda assim vale
+                    // drenar a saída — provavelmente é ela que está segurando a fila.
+                    return@runCatching Result.success(drenarEncoder(codec))
+                }
+                codec.getInputBuffer(entrada)!!.apply {
+                    clear()
+                    order(ByteOrder.LITTLE_ENDIAN)
+                    asShortBuffer().put(pcm)
+                }
+                codec.queueInputBuffer(entrada, 0, pcm.size * 2, proximaApresentacaoUs(), 0)
 
-            Result.success(drenarEncoder(codec))
-        }.getOrElse { e ->
-            Result.failure(ClaryonError.Unexpected("opus.encode", e.message ?: "falha ao codificar"), e)
+                Result.success(drenarEncoder(codec))
+            }.getOrElse { e ->
+                Result.failure(ClaryonError.Unexpected("opus.encode", e.message ?: "falha ao codificar"), e)
+            }
         }
     }
 
@@ -158,7 +181,8 @@ class MediaCodecOpus(private val config: ConfigOpus = ConfigOpus()) : CodecDeVoz
 
     // ── Decodificação ─────────────────────────────────────────────────────────
 
-    override suspend fun decodificar(payload: ByteArray?): Result<ShortArray> = mutex.withLock {
+    override suspend fun decodificar(payload: ByteArray?): Result<ShortArray> = withContext(dispatcher) {
+        mutex.withLock {
         if (payload == null || payload.isEmpty()) {
             return@withLock Result.success(ocultarPerda())
         }
@@ -197,6 +221,7 @@ class MediaCodecOpus(private val config: ConfigOpus = ConfigOpus()) : CodecDeVoz
             Result.success(pcm)
         }.getOrElse { e ->
             Result.failure(ClaryonError.Unexpected("opus.decode", e.message ?: "falha ao decodificar"), e)
+        }
         }
     }
 

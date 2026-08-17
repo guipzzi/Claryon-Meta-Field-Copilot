@@ -53,6 +53,12 @@ class Receptor(
     private val escopo: CoroutineScope,
     private val quadroMs: Long = 20,
     private val jitter: BufferDeJitter = BufferDeJitter(),
+    /**
+     * `null` por padrão — instrumentação é opt-in, para não obrigar todo teste
+     * existente a aprender um parâmetro novo. Ver [SessaoPtt.telemetria].
+     */
+    private val telemetria: TelemetriaDoRadio? = null,
+    private val agoraMs: () -> Long = { System.currentTimeMillis() },
 ) {
 
     private var coleta: Job? = null
@@ -115,12 +121,23 @@ class Receptor(
                     is SaidaDoJitter.Reproduzir -> {
                         esperasSeguidas = 0
                         quadrosTocados++
+                        telemetria?.contar(TelemetriaDoRadio.QUADROS_RECEBIDOS)
+                        // Mede decodificação + entrega ao consumidor: é o trecho
+                        // que este processo controla. O que vem depois (buffer do
+                        // AudioTrack, elo SCO) não é observável daqui — ver o
+                        // KDoc de `TelemetriaDoRadio` sobre boca a ouvido.
+                        val antes = agoraMs()
                         emitir(codec.decodificar(saida.quadro.payload), aoEvento)
+                        telemetria?.registrar(
+                            TelemetriaDoRadio.Metrica.RECEPCAO_ATE_AUDIO,
+                            agoraMs() - antes,
+                        )
                     }
 
                     is SaidaDoJitter.Interpolar -> {
                         esperasSeguidas = 0
                         quadrosPerdidos++
+                        telemetria?.contar(TelemetriaDoRadio.QUADROS_PERDIDOS)
                         // `null` = perda. Silêncio soa como corte; a interpolação
                         // soa como voz degradada.
                         emitir(codec.decodificar(null), aoEvento)

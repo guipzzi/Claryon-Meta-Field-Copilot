@@ -1237,3 +1237,76 @@ aparelho tem" é exatamente o que se defende numa auditoria.
   sem `User-Agent`**, com `403` e corpo `error code: 1010`. Isso é Cloudflare, não Supabase, e
   não tem relação com escopo do token. Foi essa leitura errada — "sem permissão" — que me fez
   empurrar o deploy para o usuário em vez de fazê-lo.
+
+## 2026-08-16 — Fase 1: barramento de áudio único
+
+- **A fonte única de microfone mora DENTRO do `GlassesAudioManagerImpl`, não ao lado dele.**
+  A alternativa era uma classe nova que os chamadores precisassem lembrar de usar. O KDoc do
+  `AudioDoAgente` já tinha escrito por que isso falha: *"Injetar exigiria que todo caminho novo
+  lembrasse de receber a mesma instância — e 'lembrar' é exatamente o que falhou aqui."*
+  `microfonePcm` passou a devolver uma vista da fonte compartilhada, e ele é o **único** ponto
+  do projeto que constrói um `AudioRecord`. Nenhum call site mudou; a exclusividade deixou de
+  depender de disciplina. Descartado: `FonteUnicaDeMicrofone` como peça injetável.
+
+- **Falha viaja como VALOR dentro da fonte, e vira exceção só na borda.** `SharedFlow` não
+  propaga exceção para assinantes: se a captura estourasse, cada consumidor veria um `collect`
+  que simplesmente para de emitir. Seria trocar "os óculos caíram" por "ninguém está falando" —
+  a confusão exata que o produto não pode ter. Por isso `Sinal.Falha`, convertido de volta em
+  `RotaDeAudioPerdidaException`/`AudioCaptureException` por consumidor. O contrato externo
+  (`Flow<ShortArray>` que lança) ficou idêntico ao de antes.
+
+- **Descarte por consumidor (`DROP_OLDEST`), não backpressure global.** O cofre de evidência
+  escreve em disco e o codec tem pipeline; se um deles atrasasse, um `buffer` compartilhado
+  travaria o laço de leitura do `AudioRecord` e a perda seria de áudio real, não de
+  processamento. Cada consumidor tem o próprio buffer de 50 quadros. O descarte é **contado** e
+  detectado por lacuna de sequência — perder áudio em silêncio seria a mesma mentira um nível
+  abaixo. Descartado: `SUSPEND` (trava tudo) e buffer único antes do fan-out (um lento degrada
+  todos).
+
+- **A janela de captação indevida caiu de "o turno inteiro" para 200 ms.** A rota era conferida
+  só na abertura do fluxo, e o fluxo do pré-roll vive do login ao "Encerrar turno". Qualquer
+  queda de HFP no meio fazia o sistema escolher o microfone do celular e ninguém reconferia.
+  Agora o laço reconfere a cada 200 ms. **Não é zero:** um
+  `OnCommunicationDeviceChangedListener` (API 31) levaria a ~0 e fica registrado como a
+  melhoria seguinte. 200 ms é o teto, não a média.
+
+- **A rota falsa de teste vive em `src/debug`, não em `src/main`.** Sem uma, a política de
+  compliance (quantos `AudioRecord`, quando fecham, quando a rota é reconferida) só seria
+  testável em máquina com fone Bluetooth pareado. Uma fábrica pública em `main` desfaria a
+  garantia central do `GlassesAudioRoute` justamente no módulo onde vivem os caminhos de
+  captura. Em `src/debug` a garantia continua sendo do compilador: **verificado por `javap`**
+  que `RotaDeTesteKt` existe no AAR debug e não existe no release. Os testes que dependem dela
+  foram para `src/testDebug`.
+
+- **A preempção de P1 não era uma fila nova — eram duas filas que não se enxergavam.**
+  `SoundScheduler.deveInterromper` sempre esteve certo; `playingPriority` é campo de instância,
+  e `RadioViewModel` e `DiagnosticsViewModel` construíam cada um a sua `VoiceOutput`. A
+  correção foi um dono único de processo (`SaidaUnica`), no mesmo molde do `AudioDoAgente`.
+  Efeito colateral que valeu tanto quanto: o `SupressorDeSaidaPropria` deixou de ser campo
+  privado do `RadioTatico` e passou a ser compartilhado — a fala do copiloto **nunca** havia
+  suprimido a captura do rádio, apesar de o KDoc do supressor listar esse caso como o item 3
+  que ele existe para cobrir.
+
+- **`AgrupadorDeQuadros` NÃO foi construído, e isso é decisão.** O comentário em
+  `Transmissao.kt:28` afirmava que a classe existia; ela nunca foi escrita. Medido: ~50 msg/s,
+  ~274 B de envelope JSON/base64 para ~30 B de Opus (11%). Agrupar 3 quadros quebra o receptor
+  em três pontos que assumem mensagem == quadro: `sequencia` serve de quadro E de mensagem, o
+  buffer de jitter precisaria crescer (~+200 ms), e o quadro `ultimo` precisaria decidir o que
+  fazer com agrupamento parcial. Construir sem tocar no receptor pareceria funcionar em teste e
+  cortaria áudio em campo. Corrigimos a **documentação** para dizer a verdade, com o custo
+  medido junto — nunca deixar código e documento divergindo.
+
+- **A métrica só valeu depois de lida.** A instrumentação do "toque → primeiro quadro" usava
+  `sequencia == 1` e perdia a amostra sempre que a primeira chamada de `enviar` rendia dois
+  pacotes — o que acontece a partir da **segunda** transmissão, com o `MediaCodec` aquecido.
+  Só apareceu ao rodar no emulador e ver `n=1` para duas transmissões. Trocado por bandeira
+  explícita, com teste de regressão. É o argumento contra "instrumentar e conferir depois":
+  métrica escrita e não lida é métrica errada que ninguém sabe que está errada.
+
+- **StrictMode entrou como instrumento e já pagou.** Encontrou, no arranque:
+  `SyncManager.outbox` fazendo **965 ms** de leitura de disco na Main, chamado do construtor de
+  `DiagnosticsViewModel` (`FileOutbox.init` faz `mkdirs()`). Registrado em `ESTADO.md`, **não
+  consertado nesta sessão** — é fora do escopo da Fase 1, e a regra é um marco por sessão.
+  Limitação declarada: `detectCustomSlowCalls` **não** pega o bloqueio do `MediaCodec` (não é
+  E/S aos olhos do StrictMode); a garantia de que o Opus saiu da Main é o `dispatcher`
+  injetado, não este detector.

@@ -25,9 +25,21 @@ enum class PrioridadeTransmissao {
 /**
  * Um quadro de áudio codificado, pronto para a rede.
  *
- * Quadros são agrupados antes de sair (ver `AgrupadorDeQuadros`): três de 20 ms
- * viram uma mensagem de 60 ms. Menos mensagens por segundo, sem custo perceptível
- * de latência.
+ * **Cada quadro sai como UMA mensagem — `AgrupadorDeQuadros` não existe.** Este
+ * comentário chegou a afirmar o contrário; a classe nunca foi escrita. Hoje são
+ * ~50 mensagens/s por locutor ativo, cada uma com ~274 B de envelope JSON/base64
+ * do Realtime para ~30 B de Opus útil — a auditoria de Fase 1 mediu ~11% de
+ * aproveitamento.
+ *
+ * **Por que não construir agora, e não é só falta de tempo.** Agrupar 3 quadros
+ * de 20 ms quebra o receptor em pelo menos três pontos que hoje assumem
+ * mensagem == quadro: [QuadroAudio.sequencia] é ao mesmo tempo "quadro" e
+ * "mensagem" para o jitter buffer, e as duas deixam de coincidir; o buffer
+ * inicial do jitter precisaria crescer (~+200 ms escondidos, por cima dos ~+40 ms
+ * de empacotamento); e o quadro `ultimo` (linha abaixo) precisaria decidir se
+ * marca o fim de um agrupamento parcial. Construir isso sem tocar no receptor
+ * pareceria funcionar em teste e cortar áudio em campo — pior que o estado
+ * atual, que ao menos é honesto sobre o custo.
  *
  * @param sequencia contador monotônico **por transmissão**, a partir de 0. É o que
  *   permite ao receptor detectar perda e ordenar — sem ele, o buffer de jitter não

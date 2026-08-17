@@ -30,4 +30,8 @@ dependencies {
     implementation(project(":core-common"))
 
     testImplementation(libs.junit)
+    // PrioritySoundQueue é o mecanismo da preempção (SoundSchedulerTest cobre
+    // só a política pura). Sem isto a suíte prova que o nível 1 DECIDE
+    // interromper e nunca prova que um som PARA de tocar.
+    testImplementation(libs.kotlinx.coroutines.test)
 }

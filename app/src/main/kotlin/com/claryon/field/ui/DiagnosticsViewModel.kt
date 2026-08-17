@@ -12,6 +12,7 @@ import com.claryon.agent.ModoOperacao
 import com.claryon.agent.Utterance
 import com.claryon.agent.utteranceFor
 import com.claryon.field.audio.AudioDoAgente
+import com.claryon.field.audio.SaidaUnica
 import com.claryon.audio.RotaDeAudioPerdidaException
 import com.claryon.common.Result
 import com.claryon.evidence.EncryptedEvidenceVault
@@ -43,16 +44,11 @@ import com.claryon.glasses.RegistrationStatus
 import com.claryon.glasses.MockDeviceController
 import com.claryon.field.voice.Modelos
 import com.claryon.field.voice.VoiceCycle
-import com.claryon.field.voice.VoiceOutput
 import com.claryon.sync.SemTransporteGateway
 import com.claryon.sync.SyncManager
 import com.claryon.sync.TacticalDispatcher
 import com.claryon.voice.AndroidOnDeviceStt
-import com.claryon.voice.AndroidTts
 import com.claryon.voice.EnergyVoiceActivityDetector
-import com.claryon.voice.PcmAudio
-import com.claryon.voice.PiperTts
-import com.claryon.voice.TtsEngine
 import java.io.File
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -62,8 +58,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
@@ -195,30 +189,6 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
 
     private val router = DeterministicIntentRouter()
     private val stt = AndroidOnDeviceStt(app)
-
-    /** Fallback do TTS: sempre disponível, voz do sistema. */
-    private val tts = AndroidTts(app)
-
-    /**
-     * TTS neural (Piper) resolvido sob demanda — a primeira chamada copia o
-     * `espeak-ng-data` e carrega o modelo ONNX, o que leva alguns segundos e não
-     * pode acontecer no construtor do ViewModel.
-     */
-    private var piper: PiperTts? = null
-    private var piperResolvido = false
-    private val ttsMutex = Mutex()
-
-    private suspend fun sintetizar(texto: String): PcmAudio? {
-        val engine: TtsEngine = ttsMutex.withLock {
-            if (!piperResolvido) {
-                piper = Modelos.piper(getApplication())
-                piperResolvido = true
-                Log.i(TAG, "TTS = ${if (piper != null) "Piper (neural, on-device)" else "AndroidTts (fallback)"}")
-            }
-            piper ?: tts
-        }
-        return (engine.synthesize(texto) as? Result.Success)?.value
-    }
 
     private val _commandStatus = MutableStateFlow("—")
     val commandStatus: StateFlow<String> = _commandStatus.asStateFlow()
@@ -459,11 +429,15 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
         agora = { System.currentTimeMillis() },
     )
 
-    private val saida = VoiceOutput(
-        scope = viewModelScope,
-        sintetizar = { texto -> sintetizar(texto) },
-        reproduzir = { pcm, sr -> reproduzirComRota(pcm, sr) },
-    )
+    // Dono único da saída (`SaidaUnica`) — a mesma fila que o rádio usa para os
+    // próprios earcons. Antes deste ViewModel construía a sua própria
+    // `VoiceOutput`: um P1 do rádio não enxergava a fala do copiloto porque
+    // eram duas filas de prioridade separadas, cada uma com o próprio
+    // `playingPriority`. Unificar é o que faz `deveInterromper` funcionar
+    // entre as duas fontes — e é também o que passa a registrar a janela do
+    // supressor de eco para a fala sintetizada, que antes vazava para o
+    // pré-roll do rádio sem proteção nenhuma. Ver `SaidaUnica`.
+    private val saida = SaidaUnica.de(app)
 
     private val executor = ClaryonIntentExecutor(
         cofre = cofre,
@@ -493,21 +467,6 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
         localizarPar = { indicativo -> localizar(indicativo) },
     )
 
-
-    /** Reprodução com rota garantida — sobe o HFP, toca, e devolve a rota. */
-    private suspend fun reproduzirComRota(pcm: ShortArray, sampleRateHz: Int) {
-        when (audio.iniciar()) {
-            is Result.Success -> try {
-                audio.reproduzir(pcm, sampleRateHz)
-            } finally {
-                audio.liberar()
-            }
-            // Falha nunca é silêncio — mas aqui o canal de aviso É o som, então
-            // só resta registrar. O status da UI já mostra a causa.
-            is Result.Failure -> Log.w(TAG, "sem rota de áudio para reproduzir")
-        }
-    }
-
     /** Comando por TEXTO (bypassa o STT): roteador → resposta lacônica → TTS. */
     fun runCommand(text: String) {
         viewModelScope.launch { processar(text) }
@@ -533,7 +492,12 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
             when (val rota = audio.iniciar()) {
                 is Result.Failure -> {
                     _commandStatus.value = "sem rota HFP — captura cancelada (${rota.error.message})"
-                    audio.liberar()
+                    // NÃO chamar `audio.liberar()`: `iniciar()` falhou e não
+                    // contou usuário nenhum. Chamar mesmo assim decrementa a
+                    // contagem compartilhada por um usuário que nunca existiu —
+                    // e o próximo `iniciar()` bem-sucedido de QUALQUER caminho
+                    // (o rádio, por exemplo) herda esse déficit: o `liberar()`
+                    // dele derruba a rota SCO por baixo de quem ainda captura.
                     return@launch
                 }
                 is Result.Success -> Unit
@@ -772,18 +736,22 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     override fun onCleared() {
-        // Encerramento na ordem do contrato: câmera → sessão → áudio → engines.
+        // Encerramento na ordem do contrato: câmera → sessão → engines.
         // Sem parar a sessão, o stream dos óculos segue transmitindo por
         // Bluetooth depois que a tela morre, sem nenhum indicador — e um novo
         // DatGlassesFacade tentaria createSession com a anterior ainda viva.
+        //
+        // **`audio` e `saida` NÃO são liberados aqui.** Os dois são donos únicos
+        // de processo (`AudioDoAgente`, `SaidaUnica`), não recursos deste
+        // ViewModel — `audio.liberarTudo()` chegou a estar aqui e era uma
+        // regressão real: `MainActivity.kt` pede `diag` antes de `radio`
+        // (`viewModel()`), e `ViewModelStore` limpa na ordem de inserção, então
+        // TODO encerramento de turno derrubava a rota SCO por baixo do
+        // `AudioRecord` do rádio, que segue vivo. Quem encerra um recurso de
+        // processo é o dono do processo, não o primeiro ViewModel a morrer.
         gravacaoJob?.cancel()
         facade.stopCameraStream()
         facade.stopSession()
-        audio.liberarTudo()
-        tts.liberar()
-        saida.limpar()
-        // Piper segura um runtime ONNX nativo; sem release, o modelo vaza.
-        piper?.let { p -> kotlinx.coroutines.runBlocking { p.release() } }
         mock?.disable()
         // A gravação não é finalizada aqui de propósito: `onCleared` não é
         // suspensa e o `viewModelScope` já está morrendo. Não há perda — o cofre

@@ -1,6 +1,7 @@
 package com.claryon.field
 
 import android.app.Application
+import android.os.StrictMode
 import android.util.Log
 import com.claryon.common.Result
 import com.claryon.glasses.GlassesRuntime
@@ -29,6 +30,7 @@ import org.maplibre.android.MapLibre
 class ClaryonApp : Application() {
     override fun onCreate() {
         super.onCreate()
+        instalarStrictModeDeDesenvolvimento()
         MapLibre.getInstance(this)
 
         val result = GlassesRuntime.initialize(this)
@@ -37,6 +39,45 @@ class ClaryonApp : Application() {
             // Mode com MockDeviceKit, o enable() reinicializa se necessário.
             Log.e(TAG, "Falha ao inicializar o DAT: ${result.error}")
         }
+    }
+
+    /**
+     * Parte do instrumento do critério de aceite da Fase 1: "StrictMode não
+     * acusa violação na Main durante 30 s de transmissão contínua"
+     * (`ROADMAP.md`).
+     *
+     * **O que isto pega de verdade, hoje:** disco e rede na Main —
+     * `detectDiskReads`/`detectDiskWrites`/`detectNetwork` são automáticos, sem
+     * precisar instrumentar chamador nenhum. A auditoria de threading já achou
+     * candidatos reais (leitura do cofre cifrado da sessão, `ConsultaDePosicao`)
+     * que estes três detectores acusariam sozinhos.
+     *
+     * **O que isto NÃO pega:** o bloqueio do `MediaCodec` (`dequeueInputBuffer`/
+     * `dequeueOutputBuffer`) não é E/S de disco nem de rede aos olhos do
+     * StrictMode — é chamada bloqueante comum, e só `detectCustomSlowCalls` +
+     * `StrictMode.noteSlowCall` no próprio ponto de bloqueio pegariam isso, o
+     * que este ciclo não instrumentou. A garantia de que o Opus saiu da Main é
+     * `MediaCodecOpus.dispatcher` — verificável por construção e por teste com
+     * dispatcher injetado, não por este detector.
+     *
+     * `penaltyLog` e não `penaltyDeath`: em produto real (não CI), matar o
+     * processo por uma violação transformaria um sinal de diagnóstico em
+     * incidente de campo.
+     *
+     * Só em `BuildConfig.DEBUG`: rodar isto em release custaria overhead de
+     * detecção sem ninguém para ler o log.
+     */
+    private fun instalarStrictModeDeDesenvolvimento() {
+        if (!BuildConfig.DEBUG) return
+        StrictMode.setThreadPolicy(
+            StrictMode.ThreadPolicy.Builder()
+                .detectCustomSlowCalls()
+                .detectDiskReads()
+                .detectDiskWrites()
+                .detectNetwork()
+                .penaltyLog()
+                .build(),
+        )
     }
 
     companion object {

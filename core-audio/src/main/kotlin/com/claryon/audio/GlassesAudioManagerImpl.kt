@@ -11,14 +11,14 @@ import android.media.MediaRecorder
 import android.util.Log
 import com.claryon.common.ClaryonError
 import com.claryon.common.Result
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.flowOn
-import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Roteamento e captura de áudio pelo canal Bluetooth (HFP/SCO) — implementação
@@ -149,16 +149,53 @@ class GlassesAudioManagerImpl(
         prova
     }
 
+    /**
+     * Escopo do laço de captura.
+     *
+     * Não é o do chamador de propósito: o microfone é compartilhado entre
+     * consumidores com ciclos de vida diferentes (o pré-roll do rádio, a captura
+     * ao vivo do PTT, o cofre), e amarrar o laço ao escopo de quem chegou primeiro
+     * faria a saída **dele** derrubar a captura de todos os outros. Quem decide
+     * quando o `AudioRecord` fecha é a contagem de assinantes, em
+     * [FonteUnicaDeMicrofone], não a vida de um ViewModel.
+     */
+    private val escopoDaFonte = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /** Quadros perdidos por consumidor lento. Zero é o normal; ver [quadrosDescartados]. */
+    private val descartados = AtomicLong(0)
+
+    /**
+     * Quantos quadros de 20 ms um consumidor lento já perdeu.
+     *
+     * Exposto porque descarte silencioso é a versão sutil de "falha em silêncio":
+     * o áudio some, ninguém vê, e a hipótese vira "o microfone está ruim". Este
+     * número é o que separa as duas explicações.
+     */
+    val quadrosDescartados: Long get() = descartados.get()
+
+    private val fonte = FonteUnicaDeMicrofone(
+        escopo = escopoDaFonte,
+        confereRota = { rota -> audioManager.confereRota(rota) },
+        abrirCaptura = { abrirAudioRecord() },
+        aoDescartar = { quantos ->
+            descartados.addAndGet(quantos.toLong())
+            Log.w(TAG, "consumidor lento descartou $quantos quadro(s) de microfone")
+        },
+    )
+
+    /**
+     * **Uma vista da fonte única.** Ver [FonteUnicaDeMicrofone].
+     *
+     * Assinar é o que abre o `AudioRecord`; sair é o que o fecha. Chamar isto duas
+     * vezes não abre dois microfones — que era exatamente o que acontecia durante
+     * todo PTT, com o pré-roll e a captura ao vivo disputando o mesmo hardware.
+     */
+    override fun microfonePcm(route: GlassesAudioRoute): Flow<ShortArray> = fonte.pcm(route)
+
     // Contrato: o chamador (app) garante RECORD_AUDIO concedido em runtime (o
     // onboarding pede antes de qualquer captura). O lint não enxerga esse fluxo.
     @Suppress("MissingPermission")
-    override fun microfonePcm(route: GlassesAudioRoute): Flow<ShortArray> = flow {
-        // A prova foi tirada no roteamento; a captura pode começar segundos
-        // depois. Se o HFP caiu no intervalo (óculos dobrados, fone desligado,
-        // ligação entrando), o sistema já escolheu um substituto — o microfone
-        // do celular — e capturar aqui captaria terceiros. Falhar é o certo.
-        if (!audioManager.confereRota(route)) throw RotaDeAudioPerdidaException()
-
+    private fun abrirAudioRecord(): FonteUnicaDeMicrofone.CapturaBruta {
         val frameSamples = sampleRateHz / 50 // janelas de 20 ms
         val minBuf = AudioRecord.getMinBufferSize(
             sampleRateHz,
@@ -172,18 +209,25 @@ class GlassesAudioManagerImpl(
             AudioFormat.ENCODING_PCM_16BIT,
             maxOf(minBuf, frameSamples * 2 * 4),
         )
-        try {
-            check(record.state == AudioRecord.STATE_INITIALIZED) {
-                "AudioRecord não inicializou (permissão RECORD_AUDIO? rota de áudio?)"
-            }
-            record.startRecording()
-            val buffer = ShortArray(frameSamples)
-            while (currentCoroutineContext().isActive) {
+        check(record.state == AudioRecord.STATE_INITIALIZED) {
+            record.release()
+            "AudioRecord não inicializou (permissão RECORD_AUDIO? rota de áudio?)"
+        }
+        record.startRecording()
+        Log.i(TAG, "AudioRecord aberto a $sampleRateHz Hz")
+
+        val buffer = ShortArray(frameSamples)
+        return object : FonteUnicaDeMicrofone.CapturaBruta {
+            override val duracaoDoQuadroMs = 20L
+
+            override suspend fun ler(): ShortArray? {
+                // `read` bloqueante em `Dispatchers.IO` — é ele o relógio da
+                // captura, e é onde a thread deve esperar.
                 val n = record.read(buffer, 0, buffer.size)
-                when {
-                    n > 0 -> emit(buffer.copyOf(n))
+                return when {
+                    n > 0 -> buffer.copyOf(n)
                     // n == 0 é legítimo (buffer ainda sem dados): só continuar.
-                    n == 0 -> Unit
+                    n == 0 -> null
                     // Negativo é erro. Sem este ramo, uma desconexão do HFP
                     // (ERROR_DEAD_OBJECT) faz o laço girar a 100% de CPU para
                     // sempre, sem emitir e sem avisar ninguém — "sem fala
@@ -192,11 +236,14 @@ class GlassesAudioManagerImpl(
                     else -> throw AudioCaptureException(n)
                 }
             }
-        } finally {
-            runCatching { record.stop() }
-            record.release()
+
+            override fun fechar() {
+                runCatching { record.stop() }
+                record.release()
+                Log.i(TAG, "AudioRecord fechado")
+            }
         }
-    }.flowOn(Dispatchers.IO)
+    }
 
     override suspend fun reproduzir(pcm: ShortArray, sampleRateHz: Int): Result<Unit> =
         withContext(Dispatchers.IO) {
@@ -238,6 +285,19 @@ class GlassesAudioManagerImpl(
                 delay((pcm.size * 1000L) / sampleRateHz + 50)
                 Result.success(Unit)
             } finally {
+                // **É esta função que sustenta a preempção de `PrioritySoundQueue`
+                // (ver `SoundQueue.kt`: "nível 1 interrompe qualquer coisa").**
+                // Quando um P1 do rádio cancela a fala do copiloto em curso, o
+                // `delay` acima é pulado — o cancelamento entra direto aqui.
+                //
+                // `pause()` + `flush()` antes de `stop()` torna o corte
+                // EXPLÍCITO em vez de depender da coincidência de tempo entre
+                // "quanto sobrou no buffer" e "quando o `finally` roda": pause()
+                // para a saída no instante em que é chamado, e flush() descarta
+                // o que ainda não tocou. No caminho normal (delay já esgotado),
+                // o buffer já está vazio e os dois são no-op — sem custo.
+                runCatching { track.pause() }
+                runCatching { track.flush() }
                 runCatching { track.stop() }
                 track.release()
             }
@@ -264,6 +324,8 @@ class GlassesAudioManagerImpl(
             AudioFormat.ENCODING_PCM_16BIT,
         )
 
+        private val bufferSizeBytes = maxOf(minBuf, minBuf * 4)
+
         private val track: AudioTrack = AudioTrack.Builder()
             .setAudioAttributes(
                 AudioAttributes.Builder()
@@ -281,8 +343,16 @@ class GlassesAudioManagerImpl(
                     .build(),
             )
             .setTransferMode(AudioTrack.MODE_STREAM)
-            .setBufferSizeInBytes(maxOf(minBuf, minBuf * 4))
+            .setBufferSizeInBytes(bufferSizeBytes)
             .build()
+
+        /**
+         * Cota máxima de áudio que pode estar em voo no buffer nativo no
+         * instante de [fechar]: `write()` é bloqueante e nunca deixa mais que
+         * [bufferSizeBytes] sem consumir — é o próprio buffer que impõe o teto,
+         * não uma estimativa de quanto falta.
+         */
+        private val duracaoMaximaEmVooMs = (bufferSizeBytes / 2) * 1000L / sampleRateHz
 
         @Volatile private var aberto = true
 
@@ -310,13 +380,38 @@ class GlassesAudioManagerImpl(
                 Result.success(Unit)
             }
 
+        /**
+         * Fecha o `AudioTrack`.
+         *
+         * **`stop()` colado a `release()`, sem espera entre os dois, NÃO
+         * drena** — o comentário que esteve aqui antes prometia o oposto, e
+         * fazia o oposto: `MODE_STREAM` devolve o controle assim que o pedido de
+         * parar é aceito, não quando o que já está no buffer termina de tocar.
+         * O resultado era a última sílaba de **toda** transmissão recebida
+         * cortada, na ordem de [duracaoMaximaEmVooMs] — centenas de ms a 16 kHz.
+         *
+         * A espera roda **fora** do chamador: `fechar()` é `fun`, não `suspend`
+         * — mudar a assinatura para drenar de forma síncrona propagaria
+         * `suspend` até `RadioTatico.fecharFluxoDeSaida()`, hoje chamada de
+         * contexto não-suspenso. `escopoDaFonte` (IO, vida do processo) é onde
+         * este gerente já faz housekeeping equivalente para a captura — reusado
+         * aqui em vez de outro escopo, porque a natureza do trabalho é a mesma:
+         * limpeza de recurso nativo, não caminho de áudio ao vivo.
+         *
+         * `aberto = false` continua síncrono, na entrada: é o que
+         * [escrever] confere antes de cada bloco. Não elimina toda corrida — um
+         * `write()` já em voo quando isto roda só observa a flag no próximo
+         * quadro — mas fecha a maior parte da janela sem exigir uma reescrita de
+         * `RadioTatico` neste ciclo. Risco residual: NÃO VERIFICADO em hardware.
+         */
         override fun fechar() {
             if (!aberto) return
             aberto = false
-            // `stop()` e não `pause()`: stop drena o que já foi escrito antes de
-            // parar, e é isso que impede o corte da última sílaba.
-            runCatching { track.stop() }
-            runCatching { track.release() }
+            escopoDaFonte.launch {
+                delay(duracaoMaximaEmVooMs)
+                runCatching { track.stop() }
+                runCatching { track.release() }
+            }
         }
     }
 

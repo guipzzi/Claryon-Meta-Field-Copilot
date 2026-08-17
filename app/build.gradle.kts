@@ -87,6 +87,24 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+
+    testOptions {
+        unitTests {
+            // Sem isto, `android.util.Log` lança `RuntimeException("not mocked")`
+            // em teste JVM — e o que fica intestável é justamente o CAMINHO DE
+            // FALHA, porque é ele que loga. `RadioTatico` registra o toque
+            // ignorado por repique, a captura que falhou e a recepção
+            // encerrada; a `PrioritySoundQueue` loga a exceção que ela existe
+            // para não deixar escapar. Todos eram inalcançáveis por teste.
+            //
+            // `returnDefaultValues` devolve 0/null/false para todo método de
+            // framework não implementado. Não é substituto do Robolectric: só
+            // torna o stub silencioso em vez de explosivo. Onde o comportamento
+            // do framework importa de verdade, o teste continua sendo
+            // instrumentado (`app/src/androidTest`).
+            isReturnDefaultValues = true
+        }
+    }
     // Lint ATIVO (o AGP 8.9.2 corrigiu o bug com Kotlin 2.2). O único achado
     // suprimido é o MissingPermission do AudioRecord, com justificativa no
     // próprio ponto de uso.

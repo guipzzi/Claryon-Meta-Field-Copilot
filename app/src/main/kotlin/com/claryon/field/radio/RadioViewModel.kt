@@ -1,15 +1,16 @@
 package com.claryon.field.radio
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.claryon.field.audio.AudioDoAgente
+import com.claryon.field.audio.SaidaUnica
 import com.claryon.audio.GlassesAudioRoute
 import com.claryon.common.Earcon
 import com.claryon.common.Result
 import com.claryon.field.BuildConfig
 import com.claryon.field.ui.componentes.EstadoDoPtt
-import com.claryon.field.voice.VoiceOutput
 import com.claryon.field.ui.telas.FalaNoGrupo
 import com.claryon.field.ui.telas.ParPresente
 import com.claryon.net.ClienteDePisoLocal
@@ -67,6 +68,10 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
      */
     var tokenDeSessao: suspend () -> String? = { null }
 
+    // Dono único do processo. Duas instâncias sobre o mesmo estado global do
+    // aparelho produziam captação pelo microfone do celular — ver `AudioDoAgente`.
+    private val audio = AudioDoAgente.de(app)
+
     /**
      * Saída de som do rádio.
      *
@@ -74,36 +79,18 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
      * engolia **todos** os sinais do rádio: canal ocupado, canal perdido em
      * emergência, limite de duração, alerta prioritário recebido e sem rede. Num
      * produto sem display, isso é a regra dura "falha nunca é silêncio" sendo
-     * falsa enquanto a suíte fica verde. Pior que mudo: `emitirComSupressao`
-     * **registra** a janela de supressão antes de emitir, então o rádio desligava
-     * o microfone por 320 ms para se proteger do eco de um tom que nunca tocava.
+     * falsa enquanto a suíte fica verde.
      *
-     * A justificativa antiga — "o ciclo de voz já toca" — era falsa em dois
-     * níveis: o ciclo de voz não tem porta de entrada no app entregue, e mesmo
-     * que tivesse, ele não sabe do rádio.
-     *
-     * **Limitação conhecida, e ela é deliberada.** Esta é uma segunda fila de
-     * prioridade, separada da do ciclo de voz. Um alerta P1 do rádio **não**
-     * interrompe uma resposta falada do copiloto, porque as duas filas não se
-     * enxergam. O que tornou isso aceitável agora foi o dono único da rota
-     * (`AudioDoAgente`): as duas filas disputam ordem, não mais o estado global de
-     * áudio do aparelho — que era o defeito que difundia terceiros. Arbitragem de
-     * prioridade entre subsistemas fica registrada em `ESTADO.md` como pendência,
-     * e não se resolve aqui sem mover o TTS para o dono, que é mudança maior.
+     * **A limitação que este KDoc documentava — duas filas de prioridade que não
+     * se enxergam — está resolvida.** `saidaDoRadio` agora É a fila única
+     * (`SaidaUnica`), a mesma que `DiagnosticsViewModel` usa para o copiloto. Um
+     * P1 do rádio interrompe a fala do copiloto em curso porque os dois
+     * `Sound.Tone`/`Sound.Speech` disputam o mesmo `SoundScheduler`. TTS real
+     * também passa a existir para o rádio — `sintetizar` não é mais `{ null }` —
+     * então o único sinal falado do rádio (`utteranceFor(SEM_REDE)`, hoje
+     * descartado por render nulo) passa a soar.
      */
-    private val saidaDoRadio = VoiceOutput(
-        scope = viewModelScope,
-        // O rádio não fala frases próprias: dos cinco sinais, quatro são tons e o
-        // quinto reusa `utteranceFor(SEM_REDE)`. Devolver `null` faz a fila tratar
-        // como não-sintetizável e cair no earcon, em vez de carregar o Piper de
-        // 60 MB para um caminho que só emite bipe.
-        sintetizar = { null },
-        reproduzir = { pcm, sr -> audio.reproduzir(pcm, sr) },
-    )
-
-    // Dono único do processo. Duas instâncias sobre o mesmo estado global do
-    // aparelho produziam captação pelo microfone do celular — ver `AudioDoAgente`.
-    private val audio = AudioDoAgente.de(app)
+    private val saidaDoRadio = SaidaUnica.de(app)
 
     private val _estado = MutableStateFlow<EstadoDoPtt>(
         EstadoDoPtt.Indisponivel("Rádio fechado."),
@@ -201,7 +188,6 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
                 sampleRateHz = audio.taxaDeAmostragemHz,
                 piso = ClienteDePisoLocal(),
                 pcmDoMicrofone = { rotaValida -> audio.microfonePcm(rotaValida) },
-                reproduzir = { pcm, taxa -> audio.reproduzir(pcm, taxa) },
                 abrirFluxoDeSaida = { taxa -> audio.abrirFluxoDeReproducao(taxa) },
                 registrarNoHistorico = { id, prio, dur ->
                     viewModelScope.launch {
@@ -227,6 +213,11 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
                 emitir = { u -> saidaDoRadio.emitir(u) },
                 duracaoDoEarconMs = { e -> duracaoDoEarcon(e) },
                 aoMudarQuemFala = { quem -> _quemFala.value = quem },
+                // Compartilhado com `SaidaUnica`: é o que faz a fala do
+                // copiloto (que toca pela MESMA fila) suprimir a captura do
+                // rádio também — antes só os earcons do próprio rádio
+                // registravam janela. Ver o KDoc de `SaidaUnica`.
+                supressor = SaidaUnica.supressor,
             )
             novo.entrarEmModoAtivo(r)
             radio = novo
@@ -362,6 +353,11 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
         recarga = null
         historicoDoCanal = null
         transporteAtual = null
+        // As medições do turno morrem junto com o `RadioTatico`. Registrar antes
+        // é o que transforma um turno de uso em número consultável depois — sem
+        // isto, a única forma de ver p50/p95 seria pedir por voz durante a
+        // operação, e ninguém faz isso no meio de uma ocorrência.
+        radio?.telemetria?.relatorio()?.let { Log.i(TAG, it) }
         radio?.sairDeModoAtivo()
         radio = null
         rota = null
@@ -469,6 +465,25 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
     private fun canalAtual(): String =
         nomeDoCanalAtual.ifBlank { TALK_GROUP_PADRAO }
 
+    // ── Telemetria ────────────────────────────────────────────────────────────
+
+    /**
+     * Relatório de latências e contadores do rádio — p50/p95 de toque até o
+     * primeiro quadro, concessão de canal, codificação e recepção.
+     *
+     * **O caminho alcançável hoje é `adb logcat -s ClaryonField`**, pelo
+     * registro que [fechar] emite ao encerrar o rádio. Não há comando de voz
+     * nem tela que exponha isto — e não inventar um agora é deliberado:
+     * acrescentar `Intent.ConsultarTelemetria` é mudança de comportamento do
+     * copiloto e, pela regra do projeto, começa por diff de spec, não por diff
+     * de código.
+     *
+     * Devolve `null` quando o rádio nunca abriu: "sem amostras" é resposta
+     * diferente de "zero", e confundir as duas faria ausência de medição ser
+     * lida como medição excelente.
+     */
+    fun relatorioDeTelemetria(): String? = radio?.telemetria?.relatorio()
+
     // ── Peças auxiliares ──────────────────────────────────────────────────────
 
     /**
@@ -498,6 +513,8 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private companion object {
+        const val TAG = "ClaryonField"
+
         /**
          * Marca a fala inserida por este aparelho e ainda não ecoada pelo
          * servidor. É por este prefixo que a recarga sabe o que preservar.

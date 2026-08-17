@@ -31,4 +31,9 @@ dependencies {
     implementation(project(":core-common"))
 
     testImplementation(libs.junit)
+    // A política da fonte única — quantos `AudioRecord` abrem, quando fecham,
+    // quem perde quadro quando atrasa — é testável sem aparelho, e é ela que
+    // sustenta a proibição de captar terceiros. O mecanismo (`AudioRecord`) fica
+    // atrás de `FonteUnicaDeMicrofone.CapturaBruta` justamente para isso.
+    testImplementation(libs.kotlinx.coroutines.test)
 }

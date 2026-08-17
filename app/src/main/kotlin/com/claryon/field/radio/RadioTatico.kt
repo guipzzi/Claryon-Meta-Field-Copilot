@@ -23,6 +23,7 @@ import com.claryon.net.PrioridadeTransmissao
 import com.claryon.net.Receptor
 import com.claryon.net.SessaoPtt
 import com.claryon.net.SupressorDeSaidaPropria
+import com.claryon.net.TelemetriaDoRadio
 import com.claryon.net.TransporteAoVivo
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -74,7 +75,6 @@ class RadioTatico(
     private val codec: CodecDeVoz,
     private val piso: ClienteDePiso,
     private val pcmDoMicrofone: (GlassesAudioRoute) -> Flow<ShortArray>,
-    private val reproduzir: suspend (pcm: ShortArray, taxaHz: Int) -> Unit,
     /**
      * Abre o `AudioTrack` de longa duração da recepção.
      *
@@ -109,13 +109,40 @@ class RadioTatico(
     private val aoMudarQuemFala: (String?) -> Unit = {},
     private val agoraMs: () -> Long = { System.currentTimeMillis() },
     private val sampleRateHz: Int = 8_000,
+    /**
+     * Compartilhado com o dono único da saída (`SaidaUnica`), e não mais
+     * construído aqui.
+     *
+     * Enquanto era campo privado desta classe, só os earcons do próprio rádio
+     * registravam janela — a fala sintetizada do copiloto tocava por outro
+     * objeto inteiramente e nunca suprimia a captura, apesar de o KDoc de
+     * [SupressorDeSaidaPropria] listar exatamente esse caso. Compartilhar a
+     * instância é o que fecha o furo: agora qualquer som que sai pela fila única
+     * — earcon do rádio ou fala do copiloto — suprime a mesma captura.
+     */
+    private val supressor: SupressorDeSaidaPropria = SupressorDeSaidaPropria(),
+    /**
+     * Medições do rádio — latência de PTT, concessão de canal, codificação,
+     * recepção, e os contadores de quadro.
+     *
+     * A classe existia completa, testada e **sem um único chamador em
+     * `src/main`** (`ESTADO.md` item 6): meta declarada sem instrumento é
+     * adjetivo, não número. Vive aqui e não dentro de `SessaoPtt` porque uma
+     * sessão dura uma fala; as métricas precisam atravessar o turno.
+     */
+    val telemetria: TelemetriaDoRadio = TelemetriaDoRadio(),
 ) {
 
-    private val supressor = SupressorDeSaidaPropria()
     private val gatilho = GatilhoPtt()
     private val preRoll = PreRollBuffer(sampleRateHz = sampleRateHz)
 
-    private val receptor = Receptor(transporte, codec, escopo)
+    private val receptor = Receptor(
+        transporte = transporte,
+        codec = codec,
+        escopo = escopo,
+        telemetria = telemetria,
+        agoraMs = agoraMs,
+    )
 
     private var alimentacao: Job? = null
 
@@ -134,10 +161,20 @@ class RadioTatico(
      * termina por queda de rede nunca emite `Terminou`, e sem este segundo
      * caminho o track ficaria vivo segurando a rota de saída até o processo
      * morrer.
+     *
+     * `filaDeSaida` **não é recriada** aqui — ela vive enquanto durar o
+     * `RadioTatico`, porque cada transmissão nova reusa o mesmo canal (só
+     * `fluxoDeSaida`, o `AudioTrack`, é recriado). Sem o dreno abaixo, um quadro
+     * que chegou tarde demais para o consumidor cancelado ficaria à espera na
+     * cabeça do canal e seria o primeiro a tocar na transmissão SEGUINTE — a voz
+     * do locutor anterior colada na frente da próxima, possivelmente numa taxa
+     * diferente se `abrirFluxoDeSaida` mudou. `tryReceive` nunca suspende: seguro
+     * chamar de um contexto não-suspenso.
      */
     private fun fecharFluxoDeSaida() {
         consumidorDeSaida?.cancel()
         consumidorDeSaida = null
+        while (filaDeSaida.tryReceive().isSuccess) Unit
         fluxoDeSaida?.fechar()
         fluxoDeSaida = null
     }
@@ -249,6 +286,7 @@ class RadioTatico(
         when (val d = gatilho.aoPressionar(agoraMs())) {
             DecisaoDeGatilho.IgnoradoPorRepique -> {
                 Log.d(TAG, "toque ignorado por repique")
+                telemetria.contar(TelemetriaDoRadio.TOQUES_IGNORADOS)
                 return
             }
             DecisaoDeGatilho.JaTransmitindo -> return
@@ -270,6 +308,7 @@ class RadioTatico(
             piso = piso,
             agoraMs = agoraMs,
             amostrasPorQuadro = sampleRateHz / 50,
+            telemetria = telemetria,
         )
 
         transmissao = escopo.launch {
@@ -363,8 +402,22 @@ class RadioTatico(
                 escopo.launch { filaDeSaida.send(evento.pcm) }
                 if (consumidorDeSaida == null) {
                     consumidorDeSaida = escopo.launch {
+                        // `escrever` devolve `Result` e não lança — antes o
+                        // valor era descartado, e uma falha de escrita
+                        // (`ERROR_INVALID_OPERATION`, rota derrubada) não
+                        // chegava a earcon nem a log. "Falha nunca é silêncio"
+                        // vale para o áudio recebido também. Um bipe só, não um
+                        // por quadro: se a rota caiu, os quadros seguintes vão
+                        // falhar todos, e repetir o earcon 50x/s seria ruído por
+                        // cima de um aviso que o agente já recebeu.
+                        var jaAvisou = false
                         semDerrubarOProcesso("reprodução da recepção") {
-                            for (bloco in filaDeSaida) fluxo.escrever(bloco)
+                            for (bloco in filaDeSaida) {
+                                if (fluxo.escrever(bloco) is Result.Failure && !jaAvisou) {
+                                    jaAvisou = true
+                                    sinalizar(Earcon.FALHA, Priority.RESPOSTA)
+                                }
+                            }
                         }
                     }
                 }

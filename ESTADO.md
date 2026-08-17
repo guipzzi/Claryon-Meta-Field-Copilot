@@ -1,4 +1,4 @@
-# Onde estamos — 2026-08-16 · Fase 0 FECHADA
+# Onde estamos — 2026-08-16 · Fase 1 FECHADA
 
 Fonte única de "estado da conversa". **Reescrito ao fim de cada sessão, nunca acrescentado.**
 Teto duro: **60 linhas**. O que não couber é história e vai para `DECISIONS.md`. Aqui só
@@ -6,86 +6,60 @@ entra o que muda a próxima decisão: o que funciona, o que está quebrado, o qu
 
 ## O que funciona hoje
 
-- `./gradlew build` verde. JDK 17 · Gradle 8.11.1 · AGP 8.9.2 · Kotlin 2.2.0 · compileSdk 35 ·
-  minSdk 31 · NDK 27. Build offline após a primeira sincronização.
-- **O app tem três telas compostas** (`MainActivity.kt:153`), atrás de permissões e login:
-  guarnição (rádio com PTT por toque), mapa MapLibre acompanhando o portador com rumo,
-  e perfil.
-- `ClaryonIntentExecutor` existe em produção (`app/src/main/kotlin/com/claryon/field/agent/`)
-  e `core-sound`, `core-evidence` e `core-sync` são importados por `app/src/main`.
-- Modelos embarcados em `app/src/main/assets/models/` — o APK de produção contém
-  `ggml-tiny.bin` e a voz Piper. Nada de IA na nuvem em caminho nenhum.
-- Posição: `public.consultar_posicao(indicativo)` tira o solicitante do JWT e
-  `private.posicao_relativa` está revogada de `authenticated`
-  (`servidor/migracoes/0003_consultas.sql:97`). A garantia é do servidor, não do cliente.
-- Verificado no artefato por `javap`: o DAT 0.9.0 **não** expõe microfone e o MockDeviceKit
-  **não** simula áudio. Fone Bluetooth com HFP continua sendo a única bancada honesta.
+- `./gradlew build` verde · **570 testes, 0 falhas**. JDK 17 · AGP 8.9.2 · Kotlin 2.2.0 ·
+  compileSdk 35 · minSdk 31 · NDK 27. Build offline após a primeira sincronização.
+- Três telas compostas atrás de permissões e login: guarnição (PTT por toque + botão do
+  copiloto), mapa MapLibre acompanhando o portador, e perfil.
+- **Um `AudioRecord` no processo inteiro** (`FonteUnicaDeMicrofone`): `SharedFlow` com
+  fan-out, contagem por assinatura, e reconferência de rota **durante** o stream a cada
+  200 ms. Medido no emulador com PTT e ciclo de voz simultâneos: `AudioRecord aberto` = **1**.
+- **Uma fila de prioridade** (`SaidaUnica`): rádio e copiloto compartilham `PrioritySoundQueue`,
+  então P1 interrompe fala em curso. O `SupressorDeSaidaPropria` também é compartilhado — a
+  fala do copiloto passou a suprimir a captura do rádio, furo que existia desde sempre.
+- **Opus fora da Main** (`MediaCodecOpus(dispatcher)`): medido p50=22 ms por quadro, que na
+  Main seriam ~50 bloqueios de 22 ms por segundo. StrictMode instalado em `ClaryonApp`:
+  **zero violações durante as transmissões**.
+- **Telemetria com chamador real.** Medido no aparelho: toque→1º quadro p50 **245 ms** (n=2),
+  codificação p50 22 ms / p95 27 ms, 185 quadros enviados. Sai no `logcat` ao fechar o rádio.
+- Edge Functions `transmit`/`ack` deployadas; PTT → `transmissions` verificado ponta a ponta.
+- Verificado por `javap` no artefato: `rotaDeTeste` existe no AAR **debug** e **não existe** no
+  release — a fábrica de rota falsa não pode vazar para produção.
 
 ## O que está quebrado, e nós sabemos
 
-0. ~~PTT não demonstrável~~ **RESOLVIDO** — `RadioViewModel` passa
-   `sampleRateHz = audio.taxaDeAmostragemHz` e `ConfigOpus` deriva da mesma fonte. Travado
-   por `TaxaDeAmostragemTest`. ~~O PTT NÃO ERA DEMONSTRÁVEL.~~ `RadioTatico.kt:88` tem `sampleRateHz = 8_000` como
-   padrão e `RadioViewModel` não sobrescreve, enquanto a captura entrega 16 kHz. A voz
-   transmitida sai **uma oitava abaixo, com o dobro da duração**. Meia sessão de conserto,
-   e é a maior alavanca do projeto.
-0b. ~~Edge Functions nunca deployadas~~ **RESOLVIDO** — `transmit` e `ack` deployadas e
-   verificadas ponta a ponta: PTT → `RegistroDeTransmissao` → função → `transmissions` →
-   fio do canal. Três defeitos no caminho: `NetworkOnMainThreadException` (o `execute()` do
-   OkHttp na Main, exceção de mensagem nula), `tipo = "fala"` contra o CHECK que aceita
-   `('ptt','alerta')`, e `optString` devolvendo a **string** `"null"` para JSON nulo. `grep "functions/v1"
-   --include=*.kt` devolve zero. Logo `transmissions` nunca recebe INSERT e
-   `HistoricoDoCanal.falas()` devolve lista vazia **sempre** — o fio do canal que acabou de
-   ser construído mostra só as inserções otimistas locais, que somem em 10 s na recarga.
-   A superfície visível do Pilar 1 está vazia em produção.
-0c. `AgrupadorDeQuadros` **não existe no repositório**, apesar de `Transmissao.kt:28` afirmar
-   que existe. São 50 mensagens/s de ~300 B para 30 B de voz.
-1. ~~Ciclo de voz sem porta de entrada~~ **RESOLVIDO** — botão "Perguntar ao copiloto" em
-   `TelaDeGuarnicao`, ligado a `diag::cicloDeVoz`. Verificado no emulador: o botão vira
-   "OUVINDO…", o ciclo roda e o `finally` devolve o botão. **Era o defeito mais caro do
-   projeto.** ~~Antes:~~ `DiagnosticsScreen` é a única tela que chama
-   `runCommand`/`falarComando`/`cicloDeVoz`, e o nome só aparece uma vez no projeto: na
-   própria definição (`ui/DiagnosticsScreen.kt:48`). C2, C3 e C4 estão mortos por voz; o app
-   entregue é 100% toque, que é o oposto da premissa do produto.
-2. ~~Duas instâncias de `GlassesAudioManagerImpl`~~ **RESOLVIDO** — dono único em
-   `field/audio/AudioDoAgente.kt`. Era violação de compliance alcançável: o `liberar()` de
-   uma derrubava a rota SCO sob o `AudioRecord` da outra, e como `microfonePcm` confere a
-   rota só na abertura, o pré-roll passava a captar pelo microfone do celular e ia ao ar
-   no PTT seguinte — captando terceiros por trás do `GlassesAudioRoute`.
-3. ~~Earcons do rádio engolidos~~ **RESOLVIDO** — `RadioViewModel` tem `saidaDoRadio`.
-   **Pendência que sobra:** são duas filas de prioridade (rádio e ciclo de voz) que não se
-   enxergam, então um P1 do rádio não interrompe fala do copiloto. Só se resolve movendo o
-   TTS para o dono único.
-3b. ~~Captura sem tratamento de exceção~~ **RESOLVIDO** — os dois `escopo.launch` de
-   `RadioTatico` (`:135` e `:215`) passam por `semDerrubarOProcesso`, que converte falha em
-   earcon e **repropaga** `CancellationException`. Antes, óculos desconectando no toque do
-   PTT matava o processo.
-4. **Taxa de amostragem divergente:** o microfone entrega 16 kHz e `RadioTatico`/codec assumem
-   8 kHz. Na recepção, um `AudioTrack` novo é criado e liberado **por quadro de 20 ms**.
-5. `WakeWordDetector` é interface sem implementação, e `PowerPolicy` declara
-   `wakeWordAtiva = true`. O modo **Standby** é inalcançável.
-6. **Nenhuma das seis metas está instrumentada** — `Telemetry.mark` não tem chamador.
-7. `Stream.errorStream` nunca é coletado: perdemos `PERMISSIONS_DENIED`, `HINGE_CLOSED`,
-   `THERMAL_HOT`, `BATTERY_LOW` tipados. `STOPPED` não é tratado como terminal, então sem
-   `camera.stop()` o próximo `addCamera` falha.
-8. A permissão de câmera do DAT nunca é pedida em produção. Em hardware real, a leitura de
+1. **Meta de 120 ms não atingida no emulador:** toque→1º quadro p50 = 245 ms. Falta medir em
+   hardware real com fone HFP; o emulador usa codec por software e o número embute isso.
+2. **`SyncManager.outbox` faz ~965 ms de leitura de disco na Main** (`SyncManager.kt:30`, via
+   `DiagnosticsViewModel.<init>:426`) — achado NOVO, do StrictMode que esta fase instalou.
+   `FileOutbox.init` chama `mkdirs()` no construtor. Startup, não transmissão.
+3. **`AgrupadorDeQuadros` continua não existindo** — decisão registrada, não esquecimento: são
+   ~50 msg/s com ~274 B de envelope para ~30 B de voz (11% de aproveitamento). Agrupar quebra
+   o receptor em 3 pontos (`sequencia` é quadro E mensagem), e o comentário mentiroso em
+   `Transmissao.kt` foi corrigido para dizer a verdade.
+4. `WakeWordDetector` é interface sem implementação, e `PowerPolicy` declara `wakeWordAtiva =
+   true`. O modo **Standby** é inalcançável.
+5. `Telemetry` (o de `core-common`, dos estágios do ciclo de voz) continua **sem chamador** —
+   só `TelemetriaDoRadio` foi ligada. As metas de STT, wake word e bateria seguem sem instrumento.
+6. `Stream.errorStream` nunca é coletado: perdemos `PERMISSIONS_DENIED`, `HINGE_CLOSED`,
+   `THERMAL_HOT`, `BATTERY_LOW` tipados. `STOPPED` não é tratado como terminal.
+7. A permissão de câmera do DAT nunca é pedida em produção. Em hardware real, a leitura de
    placa quebra no primeiro uso.
-9. `CopilotService`: `stopSelf()` antes de qualquer `startForeground()`
-   (`service/CopilotService.kt:88`) e `parar()` usa `startService` em vez de
-   `startForegroundService` (`:215`).
+8. `CopilotService`: `stopSelf()` antes de qualquer `startForeground()` (`:88`) e `parar()` usa
+   `startService` em vez de `startForegroundService` (`:215`).
+9. `DiagnosticsViewModel` tem 800+ linhas e 5 subsistemas. A quebra em três não foi feita: a
+   auditoria achou 6 bloqueios reais (`executor`, `saida`, `gravacaoJob`, `autenticacao`,
+   `tokenCorrente`, `audio`) que precisam sair dos ViewModels ANTES do corte.
 
 ## O que vem a seguir
 
-Plano completo e faseado em [`ROADMAP.md`](ROADMAP.md). O caminho crítico:
+Plano completo em [`ROADMAP.md`](ROADMAP.md). Caminho crítico:
 
-1. **16 kHz ponta a ponta** — sem isso não há vídeo, nem checkpoint, nem demo.
-2. **Porta de entrada do ciclo de voz** — um botão em `TelaDeGuarnicao`. Whisper, Piper,
-   roteador e executor já existem, testados e inalcançáveis.
-3. **Fonte única de microfone com fan-out** — 1 e 2 não coexistem sem ela.
-4. **JWT no canal + `ClienteDePisoRemoto`** — hoje o piso é resolvido em RAM do processo.
-5. **Transcrição na origem** — acumulador, Whisper no `finally`, quarto evento no protocolo.
-6. **Entregáveis da Etapa 5 — prazo 22/08.**
+1. **Medir em hardware real** — óculos + fone HFP. Sem isso, os números da Fase 1 são de emulador.
+2. **Fase 2: gatilho por voz** ("Hey Claryon" / "guarnição N na escuta") — depende da fonte
+   única, que agora existe.
+3. **Transcrição na origem** (Pilar 1) — acumulador + Whisper no `finally` do PTT.
+4. **Entregáveis da Etapa 5 — prazo 22/08.**
 
-**Pendências que não se resolvem sozinhas:** rotacionar o PAT do GitHub exposto no setup ·
-`security-crypto` em `1.1.0-alpha06` · `MockDeviceKitStreamTest` roda isolado · conferir se o
-documento submetido menciona WhatsApp (§14.1 do edital veda alteração de escopo).
+**Pendências que não se resolvem sozinhas:** `security-crypto` em `1.1.0-alpha06` ·
+`MockDeviceKitStreamTest` roda isolado · conferir se o documento submetido menciona WhatsApp
+(§14.1 do edital veda alteração de escopo).

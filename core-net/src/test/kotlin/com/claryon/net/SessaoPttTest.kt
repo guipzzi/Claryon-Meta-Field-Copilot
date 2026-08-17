@@ -113,6 +113,7 @@ class SessaoPttTest {
         piso: ClienteDePiso,
         relogio: () -> Long = { 0L },
         duracaoMaximaMs: Long = 30_000,
+        telemetria: TelemetriaDoRadio? = null,
     ) = SessaoPtt(
         talkGroupId = "gta-3",
         agenteId = "alfa",
@@ -123,6 +124,7 @@ class SessaoPttTest {
         agoraMs = relogio,
         amostrasPorQuadro = amostrasPorQuadro,
         duracaoMaximaMs = duracaoMaximaMs,
+        telemetria = telemetria,
     )
 
     private fun blocosDeFala(n: Int) = flow {
@@ -330,5 +332,107 @@ class SessaoPttTest {
 
         assertEquals("áudio não sobrevive ao momento de uso", 0, preRoll.tamanho)
         assertFalse(preRoll.desdeOInicioDaFala().any { it.toInt() != 0 })
+    }
+
+    // ── Telemetria ────────────────────────────────────────────────────────────
+    //
+    // As duas metas de latência do rádio (toque → primeiro quadro ≤ 120 ms,
+    // concessão de canal ≤ 150 ms) existiam declaradas em `docs/` e não mediam
+    // nada: `TelemetriaDoRadio` não tinha um único chamador em `src/main`. Estes
+    // testes travam a ligação — se alguém remover a instrumentação, a suíte cai
+    // em vez de a métrica virar silenciosamente "sem amostras".
+
+    @Test
+    fun mede_toqueAtePrimeiroQuadro_comORelogioDaSessao() = runTest {
+        val log = mutableListOf<String>()
+        val t = TelemetriaDoRadio()
+        // Relógio controlado: 0 no início, 40 ms em toda leitura seguinte.
+        var primeiraLeitura = true
+        val relogio = {
+            if (primeiraLeitura) { primeiraLeitura = false; 0L } else 40L
+        }
+
+        sessao(
+            preRollCom(3), CodecFake(), TransporteFake(log = log), concede(log),
+            relogio = relogio, telemetria = t,
+        ).transmitir("tx1", PrioridadeTransmissao.P2_APOIO, "Alfa", blocosDeFala(2)) {}
+
+        val medicao = t.medicao(TelemetriaDoRadio.Metrica.TOQUE_ATE_PRIMEIRO_QUADRO)
+        assertTrue("a meta de 120 ms não tem instrumento se isto vier nulo", medicao != null)
+        assertEquals("mede UMA vez por transmissão, no primeiro quadro", 1, medicao!!.amostras)
+        assertEquals(40L, medicao.p50)
+    }
+
+    @Test
+    fun mede_toqueAtePrimeiroQuadro_mesmoQuandoOCodecEmiteDoisPacotesDeUmaVez() = runTest {
+        // Regressão medida no emulador: a primeira versão comparava
+        // `sequencia == 1` e perdia a amostra sempre que a primeira chamada
+        // rendia dois pacotes — o que acontece com o `MediaCodec` já aquecido,
+        // ou seja, da SEGUNDA transmissão em diante. Duas transmissões, `n=1`.
+        val log = mutableListOf<String>()
+        val t = TelemetriaDoRadio()
+        val codecEmDupla = object : CodecDeVoz {
+            override suspend fun codificar(pcm: ShortArray) =
+                Result.success(listOf(ByteArray(20) { 1 }, ByteArray(20) { 2 }))
+            override suspend fun decodificar(payload: ByteArray?) = Result.success(ShortArray(160))
+            override val taxaDeSaidaHz = 24_000
+            override fun liberar() = Unit
+        }
+
+        sessao(preRollCom(2), codecEmDupla, TransporteFake(log = log), concede(log), telemetria = t)
+            .transmitir("tx1", PrioridadeTransmissao.P2_APOIO, "Alfa", blocosDeFala(2)) {}
+
+        assertEquals(
+            "a sequência salta de 0 para 2 e a medição não pode se perder no salto",
+            1,
+            t.medicao(TelemetriaDoRadio.Metrica.TOQUE_ATE_PRIMEIRO_QUADRO)?.amostras,
+        )
+    }
+
+    @Test
+    fun mede_concessaoDeCanal_mesmoQuandoOCanalEhNegado() = runTest {
+        val log = mutableListOf<String>()
+        val t = TelemetriaDoRadio()
+        val ocupado = PisoFake(
+            { ResultadoDoPedido.Ocupado(concessao("outro")) },
+            log,
+        )
+
+        sessao(preRollCom(0), CodecFake(), TransporteFake(log = log), ocupado, telemetria = t)
+            .transmitir("tx1", PrioridadeTransmissao.P2_APOIO, "Alfa", blocosDeFala(2)) {}
+
+        // O canal negado é justamente o caso em que saber quanto o servidor
+        // demorou importa — medir só no sucesso esconderia o pior percentil.
+        assertTrue(t.medicao(TelemetriaDoRadio.Metrica.CONCESSAO_DE_CANAL) != null)
+        assertEquals(1, t.contador(TelemetriaDoRadio.CANAL_NEGADO))
+    }
+
+    @Test
+    fun conta_quadrosEnviados_eNaoEntregues_separadamente() = runTest {
+        val log = mutableListOf<String>()
+        val t = TelemetriaDoRadio()
+        val transporte = TransporteFake(falharEnvio = true, log = log)
+
+        sessao(preRollCom(0), CodecFake(), transporte, concede(log), telemetria = t)
+            .transmitir("tx1", PrioridadeTransmissao.P2_APOIO, "Alfa", blocosDeFala(5)) {}
+
+        assertTrue(
+            "rede caída precisa aparecer como quadro NÃO entregue, não como zero envio",
+            t.contador(TelemetriaDoRadio.QUADROS_NAO_ENTREGUES) > 0,
+        )
+        assertEquals(0, t.contador(TelemetriaDoRadio.QUADROS_ENVIADOS))
+    }
+
+    @Test
+    fun semTelemetria_aSessaoFuncionaIgual() = runTest {
+        // `telemetria` é opt-in: o caminho sem instrumentação não pode mudar de
+        // comportamento nem lançar por causa de um `null`.
+        val log = mutableListOf<String>()
+        val transporte = TransporteFake(log = log)
+
+        sessao(preRollCom(2), CodecFake(), transporte, concede(log), telemetria = null)
+            .transmitir("tx1", PrioridadeTransmissao.P2_APOIO, "Alfa", blocosDeFala(3)) {}
+
+        assertTrue(transporte.quadros.isNotEmpty())
     }
 }
