@@ -467,6 +467,18 @@ class CopilotoViewModel(app: Application) : AndroidViewModel(app) {
             val origem = Modelos.fonteDoWhisper(getApplication())?.toString() ?: "indisponível"
             _commandStatus.value = "ciclo: ouvindo… (STT=$origem)"
 
+            // **O TTS aquece AQUI, em paralelo com a escuta.**
+            //
+            // Medido no aparelho: a parcela "síntese + rota + fila" da resposta
+            // falada custava 1218 ms — MAIS que o whisper (1021 ms) — e a maior
+            // parte era a construção do motor neural na primeira fala. Aquecer
+            // aqui é grátis em tempo de parede: o agente ainda está falando, e o
+            // whisper só roda depois que o VAD fecha a janela.
+            //
+            // `launch` e não `await`: se o aquecimento demorar, o ciclo não pode
+            // ficar preso — a fala do agente é o relógio, não o nosso.
+            viewModelScope.launch { SaidaUnica.aquecer(getApplication()) }
+
             // Um id, gerado uma vez, usado pelos dois lados da instrumentação.
             val cicloId = "ciclo-${System.currentTimeMillis()}"
             SaidaUnica.telemetriaDoCiclo.abrirCiclo(cicloId)

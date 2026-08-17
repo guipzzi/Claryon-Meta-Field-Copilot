@@ -188,6 +188,30 @@ object SaidaUnica {
         }
     }
 
+    /**
+     * **Aquece o TTS antes de o agente falar.**
+     *
+     * Medido: a primeira resposta falada pagava ~1,2 s de construção do motor
+     * neural dentro da meta de 2000 ms, e o número só apareceu quando a telemetria
+     * do bench foi ligada a esta classe (ver `CicloDeVozNoAparelhoTest`).
+     *
+     * Idempotente e suspensa: chame de um escopo, não da Main. Segura o mesmo
+     * mutex de [sintetizar], então uma síntese que chegue no meio do aquecimento
+     * espera em vez de construir um segundo motor.
+     */
+    suspend fun aquecer(context: Context) {
+        val app = context.applicationContext as Application
+        mutexDoTts.withLock {
+            if (piperResolvido) return@withLock
+            piper = Modelos.piper(app)
+            piperResolvido = true
+            Log.i(TAG, "TTS aquecido = ${if (piper != null) "Piper (neural)" else "AndroidTts (fallback)"}")
+        }
+        // O `Modelos.piper` já constrói o `OfflineTts`; `aquecer()` confirma que o
+        // nativo subiu, para o log não prometer um motor que vai falhar na 1ª fala.
+        piper?.aquecer()
+    }
+
     private suspend fun sintetizar(app: Application, fallback: TtsEngine, texto: String): PcmAudio? {
         val engine: TtsEngine = mutexDoTts.withLock {
             if (!piperResolvido) {

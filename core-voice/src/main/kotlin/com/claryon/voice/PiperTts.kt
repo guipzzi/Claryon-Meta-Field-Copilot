@@ -109,6 +109,24 @@ class PiperTts(
 
     override suspend fun isAvailable(): Boolean = engine() != null
 
+    /**
+     * **Constrói o motor nativo agora, fora do caminho crítico.**
+     *
+     * Medido no aparelho em 2026-08-17: a parcela "síntese TTS + rota + fila" do
+     * ciclo de voz custou **1218 ms** — mais que o whisper inteiro (1021 ms) — e a
+     * maior parte disso é a PRIMEIRA construção do `OfflineTts`, que carrega o
+     * modelo VITS de ~19 MB e o `espeak-ng-data`. O agente pagava isso na primeira
+     * resposta falada, dentro da meta de 2000 ms.
+     *
+     * É o mesmo padrão que `CodecDeVoz.preparar()` já faz para o Opus (o
+     * `MediaCodec` era criado na primeira codificação, dentro do caminho do PTT) e
+     * que `EscutaDoAgente` faz para o Whisper. Aqui só faltava alguém chamar.
+     *
+     * Devolve `true` se o motor está de pé. Falha não lança: quem chama já degrada
+     * para o `AndroidTts`.
+     */
+    suspend fun aquecer(): Boolean = engine() != null
+
     override suspend fun synthesize(text: String): Result<PcmAudio> = withContext(Dispatchers.Default) {
         val engine = engine()
             ?: return@withContext Result.failure(

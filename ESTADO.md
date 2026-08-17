@@ -1,23 +1,27 @@
-# Onde estamos — 2026-08-17 · Fase 2 · o STT é o gargalo, e agora está medido
+# Onde estamos — 2026-08-17 · Fase 2 · latência resolvida, acerto é o gargalo
 
 **Reescrito ao fim de cada sessão, nunca acrescentado. Teto duro: 60 linhas.** O que não
 couber é história e vai para `DECISIONS.md`. Aqui só o que muda a próxima decisão.
 
 ## O que funciona hoje
 
-- `./gradlew build` verde. **640 testes JVM, 0 falhas.** Instrumentados: 1 falha conhecida
-  (item 1); o bench de STT reprova de propósito (item 2).
-- **PTT ponta a ponta:** toque→1º quadro **31–48 ms** (meta 120) · 50 msg/s → ~17 ·
-  `transmit`/`ack` deployadas, fio do canal populado.
-- **Fonte única de microfone** com fan-out e **dono único de saída**. P1 corta a fala do
-  copiloto em **11 ms** (aceite ≤200) — era 286 ms, dos quais 204 eram desmonte de rota SCO
-  dentro do caminho crítico; `RotaSustentada` mantém a rota pela rajada de fala.
+- `./gradlew build` verde. **648 testes JVM, 0 falhas** · 17 instrumentados OK. O bench de
+  STT reprova de propósito (item 2).
+- **A crise de latência era uma flag de build.** O `CMakeLists` só aplicava `-O3` fora do
+  Debug, e os testes instrumentados rodam no Debug: o ggml compilava sem otimização e com
+  asserções ativas. **STT de 42 s → 1,0–1,5 s.** Os alvos do ggml são **três** e só
+  `ggml-cpu` tem os kernels — achado pelo `compile_commands.json`.
+- **As duas metas do ciclo têm amostra**, e a decomposição achou custo escondido: earcon
+  **606 ms** (meta 500) · resposta **2014 ms** (meta 2000) · whisper 1021–1461 · ação ~1 ·
+  **TTS + rota + fila 552 ms**, que era **1218** antes de aquecer o Piper.
+- **PTT:** toque→1º quadro **31–48 ms** (meta 120) · 50 msg/s → ~17 · fio do canal populado.
+- **Fonte única de microfone** e **dono único de saída**. P1 corta a fala do copiloto em
+  **11 ms** (aceite ≤200); `RotaSustentada` mantém a rota SCO pela rajada de fala.
 - **VAD Silero** (629 KB) no lugar do RMS: silêncio → 0, senoide **alta** → 0, fala → 98%.
 - **Troca de grupo por voz ligada**, chamador verificado por `grep` elo por elo:
   `VoiceCycle:92` → executor → `CanaisDoAgente` → `RadioTatico:303`. Sem casamento
   aproximado (proibição de spec), recusa que não revela existência de grupo (13 testes).
-- **Régua de WER** (`Wer.kt`, 10 testes): `(S+D+I)/N` com N da referência, então alucinação
-  passa de 100%; corpus agrega `ΣE/ΣN`. **Verificador da corrente** de ponta a ponta.
+- **Régua de WER** (`Wer.kt`, 10 testes) e **verificador da corrente** de ponta a ponta.
 
 ## O que está quebrado, e nós sabemos
 
@@ -34,21 +38,20 @@ couber é história e vai para `DECISIONS.md`. Aqui só o que muda a próxima de
    **Ver [`specs/stt-portugues.spec.md`](specs/stt-portugues.spec.md) — há decisão de licença
    que é humana:** o modelo que resolve (NeMo FastConformer pt do sherpa, "guarnição" 4/4 e
    texto idêntico a 8 e 16 kHz) é **CC BY-NC 4.0, não comercial**.
-3. **Latência de STT: o emulador não serve para concluir nada.** `audio_ctx` dimensionado
-   pela fala levou o `tiny` de 48 s a 14,9 s (o Whisper roda 30 s de encoder mesmo para 2 s
-   de áudio). Mas o `base` mediu **9 s a 176 s para trabalho equivalente** — variação de 19×,
-   que é contenção de emulador, não sinal. Meta do ciclo: 2 000 ms. **Só arm64 real responde.**
-4. **A banda de 8 kHz NÃO é a causa** — refutada por medição publicada (1,2× de WER, não 3×).
-   Não construir *bandwidth extension*: no mesmo experimento ela piorou o resultado.
+3. **A meta de earcon (≤500 ms) é inalcançável por construção.** Medido 606 ms, dos quais
+   **600 são o hangover do Silero** (`minSilenceDuration`) — o caminho do earcon custa ~6 ms.
+   Ou a meta muda, ou o hangover cai. Reduzi-lo corta fala em pausa intra-frase: é decisão de
+   produto, não de código. `audio_ctx` dimensionado pela fala segue valendo.
+4. **A banda de 8 kHz NÃO é a causa** — refutada (1,2× de WER, não 3×). Não construir
+   *bandwidth extension*: no mesmo experimento publicado ela piorou.
 5. **A palavra de ativação não sobrevive à ORTOGRAFIA, e o portão dela não existe.** O STT
    escreve **"Clarion"** (3/8), "varion" (1/8) ou **omite** (2/8) — e "Clarion" não é erro de
    som: "Claryon" com "y" não é padrão grafêmico do português. Comparação exata reprovaria
    escuta correta. Saídas na spec do gatilho; as 2 omissões nenhuma lista resolve.
 6. **`fim da fala → earcon` e `→ resposta falada` seguem sem amostra.** Os marcos saem de
    `SaidaUnica` e o bench usa telemetria própria — instrumento existe, não está ligado ali.
-7. `Stream.errorStream` nunca é coletado (perdemos `HINGE_CLOSED`, `THERMAL_HOT`,
-   `BATTERY_LOW`); `STOPPED` não é terminal; a permissão de câmera do DAT nunca é pedida.
-8. Transcrição na origem (P1) não existe. `WakeWordDetector` é interface sem implementação.
+7. `Stream.errorStream` nunca coletado; `STOPPED` não é terminal; permissão de câmera do DAT
+   nunca é pedida. Transcrição na origem (P1) não existe. `WakeWordDetector` sem implementação.
 
 ## O que vem a seguir
 

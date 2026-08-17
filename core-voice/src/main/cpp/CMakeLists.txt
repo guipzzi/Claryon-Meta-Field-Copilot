@@ -46,8 +46,28 @@ function(build_library target_name)
         set(GGML_COMPILE_OPTIONS                      -mfpu=neon-vfpv4)
     endif ()
 
+    # ── Otimizacao SEMPRE, inclusive no Debug ─────────────────────────────────
+    #
+    # **Isto era um defeito de medicao, e ele invalidou uma sessao inteira de
+    # numeros de latencia.** O bloco original aplicava -O3 apenas quando
+    # CMAKE_BUILD_TYPE != Debug. Como os testes instrumentados rodam na variante
+    # debug, todo o ggml e o whisper.cpp compilavam SEM flag de otimizacao nenhuma
+    # e COM as asercoes ativas.
+    #
+    # Lido de core-voice/.cxx/Debug/*/arm64-v8a/compile_commands.json em
+    # 2026-08-17: '-O' vazio, '-DNDEBUG' ausente. No RelWithDebInfo: '-O3' e
+    # '-DNDEBUG' presentes. Foi assim que "o STT leva 14,9 s" entrou no ESTADO.md
+    # descrevendo codigo que o produto nunca executa.
+    #
+    # Por que otimizar o nativo no debug nao custa nada que importe aqui: o que se
+    # depura neste projeto e Kotlin, e o Kotlin nao e afetado. Ninguem coloca
+    # breakpoint dentro de um kernel de matmul do ggml — e se um dia precisar,
+    # comenta esta linha na hora.
+    #
+    # NDEBUG junto porque as asercoes do ggml rodam DENTRO dos lacos internos.
+    target_compile_options(${target_name} PRIVATE -O3 -DNDEBUG)
+
     if (NOT ${CMAKE_BUILD_TYPE} STREQUAL "Debug")
-        target_compile_options(${target_name} PRIVATE -O3)
         target_compile_options(${target_name} PRIVATE -fvisibility=hidden -fvisibility-inlines-hidden)
         target_compile_options(${target_name} PRIVATE -ffunction-sections -fdata-sections)
         target_link_options(${target_name} PRIVATE -Wl,--gc-sections)
@@ -61,7 +81,27 @@ function(build_library target_name)
         FetchContent_Declare(ggml SOURCE_DIR ${WHISPER_LIB_DIR}/ggml)
     endif()
     FetchContent_MakeAvailable(ggml)
-    target_compile_options(ggml PRIVATE ${GGML_COMPILE_OPTIONS})
+    # ── E os alvos do ggml, que sao TRES e nao um ────────────────────────────
+    #
+    # O `ggml` do FetchContent nao herda nada do alvo do whisper, e — pior — ele
+    # proprio e so a casca: `ggml/src/CMakeLists.txt` cria `ggml-base` (linha 192),
+    # `ggml` (242) e um alvo de backend por `ggml_add_backend_library`, que aqui e
+    # `ggml-cpu`. **Os kernels de matmul quantizado moram em `ggml-cpu`.**
+    #
+    # Verificado na marra: aplicar -O3 so em `ggml` deixou `quants.c`, `ggml-cpu.c`
+    # e `ggml-quants.c` compilando com '-O' VAZIO — exatamente os arquivos que
+    # dominam o tempo de inferencia. O `compile_commands.json` mostrou isso e foi
+    # o unico jeito de descobrir; nenhuma leitura do CMakeLists sugeria.
+    #
+    # `if (TARGET ...)` porque o conjunto de backends depende da configuracao: um
+    # alvo ausente derrubaria o configure inteiro em vez de degradar.
+    foreach (ggml_alvo ggml ggml-base ggml-cpu)
+        if (TARGET ${ggml_alvo})
+            target_compile_options(${ggml_alvo} PRIVATE ${GGML_COMPILE_OPTIONS} -O3 -DNDEBUG)
+        else ()
+            message(WARNING " alvo do ggml ausente, sem otimizacao: ${ggml_alvo}")
+        endif ()
+    endforeach ()
     target_link_libraries(${target_name} ${LOG_LIB} android ggml)
 endfunction()
 
