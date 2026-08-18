@@ -43,6 +43,11 @@
  *
  * `--privado` liga `config.private: true`. Sem política RLS em `realtime.messages`
  * o servidor **recusa** o join — e é assim que se prova que a política existe.
+ *
+ * `--falar [indicativo]` transmite um anúncio e um quadro. Serve para duas coisas:
+ * o aceite pede "B aperta o PTT durante a fala de A", e o **indicativo forjado**
+ * é como se testa se o servidor aceita personificação. Com um indicativo que não
+ * é o do agente autenticado, uma política que inspecione o payload tem de recusar.
  */
 
 const args = process.argv.slice(2);
@@ -59,6 +64,8 @@ const SENHA = process.env.PAR_SENHA;
 const GRUPO = opt('grupo');
 const PRIVADO = flag('privado');
 const SEGUNDOS = Number(opt('segundos', '60'));
+const FALAR = args.includes('--falar');
+const INDICATIVO = opt('falar', 'Bravo Um');
 
 const faltando = Object.entries({ SUPABASE_URL: URL_BASE, SUPABASE_ANON_KEY: ANON, PAR_EMAIL: EMAIL, PAR_SENHA: SENHA })
   .filter(([, v]) => !v)
@@ -171,7 +178,10 @@ ws.addEventListener('open', () => {
     topic: topico(GRUPO),
     event: 'phx_join',
     payload: {
-      config: { broadcast: { ack: false }, private: PRIVADO },
+      // `self` só quando este par também fala: o broadcast do Supabase não ecoa
+      // para o próprio emissor por padrão, e sem eco o teste de personificação
+      // precisaria de dois processos para observar o próprio envio.
+      config: { broadcast: { ack: false, self: FALAR }, private: PRIVADO },
       access_token: token,
     },
     ref: proximo(),
@@ -181,6 +191,26 @@ ws.addEventListener('open', () => {
   setInterval(() => {
     ws.send(JSON.stringify({ topic: 'phoenix', event: 'heartbeat', payload: {}, ref: proximo() }));
   }, 25_000);
+
+  if (FALAR) {
+    // Mesmo envelope do app: broadcast aninhando {type, event, payload}.
+    const tx = 'tx-par-' + INDICATIVO.replace(/\s/g, '');
+    const difundir = (evento, dados) => ws.send(JSON.stringify({
+      topic: topico(GRUPO),
+      event: 'broadcast',
+      payload: { type: 'broadcast', event: evento, payload: dados },
+      ref: proximo(),
+    }));
+    setTimeout(() => {
+      console.log(`  → transmitindo como "${INDICATIVO}"`);
+      difundir('fala.anuncio', { transmissaoId: tx, indicativo: INDICATIVO, prioridade: 'P2_APOIO' });
+      difundir('fala.quadro', {
+        transmissaoId: tx, seq: 1, t: 0,
+        opus: Buffer.alloc(40).toString('base64'), ultimo: true,
+      });
+      difundir('fala.fim', { transmissaoId: tx });
+    }, 2_000);
+  }
 });
 
 ws.addEventListener('message', (e) => classificar(e.data));

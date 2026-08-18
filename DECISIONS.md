@@ -1573,3 +1573,23 @@ de memória, que é como este projeto já errou com `pedir_piso`.
   | **público**, agente não é membro | `status=ok` |
 
   A terceira é o defeito de produção, demonstrado em vez de argumentado.
+
+- **A política de `realtime.messages` NÃO enxerga o payload do broadcast — medido, não
+  suposto.** O item do indicativo derivado do JWT começou pela hipótese óbvia: se a
+  coluna `payload` existe (e existe, `jsonb`), a política de INSERT poderia recusar um
+  anúncio cujo indicativo não fosse o do agente autenticado. **Falso.** Acrescentar
+  `and realtime.messages.payload is not null` ao `with check` fez **todo** broadcast
+  parar; com a cláusula removida, voltou a passar. O payload chega **nulo** na checagem.
+
+  Consequência de desenho: **o servidor não tem como recusar anúncio forjado.** A
+  autoria confiável só pode vir de (a) resolução local contra um cadastro que a RLS já
+  filtrou, ou (b) mediação por função de servidor, que põe uma ida e volta no caminho
+  crítico do anúncio — e o anúncio precisa sair antes do áudio.
+
+  A sonda foi feita com `--falar` no par headless, com eco (`broadcast.self`), porque o
+  Supabase não devolve broadcast ao próprio emissor por padrão. A política foi
+  restaurada e o envio reconferido antes de qualquer outra coisa.
+
+  Nota: o **histórico** já é confiável por outro caminho — `transmissions` tem
+  `with check (false)` para INSERT direto (`0002_rls.sql`) e é escrito pela Edge
+  Function `transmit`, que deriva o autor da sessão. O problema é só o anúncio ao vivo.
