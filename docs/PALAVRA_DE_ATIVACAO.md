@@ -119,6 +119,70 @@ classificador achou o atalho antes de olhar para a palavra. A correção foi rec
 todo clipe em exatamente 1,0 s centrado na energia e manter só `Claryon.` isolado
 como positivo. Os números acima são os de depois.
 
+## Voz humana, 17/08 — e a reversão da minha própria recomendação
+
+Chegaram gravações de quatro pessoas (Guido, Carla, Bruna, Pedro). Segmentadas por
+energia: **31 elocuções de "Claryon"**, das quais **27 são de um único locutor**, mais
+11 de `"na escuta"` como controle. É pouco, e o desequilíbrio impede o protocolo de
+deixar-um-locutor-de-fora em forma plena. Mas dá para responder as duas perguntas que
+decidem, e as respostas se contradizem de um jeito útil.
+
+### 1. Um detector treinado só com Piper dispara em gente? **Não.**
+
+| | escore médio |
+|---|---|
+| 31 positivos **humanos** | **0,03** |
+| 11 controles humanos | 0,00 |
+
+Um clipe em 31 passou de 0,5. Em qualquer limiar operacional o detector fica mudo.
+
+E aqui um número quase me enganou, registrado porque é do tipo que mente: a rotina
+imprimiu *"recall com zero falso positivo: 58,1%"*. Como os controles marcaram
+exatamente `0,000`, qualquer positivo com escore `0,0001` "passava". Era estatística
+de **ranking**, não de detecção. O que vale é a média de 0,03.
+
+### 2. O embedding representa a palavra em voz humana? **Sim, e generaliza.**
+
+Treino **só com o Guido** (27 positivos, 3 negativos), teste em três locutores que o
+treino nunca viu:
+
+| clipe | escore |
+|---|---|
+| Carla | **0,963** |
+| Pedro | **0,996** |
+| Bruna | **0,999** |
+| Bruna (segmento parcial) | 0,325 |
+| 8 controles `na escuta` | ≤ **0,216** |
+
+Separação limpa com **um** locutor no treino. O embedding transfere para o português
+**e** entre pessoas — o que o teste com Piper não conseguia mostrar porque estava
+medindo outra coisa.
+
+### 3. O sintético ajuda como reforço? **Não: ele destrói.**
+
+Mesmo teste, variando só o que entra no treino:
+
+| treino | margem (pior positivo − pior negativo) |
+|---|---|
+| só Guido, humano | **+0,109 · separa** |
+| só Piper | −0,001 · não separa |
+| Guido **+** Piper | −0,020 · **não separa** |
+| Guido + só os negativos do Piper | −0,052 · **não separa** |
+
+Acrescentar Piper a dados humanos que funcionavam **quebra** o que funcionava. A voz
+sintética ocupa uma região do espaço de embedding distante da voz real, e a fronteira
+aprendida lá não vale aqui.
+
+### A recomendação anterior está revertida
+
+Em 17/08 eu escrevi, acima nesta mesma página, que a via era *"gerar milhares de
+rendições com o Piper"*. **A medição derrubou isso.** O corpus sintético serviu para
+provar que o embedding transfere para o português, e esse trabalho valeu; como dado
+de treino ele é inútil no melhor caso e nocivo no caso medido.
+
+O que decide agora é **gravação de pessoas**, e a boa notícia é a barra: 27 clipes de
+um locutor já generalizaram para três inéditos acima de 0,96.
+
 ## O que ainda não foi medido, e sem o que nada disso vira aceite
 
 - **Fala humana real.** Tudo acima é Piper: um detector treinado no Piper e avaliado
