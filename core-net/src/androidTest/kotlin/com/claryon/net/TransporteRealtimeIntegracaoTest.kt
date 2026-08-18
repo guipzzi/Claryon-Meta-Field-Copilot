@@ -2,6 +2,13 @@ package com.claryon.net
 
 import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
+import org.junit.Assert.assertNull
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -137,4 +144,133 @@ class TransporteRealtimeIntegracaoTest {
         assertNotNull("o anúncio de fala não chegou", evento)
         assertEquals(PrioridadeTransmissao.P1_EMERGENCIA, evento!!.anuncio.prioridade)
     }
+    // ── Canal privado ────────────────────────────────────────────────────────
+
+    /**
+     * Credenciais por argumento de instrumentação, nunca versionadas:
+     *
+     * ```
+     * -e par_email guido@... -e par_senha ... -e par_grupo <uuid>
+     * ```
+     *
+     * Sem elas o teste **pula**. Quem clona o repositório não herda bancada
+     * quebrada, e senha de teste não entra em arquivo.
+     */
+    private fun arg(nome: String): String? =
+        InstrumentationRegistry.getArguments().getString(nome)?.takeIf { it.isNotBlank() }
+
+    /** Token do agente, pelo mesmo endpoint que o app usa. */
+    private fun autenticar(email: String, senha: String): String? = runCatching {
+        val corpo = JSONObject().put("email", email).put("password", senha).toString()
+        val req = Request.Builder()
+            .url("${config.projetoUrl.trimEnd('/')}/auth/v1/token?grant_type=password")
+            .addHeader("apikey", config.apiKey)
+            .post(corpo.toRequestBody("application/json".toMediaType()))
+            .build()
+        OkHttpClient().newCall(req).execute().use { r ->
+            JSONObject(r.body?.string().orEmpty()).optString("access_token").takeIf { it.isNotEmpty() }
+        }
+    }.getOrNull()
+
+    private fun configPrivada(token: String) = ConfigRealtime(
+        projetoUrl = BuildConfig.SUPABASE_URL,
+        apiKey = BuildConfig.SUPABASE_ANON_KEY,
+        tokenDoAgente = { token },
+        privado = true,
+    )
+
+    /**
+     * **O app entra no canal privado e o áudio atravessa.**
+     *
+     * A asserção NÃO pode ser `conectado()`: esse campo vira `true` no `onOpen`,
+     * **antes** da resposta do `phx_join`, e o join é justamente o que a RLS
+     * julga. Um teste sobre `conectado()` passaria com a política recusando tudo
+     * — mediria o socket TCP, não a autorização.
+     *
+     * O que prova é o quadro chegar do outro lado. Se a política da migração
+     * `0012` recusar o join, nenhum byte cruza e este teste falha.
+     */
+    @Test
+    fun canalPrivado_oQuadroAtravessaEntreDoisClientes(): Unit = runBlocking {
+        exigeCredenciais()
+        val email = arg("par_email")
+        val senha = arg("par_senha")
+        val grupo = arg("par_grupo")
+        Assume.assumeTrue(
+            "sem -e par_email/-e par_senha/-e par_grupo — teste de canal privado pulado",
+            email != null && senha != null && grupo != null,
+        )
+        val token = autenticar(email!!, senha!!)
+        Assume.assumeTrue("login falhou para $email", token != null)
+
+        val cfg = configPrivada(token!!)
+        val rx = TransporteRealtime(cfg, escopo).also { receptor = it }
+        val tx = TransporteRealtime(cfg, escopo).also { emissor = it }
+        rx.conectar(grupo!!)
+        tx.conectar(grupo)
+        assertTrue("receptor não abriu socket", esperarConexao(rx))
+        assertTrue("emissor não abriu socket", esperarConexao(tx))
+        delay(2_000) // o join é assíncrono depois do socket
+
+        val payload = ByteArray(90) { (it * 5 - 128).toByte() }
+        val enviado = QuadroAudio("tx-privado", sequencia = 11, capturadoEmMs = 4321, payload = payload)
+        val aguardando = async {
+            withTimeoutOrNull(10_000) {
+                rx.eventos().first { it is EventoDeRede.Quadro } as EventoDeRede.Quadro
+            }
+        }
+        delay(300)
+        tx.enviar(enviado)
+
+        val recebido = aguardando.await()
+        assertNotNull(
+            "nada atravessou o canal PRIVADO em 10 s: ou o join foi recusado pela " +
+                "política 0012, ou o access_token não chegou ao servidor",
+            recebido,
+        )
+        assertTrue("payload corrompido", payload.contentEquals(recebido!!.quadro.payload))
+        Log.i("ClaryonField", "Canal privado: quadro atravessou com JWT e RLS de pé")
+    }
+
+    /**
+     * **O contra-teste, e é ele que dá sentido ao de cima.**
+     *
+     * Mesmo token, grupo de que o agente **não** é membro. Se um quadro atravessar
+     * aqui, a política não está sendo consultada e o teste anterior estava
+     * medindo o nada — foi por isso que o `status=ok` sozinho não bastou quando
+     * verifiquei pelo par headless.
+     */
+    @Test
+    fun canalPrivado_grupoAlheio_naoDeixaNadaPassar(): Unit = runBlocking {
+        exigeCredenciais()
+        val email = arg("par_email")
+        val senha = arg("par_senha")
+        Assume.assumeTrue("sem credenciais de par", email != null && senha != null)
+        val token = autenticar(email!!, senha!!)
+        Assume.assumeTrue("login falhou", token != null)
+
+        val alheio = "99999999-0000-0000-0000-000000000009"
+        val cfg = configPrivada(token!!)
+        val rx = TransporteRealtime(cfg, escopo).also { receptor = it }
+        val tx = TransporteRealtime(cfg, escopo).also { emissor = it }
+        rx.conectar(alheio)
+        tx.conectar(alheio)
+        delay(3_000)
+
+        val aguardando = async {
+            withTimeoutOrNull(6_000) {
+                rx.eventos().first { it is EventoDeRede.Quadro }
+            }
+        }
+        delay(300)
+        tx.enviar(QuadroAudio("tx-alheio", 1, 0, ByteArray(40)))
+
+        assertNull(
+            "um quadro atravessou um grupo de que o agente NÃO é membro: a política " +
+                "0012 não está sendo consultada, e o canal privado é decorativo",
+            aguardando.await(),
+        )
+        Log.i("ClaryonField", "Canal privado: grupo alheio bloqueado, como a política manda")
+    }
+
 }

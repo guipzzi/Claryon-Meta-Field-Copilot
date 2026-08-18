@@ -74,9 +74,27 @@ class TransporteRealtime(
 
     @Volatile private var socket: WebSocket? = null
     @Volatile private var talkGroup: String? = null
+    /** O socket TCP subiu. **Não** significa que há canal. */
     @Volatile private var aberto = false
 
-    override fun conectado(): Boolean = aberto
+    /**
+     * O servidor aceitou o `phx_join`. É este que significa "há rádio".
+     *
+     * Separado de [aberto] depois de 18/08: com o canal privado ligado e sem
+     * sessão, o app mostrou indicador verde, aceitou o PTT e mandou **168 quadros
+     * em 4 s** para um canal em que não tinha entrado — o par headless, membro
+     * legítimo do mesmo grupo, recebeu zero. O socket abre sempre; quem a política
+     * de linha julga é o **join**, e ele responde depois. Um booleano só para as
+     * duas coisas é uma mentira estrutural, não um descuido de nomeação.
+     */
+    @Volatile private var autorizado = false
+
+    /** Última recusa do servidor, para a tela poder explicar ao agente. */
+    @Volatile
+    override var motivoDaRecusa: String? = null
+        private set
+
+    override fun conectado(): Boolean = aberto && autorizado
 
     override fun eventos(): Flow<EventoDeRede> = _eventos.asSharedFlow()
 
@@ -116,6 +134,10 @@ class TransporteRealtime(
                 override fun onOpen(webSocket: WebSocket, response: Response) {
                     val ws = webSocket
                     aberto = true
+                    // Socket novo, canal ainda não julgado. Herdar o `autorizado`
+                    // da conexão anterior daria uma janela em que o app se acha
+                    // no ar antes de o servidor responder ao join.
+                    autorizado = false
                     reconexao.aoConectar()
                     // O token é obtido em corrotina: `onOpen` não é contexto de
                     // suspensão e buscá-lo aqui bloquearia a linha do OkHttp.
@@ -133,16 +155,35 @@ class TransporteRealtime(
                     // não pode derrubar o canal de voz inteiro.
                     // `interpretar` devolve LISTA: uma mensagem agrupada vira N
                     // eventos de quadro. Ver `ProtocoloRealtime.quadros`.
-                    for (e in ProtocoloRealtime.interpretar(text)) _eventos.tryEmit(e)
+                    for (e in ProtocoloRealtime.interpretar(text)) {
+                        when (e) {
+                            is EventoDeRede.CanalPronto -> {
+                                autorizado = true
+                                motivoDaRecusa = null
+                            }
+                            is EventoDeRede.CanalRecusado -> {
+                                // Não reconecta: recusa é decisão do servidor, e
+                                // insistir viraria laço batendo numa porta que
+                                // continuará fechada até a credencial mudar.
+                                autorizado = false
+                                motivoDaRecusa = e.motivo
+                                Log.w(TAG, "canal RECUSADO: ${e.motivo}")
+                            }
+                            else -> Unit
+                        }
+                        _eventos.tryEmit(e)
+                    }
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                    autorizado = false
                     aberto = false
                     Log.w(TAG, "canal caiu: ${t.message}")
                     escopo.launch { reagendar() }
                 }
 
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                    autorizado = false
                     aberto = false
                     escopo.launch { reagendar() }
                 }
@@ -236,6 +277,17 @@ class TransporteRealtime(
         val tg = talkGroup
         if (ws == null || tg == null || !aberto) {
             return Result.failure(ClaryonError.Sync("net.desconectado", "canal fechado"))
+        }
+        // Socket aberto sem join aceito é o caso que mandou 168 quadros para o
+        // vazio. Falhar aqui faz a `SessaoPtt` contar o não entregue e a tela
+        // saber; deixar passar faz o agente achar que falou.
+        if (!autorizado) {
+            return Result.failure(
+                ClaryonError.Sync(
+                    "net.nao_autorizado",
+                    motivoDaRecusa ?: "o servidor ainda não aceitou a entrada no canal",
+                ),
+            )
         }
         // `send` devolve false quando a fila de saída estouraria. Reportar em vez
         // de bloquear: a sessão de PTT conta o não entregue e a captura segue.

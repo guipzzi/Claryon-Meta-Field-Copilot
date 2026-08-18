@@ -93,6 +93,33 @@ sealed interface EventoDeRede {
      * emissor morreu). Sem isto, o receptor esperaria indefinidamente.
      */
     data class FimDeTransmissao(val transmissaoId: String) : EventoDeRede
+
+    /**
+     * O servidor **aceitou** a entrada no canal (`phx_reply` com `status = ok`).
+     *
+     * Distinto de "o socket abriu": o socket TCP sobe antes de qualquer
+     * autorização, e é o `phx_join` que a política de linha julga. Só depois
+     * deste evento existe canal de verdade.
+     */
+    data object CanalPronto : EventoDeRede
+
+    /**
+     * O servidor **recusou** a entrada no canal.
+     *
+     * Existe porque a ausência dele custou caro: em 18/08, com o canal privado
+     * ligado e sem sessão, o app entrou na tela do rádio com indicador verde,
+     * aceitou o PTT e mandou **168 quadros em 4 s para um canal em que não
+     * entrou**. O par headless, membro legítimo do mesmo grupo, recebeu zero.
+     *
+     * A recusa chegava e era descartada: `interpretar` procurava `payload.payload`
+     * e o `phx_reply` não tem esse nível, então caía no `return emptyList()`.
+     * Silêncio na camada de protocolo virou mentira na tela — e, em campo, seria
+     * um agente apertando o botão numa ocorrência sem ninguém do outro lado.
+     *
+     * Cobre também token expirado, agente removido do grupo e `ativo = false`,
+     * que falhariam exatamente do mesmo jeito.
+     */
+    data class CanalRecusado(val motivo: String) : EventoDeRede
 }
 
 /**
@@ -132,8 +159,23 @@ interface TransporteAoVivo {
     /** Fluxo de eventos recebidos do talk group. */
     fun eventos(): Flow<EventoDeRede>
 
-    /** `true` enquanto o socket está de fato aberto (para o indicador de degradação). */
+    /**
+     * `true` quando há **canal**: socket aberto **e** entrada aceita pelo servidor.
+     *
+     * A distinção não é preciosismo. Até 18/08 isto devolvia só "o socket abriu",
+     * e com o canal privado ligado o app mostrou verde, aceitou o PTT e mandou 168
+     * quadros para um canal em que não tinha entrado.
+     */
     fun conectado(): Boolean
+
+    /**
+     * Por que o canal foi recusado, quando foi — `null` se o problema é rede.
+     *
+     * Existe para a tela não mentir de um jeito novo: dizer "sem dados" quando a
+     * causa é credencial manda o agente conferir o sinal em vez do login, e ele
+     * perde a ocorrência procurando torre.
+     */
+    val motivoDaRecusa: String? get() = null
 
     suspend fun desconectar()
 }

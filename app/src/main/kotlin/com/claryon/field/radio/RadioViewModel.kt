@@ -367,7 +367,13 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
                 _estado.value = if (conectado) {
                     EstadoDoPtt.Pronto(canal)
                 } else {
-                    EstadoDoPtt.Indisponivel("Sem dados. O canal depende da rede.")
+                    // A causa muda o que o agente faz: rede se resolve andando,
+                    // credencial se resolve entrando. Dizer "sem dados" quando é
+                    // autorização manda ele procurar torre pelo motivo errado.
+                    EstadoDoPtt.Indisponivel(
+                        transporte.motivoDaRecusa?.let { "Canal negado. $it" }
+                            ?: "Sem dados. O canal depende da rede.",
+                    )
                 }
             }
             delay(INTERVALO_DA_VIGIA_MS)
@@ -466,7 +472,10 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
         _estado.value = if (transporteAtual?.conectado() == true) {
             EstadoDoPtt.Pronto(canalAtual())
         } else {
-            EstadoDoPtt.Indisponivel("Sem dados. O canal depende da rede.")
+            EstadoDoPtt.Indisponivel(
+                transporteAtual?.motivoDaRecusa?.let { "Canal negado. $it" }
+                    ?: "Sem dados. O canal depende da rede.",
+            )
         }
     }
 

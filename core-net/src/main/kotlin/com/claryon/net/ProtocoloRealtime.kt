@@ -173,6 +173,32 @@ object ProtocoloRealtime {
         val raiz = JSONObject(texto)
         val payload = raiz.optJSONObject("payload") ?: return emptyList()
         val evento = payload.optString("event").ifEmpty { raiz.optString("event") }
+
+        // A resposta do `phx_join` vem ANTES do descarte abaixo, e tem de vir:
+        // ela traz `{status, response}` e **não** um `payload` aninhado, então
+        // caía no `return emptyList()` e a recusa do canal sumia em silêncio.
+        // Ver `EventoDeRede.CanalRecusado` para o que isso custou.
+        if (raiz.optString("event") == "phx_reply") {
+            val status = payload.optString("status")
+            return if (status == "ok") {
+                listOf(EventoDeRede.CanalPronto)
+            } else {
+                val motivo = payload.optJSONObject("response")?.optString("reason")
+                    ?.takeIf { it.isNotBlank() }
+                    ?: "o servidor recusou a entrada no canal (status=$status)"
+                listOf(EventoDeRede.CanalRecusado(motivo))
+            }
+        }
+        // O servidor também derruba canal por evento `system` — token vencido é o
+        // caso operacional, e ele chega assim, não como `phx_reply`.
+        if (raiz.optString("event") == "system" && payload.optString("status") == "error") {
+            return listOf(
+                EventoDeRede.CanalRecusado(
+                    payload.optString("message").ifBlank { "o canal foi encerrado pelo servidor" },
+                ),
+            )
+        }
+
         val dados = payload.optJSONObject("payload") ?: return emptyList()
 
         when (evento) {

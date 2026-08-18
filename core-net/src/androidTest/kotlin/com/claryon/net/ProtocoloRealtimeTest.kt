@@ -133,6 +133,55 @@ class ProtocoloRealtimeTest {
         assertEquals("jwt.novo", envelope.getJSONObject("payload").getString("access_token"))
     }
 
+    // ── Recusa de canal ─────────────────────────────────────────────────────
+
+    /**
+     * **O teste que existiria e teria evitado 168 quadros no vazio.**
+     *
+     * O envelope abaixo é o que o servidor devolveu de verdade quando o par
+     * headless tentou entrar num grupo alheio, copiado do log — não inventado.
+     * `interpretar` procurava `payload.payload`, que o `phx_reply` não tem, e
+     * devolvia lista vazia: a recusa era descartada na camada de protocolo e o
+     * app seguia achando que tinha canal.
+     */
+    @Test
+    fun aRecusaDoJoinViraEventoEmVezDeSumir() {
+        val recusa = """
+            {"event":"phx_reply","topic":"realtime:tg-999","ref":"1","payload":{
+              "status":"error",
+              "response":{"reason":"Unauthorized: You do not have permissions to read from this Channel topic: tg-999"}
+            }}
+        """.trimIndent()
+
+        val eventos = ProtocoloRealtime.interpretar(recusa)
+        assertEquals(1, eventos.size)
+        val e = eventos.single()
+        assertTrue("a recusa não virou CanalRecusado", e is EventoDeRede.CanalRecusado)
+        assertTrue(
+            "o motivo do servidor foi perdido — a tela não teria o que dizer",
+            (e as EventoDeRede.CanalRecusado).motivo.contains("Unauthorized"),
+        )
+    }
+
+    /** Aceite também é evento: é ele que autoriza o transporte a deixar transmitir. */
+    @Test
+    fun oAceiteDoJoinViraCanalPronto() {
+        val ok = """{"event":"phx_reply","topic":"realtime:tg-1","ref":"1","payload":{"status":"ok","response":{}}}"""
+        assertEquals(listOf(EventoDeRede.CanalPronto), ProtocoloRealtime.interpretar(ok))
+    }
+
+    /**
+     * Token vencido não chega como `phx_reply` — chega como `system`. Sem este
+     * ramo, a queda por expiração falharia do mesmo jeito silencioso de antes.
+     */
+    @Test
+    fun oErroDeSistemaTambemDerrubaOCanal() {
+        val sys = """{"event":"system","topic":"realtime:tg-1","payload":{"status":"error","message":"token has expired"}}"""
+        val e = ProtocoloRealtime.interpretar(sys).single()
+        assertTrue(e is EventoDeRede.CanalRecusado)
+        assertTrue((e as EventoDeRede.CanalRecusado).motivo.contains("expired"))
+    }
+
     private fun envelopar(enviado: String): String {
         val original = JSONObject(enviado)
         return JSONObject()

@@ -98,6 +98,16 @@ class Receptor(
                     }
 
                     is EventoDeRede.FimDeTransmissao -> Unit // o quadro `ultimo` encerra
+
+                    // Estado de canal não é assunto do receptor: quem decide o
+                    // que fazer com autorização negada é o transporte, e quem
+                    // mostra é a tela. Enumerados de propósito em vez de um
+                    // `else` — `else` engoliria em silêncio o próximo evento que
+                    // alguém acrescentar, que é exatamente o defeito que a
+                    // `CanalRecusado` existe para consertar.
+                    EventoDeRede.CanalPronto,
+                    is EventoDeRede.CanalRecusado,
+                    -> Unit
                 }
             }
         }
