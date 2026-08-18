@@ -9,8 +9,64 @@ O emulador não tem rádio Bluetooth. A parcela de latência da saída de áudio
 hardware e firmware: nenhum software os reproduz. O MockDeviceKit também **não
 simula áudio**.
 
-**Estado:** aguardando celular Android (previsto para 15/08/2026) e fone
-Bluetooth com HFP.
+**Estado (18/08):** celular Android disponível. **Falta um dispositivo HFP** — fone
+Bluetooth com microfone ou os próprios óculos. É o que trava três cláusulas do
+aceite da Fase 2; ver a seção logo abaixo.
+
+---
+
+## FASE 2 — as três cláusulas que só fecham com hardware
+
+O aceite da Fase 2 tem oito afirmações. Cinco são código e estão comigo. **Três
+dependem de um dispositivo HFP**, e é isto que falta para a fase fechar:
+
+| cláusula do aceite | o que ela exige |
+|---|---|
+| *"fone HFP no ouvido, nenhum toque na tela"* | qualquer dispositivo SCO |
+| *"30 pronúncias reais gravadas **por HFP** dão recall ≥ 90%"* | ~10 min gravando |
+| *"8 h de rádio ambiente não abrem canal nenhuma vez"* | 8 h de aparelho parado |
+
+Mais uma quarta, que **não** precisa de fone: *"transmissão que um segundo ouvinte
+recebe"*. Pelo precedente D7 ela fecha com sessão headless — é código meu.
+
+### Por que o microfone do celular não serve no lugar
+
+As 27 gravações que existem hoje são do microfone do celular a 48 kHz. O HFP é
+outro caminho: **codec CVSD a 8 kHz**, com quantização própria, microfone dos
+óculos e AGC no *uplink*. O que as bancadas chamam de "banda estreita" corta a
+banda e **não** simula o codec — está declarado no código, não é descuido.
+
+Este projeto já pagou por essa diferença exata: *"foi por medir em banda cheia que
+a análise de 14/08 aprovou 'Claryon' e errou"*. Um recall de 90% no microfone do
+celular não prevê o recall no fone.
+
+### O que fazer, quando houver o dispositivo
+
+**Serve qualquer fone Bluetooth com microfone** — para o Android ele é o mesmo
+`TYPE_BLUETOOTH_SCO` dos óculos (ver a primeira seção). Os óculos são melhores
+porque trazem o beamforming, mas não são pré-requisito.
+
+1. **30 pronúncias, ~10 min.** "Claryon" isolado, com pausa entre cada, variando
+   distância, volume e pressa. Fecha o recall ≥ 90% por HFP.
+2. **8 h de ambiente, ~5 min de preparo.** Rádio, podcast ou TV tocando no cômodo
+   com o aparelho gravando. **É tempo de aparelho parado, não de trabalho.** Fecha
+   a cláusula das 8 h **e** dá o intervalo de confiança que falta ao falso
+   positivo: hoje 1,8 min de leitura retida dão limite superior de ~99 falsos/h, e
+   a meta de 0,5/h precisa da ordem de 6 h com zero disparo.
+3. **A ida e volta completa**, com o aparelho no bolso: "Hey Claryon, guarnição 3
+   na escuta" → earcon → BIP → quadros no ar.
+
+### O que eu entrego antes disso
+
+Tela de captura dentro do app, gravando **pela rota HFP** e nomeando os arquivos no
+formato que o treino já espera. Sem ela a gravação sai pelo microfone do celular e
+não vale para a cláusula — que é precisamente o buraco em que as 27 atuais caíram.
+
+**Enquanto o dispositivo não chega:** o bloco de código da Fase 2 fecha sem ele —
+fiação do detector, `WakeWordDetector` com `PowerPolicy`, gazetteer em produção,
+duas instâncias de Silero, fecho por silêncio e as três marcas p95. A fase fica
+com as três cláusulas marcadas como pendentes de hardware, no mesmo padrão que o
+D7 já estabeleceu para o segundo aparelho na Fase 3.
 
 ---
 
