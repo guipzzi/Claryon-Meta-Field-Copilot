@@ -53,3 +53,12 @@ core-voice/libs/*.aar
 
 # Ambiente local (contém token). O modelo versionado é .envrc.exemplo.
 .envrc
+
+# Gravações de voz de pessoas reais — dado pessoal sensível (LGPD art. 5º, II).
+# Vive fora do repositório, é insumo de treino e não entra em commit por engano.
+# A regra é estrutural de propósito: a proteção não pode depender de quem lembra.
+*.m4a
+*.wav
+!app/src/androidTest/assets/**/*.wav
+corpus/
+audios/
