@@ -11,10 +11,9 @@
   ligada**, sem casamento aproximado, com chamador verificado elo por elo.
 - **STT passa a meta na régua limpa: WER 3,4%, acurácia 96,6%** (meta ≥92%). A latência
   era build, não tecnologia: o `CMakeLists` só aplicava `-O3` fora do Debug — 42 s → centenas de ms.
-- **Earcon 605 → 305 ms**, dentro da meta de 500. Régua de WER (`Wer.kt`) e verificador
-  da corrente de ponta a ponta.
-- **A cauda do comando sai perfeita**: `mudar para a guarnição 4`, `encerrar gravação`,
-  `solicitar reforço`. O que o whisper erra é só o nome inventado.
+- **Earcon 605 → 305 ms** (meta 500) · régua de WER (`Wer.kt`) e verificador da corrente.
+- **A cauda do comando sai perfeita** — `encerrar gravação`, `solicitar reforço`. O whisper
+  erra só o nome inventado, que é a única coisa fora do vocabulário dele.
 
 ## O que está quebrado, e nós sabemos
 
