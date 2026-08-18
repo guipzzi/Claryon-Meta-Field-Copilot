@@ -141,7 +141,18 @@ class SessaoPtt(
         }
 
         aoEvento(EventoPtt.Transmitindo(transmissaoId))
-        transporte.anunciar(AnuncioDeFala(transmissaoId, indicativo, prioridade))
+        // O `agenteId` vai junto e é ele que o receptor resolve: `indicativo` é
+        // string livre e qualquer cliente pode escrever o nome de qualquer pessoa.
+        // Argumentos nomeados de propósito — a assinatura ganhou um campo no meio,
+        // e posicional aqui silenciaria o próximo que ganhar.
+        transporte.anunciar(
+            AnuncioDeFala(
+                transmissaoId = transmissaoId,
+                autorIndicativo = indicativo,
+                autorAgenteId = agenteId,
+                prioridade = prioridade,
+            ),
+        )
 
         var sequencia = 0
         var naoEntregues = 0

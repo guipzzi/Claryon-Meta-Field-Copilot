@@ -47,7 +47,7 @@ class ProtocoloRealtimeTest {
 
     @Test
     fun anuncio_carregaIndicativoEPrioridade() {
-        val a = AnuncioDeFala("tx-1", "Alfa Dois", PrioridadeTransmissao.P1_EMERGENCIA)
+        val a = AnuncioDeFala("tx-1", "Alfa Dois", prioridade = PrioridadeTransmissao.P1_EMERGENCIA)
         val evento = ProtocoloRealtime.interpretar(envelopar(ProtocoloRealtime.anuncio(tg, a, 1))).single()
         assertEquals(EventoDeRede.Anuncio(a), evento)
     }

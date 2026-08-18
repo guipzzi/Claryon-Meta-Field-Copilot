@@ -78,7 +78,25 @@ class QuadroAudio(
  */
 data class AnuncioDeFala(
     val transmissaoId: String,
+    /**
+     * **Não confie nisto para exibir.** É string livre escrita pelo emissor, e
+     * qualquer cliente pode pôr o indicativo de qualquer pessoa. Continua no fio
+     * para diagnóstico e para clientes antigos; quem decide o que aparece na tela
+     * é a resolução de [autorAgenteId] contra o cadastro do grupo.
+     */
     val autorIndicativo: String,
+    /**
+     * O id do agente que transmitiu, resolvido no receptor contra o cadastro que
+     * o servidor filtrou (`public.cadastro_do_grupo`).
+     *
+     * Vazio quando o emissor é de uma versão anterior. Id fora do cadastro **não**
+     * vira nome: a fala é marcada como de origem não confirmada, porque exibir o
+     * indicativo que o próprio forjador escreveu é pior que não exibir nada.
+     *
+     * O servidor não pode fazer essa checagem: medido em 18/08, a política de
+     * `realtime.messages` recebe `payload` nulo. Ver `DECISIONS.md`.
+     */
+    val autorAgenteId: String = "",
     val prioridade: PrioridadeTransmissao,
 )
 

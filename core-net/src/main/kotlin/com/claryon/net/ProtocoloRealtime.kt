@@ -110,6 +110,7 @@ object ProtocoloRealtime {
         JSONObject()
             .put("transmissaoId", a.transmissaoId)
             .put("indicativo", a.autorIndicativo)
+            .put("agenteId", a.autorAgenteId)
             .put("prioridade", a.prioridade.name),
     )
 
@@ -207,6 +208,7 @@ object ProtocoloRealtime {
                 AnuncioDeFala(
                     transmissaoId = dados.getString("transmissaoId"),
                     autorIndicativo = dados.optString("indicativo"),
+                    autorAgenteId = dados.optString("agenteId"),
                     prioridade = runCatching {
                         PrioridadeTransmissao.valueOf(dados.optString("prioridade"))
                     }.getOrDefault(PrioridadeTransmissao.P2_APOIO),

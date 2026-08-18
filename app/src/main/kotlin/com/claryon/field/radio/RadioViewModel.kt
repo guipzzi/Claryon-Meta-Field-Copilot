@@ -108,6 +108,18 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
     /** Quem detém o piso agora. Alimenta `ParPresente.falando`. */
     private val _quemFala = MutableStateFlow<String?>(null)
 
+    /**
+     * `{agentId → indicativo}` do grupo, vindo de `cadastro_do_grupo` — a fonte
+     * contra a qual o autor de uma fala é resolvido.
+     *
+     * `@Volatile` porque é escrito na recarga do canal e lido pelo `RadioTatico`
+     * na chegada de cada anúncio, que vem de outra linha de execução. Vazio
+     * significa "ainda não sei", e o efeito é degradar para origem não confirmada
+     * — nunca cair de volta na string livre do emissor.
+     */
+    @Volatile
+    private var cadastroDoGrupo: Map<String, String> = emptyMap()
+
 
     /**
      * A régua de presença, com `falando` **combinado na exposição**.
@@ -182,6 +194,7 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
                 talkGroupId = canal,
                 agenteId = agenteId,
                 indicativo = indicativo,
+                resolverAutor = { id -> cadastroDoGrupo[id] },
                 transporte = transporte,
                 codec = codec(),
                 // **Derivada do gerente, não constante.** `RadioTatico` tinha
@@ -317,6 +330,11 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
                 )
             } + locaisPendentes
         }
+
+        // O cadastro vem ANTES da lista de presença: é ele que decide se o nome de
+        // quem fala pode aparecer, e chegar atrasado significaria mostrar "origem
+        // não confirmada" para colega legítimo nos primeiros segundos do turno.
+        historico.cadastroDoGrupo(canal).onSuccess { cadastroDoGrupo = it }
 
         historico.membros(canal).onSuccess { lista ->
             _pares.value = lista

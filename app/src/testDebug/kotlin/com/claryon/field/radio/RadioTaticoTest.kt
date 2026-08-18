@@ -140,6 +140,8 @@ class RadioTaticoTest {
         val microfone: MicrofoneFake,
         val supressor: SupressorDeSaidaPropria,
         val emitidos: MutableList<Utterance>,
+        /** Sequência de nomes que a tela recebeu para "quem fala". */
+        val quemFalou: MutableList<String?>,
     )
 
     /**
@@ -155,6 +157,8 @@ class RadioTaticoTest {
         // teste mede o caminho errado — foi o que aconteceu aqui.
         relogio: () -> Long = { currentTime },
         supressor: SupressorDeSaidaPropria = SupressorDeSaidaPropria(),
+        /** Cadastro do grupo. Vazio no padrão: nada resolve, tudo é não confirmado. */
+        cadastro: Map<String, String> = emptyMap(),
         corpo: suspend (Bancada) -> Unit,
     ) {
         val escopo = CoroutineScope(UnconfinedTestDispatcher(testScheduler) + Job())
@@ -162,11 +166,14 @@ class RadioTaticoTest {
         val saida = SaidaFake()
         val microfone = MicrofoneFake(amostrasPorQuadro)
         val emitidos = mutableListOf<Utterance>()
+        val quemFalou = mutableListOf<String?>()
         val radio = RadioTatico(
             escopo = escopo,
             talkGroupId = "gta-3",
             agenteId = "alfa",
             indicativo = "Alfa Um",
+            resolverAutor = { id -> cadastro[id] },
+            aoMudarQuemFala = { quemFalou += it },
             transporte = transporte,
             codec = CodecFake(),
             piso = ClienteDePisoLocal(),
@@ -179,7 +186,7 @@ class RadioTaticoTest {
             supressor = supressor,
         )
         try {
-            corpo(Bancada(radio, transporte, saida, microfone, supressor, emitidos))
+            corpo(Bancada(radio, transporte, saida, microfone, supressor, emitidos, quemFalou))
         } finally {
             escopo.cancel()
         }
@@ -275,7 +282,7 @@ class RadioTaticoTest {
             advanceTimeBy(50)
 
             c.transporte.entrada.emit(
-                EventoDeRede.Anuncio(AnuncioDeFala("tx1", "Bravo", PrioridadeTransmissao.P2_APOIO)),
+                EventoDeRede.Anuncio(AnuncioDeFala("tx1", "Bravo", prioridade = PrioridadeTransmissao.P2_APOIO)),
             )
             repeat(10) { i ->
                 c.transporte.entrada.emit(
@@ -299,7 +306,7 @@ class RadioTaticoTest {
             advanceTimeBy(50)
 
             c.transporte.entrada.emit(
-                EventoDeRede.Anuncio(AnuncioDeFala("tx1", "Bravo", PrioridadeTransmissao.P2_APOIO)),
+                EventoDeRede.Anuncio(AnuncioDeFala("tx1", "Bravo", prioridade = PrioridadeTransmissao.P2_APOIO)),
             )
             // ≥ 5 quadros: `BufferDeJitter` só começa a entregar depois de encher
             // a profundidade inicial (100 ms / 20 ms). Com menos que isso ele
@@ -322,7 +329,7 @@ class RadioTaticoTest {
             // do locutor anterior com o indicativo errado na tela.
             val blocosAntes = c.saida.blocos.size
             c.transporte.entrada.emit(
-                EventoDeRede.Anuncio(AnuncioDeFala("tx2", "Charlie", PrioridadeTransmissao.P2_APOIO)),
+                EventoDeRede.Anuncio(AnuncioDeFala("tx2", "Charlie", prioridade = PrioridadeTransmissao.P2_APOIO)),
             )
             repeat(6) { i ->
                 c.transporte.entrada.emit(
@@ -344,7 +351,7 @@ class RadioTaticoTest {
             advanceTimeBy(50)
 
             c.transporte.entrada.emit(
-                EventoDeRede.Anuncio(AnuncioDeFala("tx1", "Bravo", PrioridadeTransmissao.P2_APOIO)),
+                EventoDeRede.Anuncio(AnuncioDeFala("tx1", "Bravo", prioridade = PrioridadeTransmissao.P2_APOIO)),
             )
             repeat(5) { i ->
                 c.transporte.entrada.emit(
@@ -410,4 +417,74 @@ class RadioTaticoTest {
             assertTrue(c.radio.telemetria.relatorio().contains("toque ate primeiro quadro"))
         }
     }
+    // ── Autoria da fala ───────────────────────────────────────────────────────
+
+    /**
+     * **O indicativo que aparece na tela vem do cadastro, não do fio.**
+     *
+     * `autorIndicativo` é string livre: qualquer cliente pode escrever o nome de
+     * qualquer pessoa, e o servidor **não pode barrar** — medido em 18/08, a
+     * política de `realtime.messages` recebe `payload` nulo, então ela não
+     * enxerga o conteúdo do broadcast (ver `DECISIONS.md`). A defesa é resolver
+     * no receptor contra `cadastro_do_grupo`, que a RLS já filtrou.
+     */
+    @Test
+    fun oNomeExibidoVemDoCadastroENaoDoQueOEmissorEscreveu() = runTest {
+        comRadio(cadastro = mapOf("agente-real" to "Alfa Dois")) { b ->
+            // Sem modo ativo o rádio não coleta eventos do transporte, e o teste
+            // mediria o silêncio em vez da resolução.
+            b.radio.entrarEmModoAtivo(rota)
+            advanceTimeBy(50)
+            b.transporte.entrada.emit(
+                EventoDeRede.Anuncio(
+                    AnuncioDeFala(
+                        transmissaoId = "tx-1",
+                        autorIndicativo = "NOME QUE O EMISSOR INVENTOU",
+                        autorAgenteId = "agente-real",
+                        prioridade = PrioridadeTransmissao.P2_APOIO,
+                    ),
+                ),
+            )
+            advanceTimeBy(200)
+            assertEquals(listOf("Alfa Dois"), b.quemFalou)
+        }
+    }
+
+    /**
+     * **O contra-teste, e é ele que fecha a personificação.**
+     *
+     * Id que não está no cadastro **não** cai de volta na string livre. Exibir o
+     * rótulo que o próprio forjador digitou é pior que não exibir nada, porque dá
+     * autoridade à mentira: o colega leria "Alfa Um" com o P1 de outra pessoa.
+     *
+     * O áudio continua tocando — calar uma voz que pode ser pedido de apoio real
+     * seria a falha oposta, e mais cara.
+     */
+    @Test
+    fun idForaDoCadastroNaoViraONomeQueOEmissorEscreveu() = runTest {
+        comRadio(cadastro = mapOf("agente-real" to "Alfa Dois")) { b ->
+            // Sem modo ativo o rádio não coleta eventos do transporte, e o teste
+            // mediria o silêncio em vez da resolução.
+            b.radio.entrarEmModoAtivo(rota)
+            advanceTimeBy(50)
+            b.transporte.entrada.emit(
+                EventoDeRede.Anuncio(
+                    AnuncioDeFala(
+                        transmissaoId = "tx-2",
+                        autorIndicativo = "Alfa Um",
+                        autorAgenteId = "agente-forjado",
+                        prioridade = PrioridadeTransmissao.P1_EMERGENCIA,
+                    ),
+                ),
+            )
+            advanceTimeBy(200)
+            assertTrue(
+                "a tela recebeu o indicativo que o emissor escreveu: $b.quemFalou",
+                b.quemFalou.none { it == "Alfa Um" },
+            )
+            assertEquals(listOf("Origem não confirmada"), b.quemFalou)
+        }
+    }
+
+
 }

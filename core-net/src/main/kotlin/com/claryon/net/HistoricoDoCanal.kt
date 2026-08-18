@@ -93,6 +93,30 @@ class HistoricoDoCanal(
      * Quem nunca publicou posição simplesmente não aparece — o que é honesto:
      * presença aqui significa "está publicando", não "instalou o app".
      */
+    /**
+     * **O cadastro do grupo: id e indicativo de quem pode falar aqui.**
+     *
+     * É a fonte contra a qual o receptor resolve o autor de uma fala. Vem de
+     * `public.cadastro_do_grupo` (migração `0013`), que devolve conjunto vazio
+     * para grupo de que o chamador não é membro e para chamada sem sessão —
+     * verificado nas três direções antes de existir chamador.
+     *
+     * Diferente de [membros]: aquele deriva de `posicoes_do_grupo` e só enxerga
+     * quem **publicou posição**, então um colega legítimo que ainda não publicou
+     * ficaria de fora. Para presença isso é aceitável; para decidir se uma fala é
+     * autêntica, descartaria agente real.
+     */
+    suspend fun cadastroDoGrupo(talkGroupId: String): Result<Map<String, String>> =
+        chamarRpc("cadastro_do_grupo", org.json.JSONObject().put("talk_group", talkGroupId)) { arr ->
+            buildMap {
+                for (i in 0 until arr.length()) {
+                    val o = arr.getJSONObject(i)
+                    val id = o.optString("agent_id")
+                    if (id.isNotEmpty()) put(id, o.optString("indicativo"))
+                }
+            }
+        }
+
     suspend fun membros(talkGroupId: String): Result<List<MembroDoCanal>> =
         posicoesDoGrupo(talkGroupId).map { lista ->
             lista.map { p ->

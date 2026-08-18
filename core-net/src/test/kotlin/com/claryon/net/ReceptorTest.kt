@@ -94,7 +94,7 @@ class ReceptorTest {
         QuadroAudio(tx, seq, seq * 20L, byteArrayOf(1, 2, 3), ultimo)
 
     private fun anuncio(tx: String = "t1", p: PrioridadeTransmissao = PrioridadeTransmissao.P2_APOIO) =
-        EventoDeRede.Anuncio(AnuncioDeFala(tx, "Alfa Dois", p))
+        EventoDeRede.Anuncio(AnuncioDeFala(tx, "Alfa Dois", prioridade = p))
 
     // ── Caminho normal ────────────────────────────────────────────────────────
 

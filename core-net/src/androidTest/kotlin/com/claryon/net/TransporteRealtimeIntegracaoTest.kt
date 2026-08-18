@@ -138,7 +138,7 @@ class TransporteRealtimeIntegracaoTest {
             withTimeoutOrNull(10_000) { rx.eventos().first { it is EventoDeRede.Anuncio } }
         }
         delay(300)
-        tx.anunciar(AnuncioDeFala("tx-1", "Alfa Dois", PrioridadeTransmissao.P1_EMERGENCIA))
+        tx.anunciar(AnuncioDeFala("tx-1", "Alfa Dois", prioridade = PrioridadeTransmissao.P1_EMERGENCIA))
 
         val evento = aguardando.await() as? EventoDeRede.Anuncio
         assertNotNull("o anúncio de fala não chegou", evento)

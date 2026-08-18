@@ -71,6 +71,15 @@ class RadioTatico(
     private val talkGroupId: String,
     private val agenteId: String,
     private val indicativo: String,
+    /**
+     * Traduz o id do autor no indicativo do cadastro do grupo — `null` quando o id
+     * não está lá.
+     *
+     * O padrão devolve `null` **de propósito**: um chamador que esqueça de ligar o
+     * cadastro degrada para "origem não confirmada", que é seguro, em vez de cair
+     * de volta na string livre, que é o defeito.
+     */
+    private val resolverAutor: (String) -> String? = { null },
     private val transporte: TransporteAoVivo,
     private val codec: CodecDeVoz,
     private val piso: ClienteDePiso,
@@ -460,7 +469,19 @@ class RadioTatico(
                 // Abre a janela de supressão ANTES do primeiro áudio: a voz que
                 // vai tocar não pode entrar na nossa resposta.
                 supressor.abrir(agoraMs())
-                aoMudarQuemFala(evento.anuncio.autorIndicativo)
+                // **Resolve, não confia.** `autorIndicativo` é string livre: quem
+                // transmite escreve o nome que quiser, e até aqui a tela do colega
+                // mostrava. Agora o nome sai do cadastro que o servidor filtrou
+                // (`cadastro_do_grupo`), casado pelo `autorAgenteId`.
+                //
+                // Id que não resolve NÃO vira o nome que o emissor escreveu —
+                // exibir o rótulo que o próprio forjador digitou é pior que não
+                // exibir nada, porque dá autoridade à mentira. Vira origem não
+                // confirmada, e o áudio toca do mesmo jeito: calar uma voz que
+                // pode ser um pedido de apoio real seria a falha oposta.
+                aoMudarQuemFala(
+                    resolverAutor(evento.anuncio.autorAgenteId) ?: AUTOR_NAO_CONFIRMADO,
+                )
                 if (evento.anuncio.prioridade == PrioridadeTransmissao.P1_EMERGENCIA) {
                     sinalizar(Earcon.PRIORITARIA, Priority.EMERGENCIA)
                 }
@@ -532,6 +553,14 @@ class RadioTatico(
     }
 
     private companion object {
+        /**
+         * O que a tela mostra quando o autor não resolve no cadastro do grupo.
+         *
+         * Frase e não vazio: espaço em branco no lugar do indicativo pareceria
+         * defeito de renderização, e o agente precisa saber que a origem é que é
+         * duvidosa — não a tela.
+         */
+        const val AUTOR_NAO_CONFIRMADO = "Origem não confirmada"
         const val TAG = "ClaryonField"
 
         /**
