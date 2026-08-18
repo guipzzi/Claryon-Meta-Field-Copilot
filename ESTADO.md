@@ -1,4 +1,4 @@
-# Onde estamos — 2026-08-17 · a palavra de ativação tem teto estrutural, e ele foi medido
+# Onde estamos — 2026-08-17 · o detector de ativação roda no aparelho
 
 **Reescrito a cada sessão, nunca acrescentado. Teto duro: 60 linhas.** O resto vai para `DECISIONS.md`.
 
@@ -9,52 +9,49 @@
   **11 ms** (aceite ≤200) · `RotaSustentada` mantém a rota SCO pela rajada.
 - **VAD Silero**: silêncio → 0, senoide alta → 0, fala → 98%. **Troca de grupo por voz
   ligada**, sem casamento aproximado, com chamador verificado elo por elo.
-- **STT passa a meta na régua limpa: WER 3,4%, acurácia 96,6%** (meta ≥92%). A latência
-  era build, não tecnologia: o `CMakeLists` só aplicava `-O3` fora do Debug — 42 s → centenas de ms.
-- **Earcon 605 → 305 ms** (meta 500) · régua de WER (`Wer.kt`) e verificador da corrente.
-- **A cauda do comando sai perfeita** — `encerrar gravação`, `solicitar reforço`. O whisper
-  erra só o nome inventado, que é a única coisa fora do vocabulário dele.
+- **STT na régua limpa: WER 3,4%, acurácia 96,6%** (meta ≥92%) · earcon **305 ms** (meta 500).
+- **DETECTOR DE ATIVAÇÃO, no aparelho** (`DetectorDeAtivacao` + `ativacao_jni.c`):
+  - **26 de 26** elocuções em fluxo contínuo — o número exato da bancada em Python, o
+    que prova que o mel e o empilhamento reescritos em C reproduzem o treino.
+  - **p50 3,5 ms** por decisão, passo de 80 ms → **4,4% de um núcleo**.
+  - Latência (medida em Python): **mediana −20 ms** em relação ao fim da palavra.
+  - **Zero dependência nova.** `libonnxruntime.so` já vinha no APK pelo AAR do sherpa e
+    já exportava `OrtGetApiBase`; faltava chamador, não motor. Cabeça = 1156 bytes.
 
 ## O que está quebrado, e nós sabemos
 
-1. **A ativação por voz tem teto estrutural — 8 hipóteses medidas, 6 refutadas.** Detalhe
-   e números em [`docs/PALAVRA_DE_ATIVACAO.md`](docs/PALAVRA_DE_ATIVACAO.md). O essencial:
-   - **KWS dedicado do sherpa está fora de domínio.** Controle canônico 3/3 em inglês real;
-     o Piper pt-BR dizendo **"Alexa"**, a chave de fábrica, dá **0/4**. Grafia e banda
-     estreita foram descartadas como causa (0/8 nas duas bandas, grade de 9 pontos).
-   - **O prior nunca nomeou a marca.** Corrigido isso: **0% → ~35%**, com 0 falso positivo.
-   - **O portão hoje:** marca exata **33,3%** com **0/30** de falso positivo; regra da rima
-     `-on`/`-om` **66,7%** com **3/30**. A meta é 90% e zero. Nenhum chega.
-   - A causa é fonética: /kl/ é oclusiva velar, transiente curto e agudo, e morre em 8 kHz —
-     sai `varyon`, `faryon`, `haryon`, `quaryon`, `carion`. A rima sobrevive; o ataque não.
-2. **O Piper NÃO é determinístico** — a mesma frase deu 48640, 45355 e 44820 amostras (VITS
-   sorteia a duração de cada fonema). O whisper repete. **Consequência: a mesma condição
-   medida duas vezes deu 29,2% e 41,7%** — diferenças de poucos pontos em qualquer bancada
-   deste projeto são ruído, e daqui em diante exigem `n` maior e intervalo de confiança.
-3. **Duas afirmações minhas foram refutadas e os documentos foram corrigidos:** "o
-   decodificador erra sempre do mesmo jeito" (eram 18 formas em 18 rendições) e "a grafia da
-   chave era a causa". `VariantesDoParTest` e `KwsDeClaryonTest` já contam a versão medida.
-4. **`CaosDoDatTest` falha um teste por rodada, variando qual** (`Wearables SDK already
+1. **O detector NÃO tem chamador em `src/main` do app.** Ele é `core-voice/src/main` com
+   teste instrumentado, e nada no rádio o invoca. Pela régua do §6 isto é **escrito**,
+   não construído — e é o erro que este projeto já cometeu seis vezes.
+2. **Falso positivo sem taxa medida.** O único negativo humano são **3,8 s** de fala.
+   `0 disparos` ali é ausência de amostra, não garantia; `0/30` é `[0%; 11,6%]` com 95%.
+   A métrica que decide é **falsos por hora** de fala espontânea, e ela não existe.
+   Enquanto não existir, ligar o detector no rádio pode tomar o piso da guarnição.
+3. **O modelo é de um locutor só**, com 27 elocuções aumentadas. Generalizou para três
+   locutores inéditos (0,963 · 0,996 · 0,999) mas com `n=4` no teste.
+4. **A via por transcrição tem teto estrutural** — 8 hipóteses, 6 refutadas. Marca exata
+   33,3%, regra da rima 66,7% com 3 falsos em 30. Detalhe em
+   [`docs/PALAVRA_DE_ATIVACAO.md`](docs/PALAVRA_DE_ATIVACAO.md).
+5. **O Piper NÃO é determinístico** (48640/45355/44820 amostras na mesma frase) e como
+   dado de treino ele **piora**: acrescentá-lo a dados humanos derruba a margem de
+   +0,109 para −0,020. Diferenças de poucos pontos em qualquer bancada são ruído.
+6. **`CaosDoDatTest` falha um teste por rodada, variando qual** (`Wearables SDK already
    initialized`); falha em `HEAD` limpo. Precisa isolamento de processo por classe.
-5. **`+dotprod` consertado** (`sdot = 923`), falta máquina ociosa para re-medir. **SIGILL
-   latente sem FEAT_FP16**: `libggml-cpu.so` tem 1765 instruções FP16; piso já declarado.
-6. **Buraco no aceite (b):** a preempção de P1 não alcança a fase de `render` — enquanto o
-   TTS sintetiza (~1,5 s) o P1 não corta, e o instrumento não gera amostra.
-7. `errorStream` não coletado · `STOPPED` não terminal · câmera do DAT nunca pedida ·
-   transcrição na origem (P1) não existe · `WakeWordDetector` sem implementação · o portão
-   não existe em produção: `grep -ri claryon` em `src/main` = zero.
+7. **Buraco no aceite (b):** a preempção de P1 não alcança a fase de `render`.
+8. `errorStream` não coletado · `STOPPED` não terminal · câmera do DAT nunca pedida ·
+   transcrição na origem (P1) não existe · **`+dotprod`** consertado (`sdot = 923`) mas
+   falta máquina ociosa para re-medir · SIGILL latente sem FEAT_FP16.
 
 **Pendências:** `security-crypto` `1.1.0-alpha06` · conferir se o documento cita WhatsApp (§14.1).
 
 ## O que vem a seguir
 
-**Decisão humana pendente, e ela é de dependência.** Paridade com a Alexa não sai do caminho
-por transcrição — o teto é estrutural. A via conhecida é **treinar um detector acústico** com
-dados gerados pelo Piper (que agora sabemos variar sozinho, o que é bom para isso), inferindo
-em ONNX. Custa `onnxruntime-android` — o AAR do sherpa traz só o `.so`, sem API Java — e uma
-etapa de treino fora do repositório. `CLAUDE.md` §2 exige tamanho, licença e alternativa antes.
+**O gargalo é gravação, não código.** Faltam ~10–20 min de fala espontânea do Guido, sem
+dizer a palavra: com isso o falso positivo ganha taxa e o limiar sai de `0,5` — que hoje é
+convenção, não medida — para um ponto escolhido sobre curva ROC.
 
-1. **Entregáveis de 22/08** (Fase 0) com a capacidade que **existe**: copiloto por botão, STT,
-   TTS e troca de grupo falada. **Não** o gatilho por voz. O aceite (d) falha hoje.
-2. **Se a dependência for aprovada:** gerar corpus, treinar, medir recall e falso positivo.
-3. **Bench `ΣN ≈ 500`** · re-medir `+dotprod` ocioso · medir em arm64 real.
+1. **Medir falsos por hora.** Sem esse número o detector não entra no caminho do rádio.
+2. **Ligar o detector**: `FonteUnicaDeMicrofone` → detector → earcon → o mesmo
+   `IntentExecutor` do botão. Só depois de (1).
+3. Mover os modelos (2,4 MB) para `app/src/main/assets` — hoje vivem só nas assets de teste.
+4. Medir em arm64 real · re-medir `+dotprod` ocioso · isolar `CaosDoDatTest`.

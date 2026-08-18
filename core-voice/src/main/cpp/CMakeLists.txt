@@ -26,6 +26,10 @@ set(
     SOURCE_FILES
     ${WHISPER_LIB_DIR}/src/whisper.cpp
     ${CMAKE_SOURCE_DIR}/jni.c
+    # Detector da palavra de ativacao. Nao linka nada novo: alcanca por dlopen a
+    # libonnxruntime.so que o AAR do sherpa ja poe no APK, e so precisa do
+    # cabecalho MIT em onnx/. Ver o KDoc de ativacao_jni.c.
+    ${CMAKE_SOURCE_DIR}/ativacao_jni.c
 )
 
 find_library(LOG_LIB log)
@@ -122,7 +126,9 @@ function(build_library target_name)
             target_compile_options(${ggml_alvo} PRIVATE -O3 -DNDEBUG)
         endif ()
     endforeach ()
-    target_link_libraries(${target_name} ${LOG_LIB} android ggml)
+    # `dl` pelo dlopen/dlsym do detector de ativacao; nenhuma biblioteca nova
+    # entra no APK por causa dele.
+    target_link_libraries(${target_name} ${LOG_LIB} android ggml dl)
 endfunction()
 
 if (${ANDROID_ABI} STREQUAL "arm64-v8a")
