@@ -168,10 +168,12 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
             rota = r
 
             val transporte = TransporteRealtime(
-                config = ConfigRealtime(
-                    projetoUrl = BuildConfig.SUPABASE_URL.trimEnd('/'),
-                    apiKey = BuildConfig.SUPABASE_ANON_KEY,
-                ),
+                // `SessaoDoAgente.config` e não uma cópia local: é ela que carrega
+                // o provedor de token e o `privado`. Uma segunda ConfigRealtime
+                // montada aqui entraria no canal SEM JWT e sem política — o mesmo
+                // gênero de literal gêmeo que o roadmap já flagrou em três lugares
+                // apontando para o mesmo UUID por digitação, não por referência.
+                config = SessaoDoAgente.config,
                 escopo = viewModelScope,
             )
 

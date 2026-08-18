@@ -1550,3 +1550,26 @@ de memória, que é como este projeto já errou com `pedir_piso`.
   (`RadioViewModel:551`), com `ClienteDePisoLocal` como fallback na linha 548. O item do
   roadmap descreve o estado de antes; hoje ele é verificação da condição de escolha, não
   implementação. Uma sessão a menos na fase — se a condição estiver certa.
+
+- **Par de teste criado por SQL, e o que o GoTrue não perdoa.** O aceite exige dois JWTs
+  distintos; o agente `Bravo Um` do seed estava livre e virou o par headless. Criar o
+  usuário pela Management API funciona, mas `insert` mínimo em `auth.users` produz
+  `Database error querying schema` no login — o GoTrue lê `confirmation_token`,
+  `recovery_token`, `email_change` e `email_change_token_new` como `string` e quebra no
+  scan quando são `NULL`. **Em nenhum dos usuários que funcionam elas são nulas**, e foi
+  comparar com eles que apontou as quatro; adivinhar teria custado a tarde.
+
+  A prova não é o `insert` ter passado: é o `POST /auth/v1/token` devolver token. Ele
+  vive **60 min**, o que confirma que o laço de renovação do canal não era teoria.
+
+- **A política 0012 foi exercitada antes de virar a chave, e o contra-teste é o achado.**
+  `status=ok` num canal privado não prova nada sozinho — pode ser a política autorizando
+  ou a política não sendo consultada. As três linhas juntas provam:
+
+  | cenário | resultado |
+  |---|---|
+  | privado, agente **é** membro | `status=ok` |
+  | privado, agente **não é** membro | `Unauthorized: You do not have permissions to read from this Channel topic` |
+  | **público**, agente não é membro | `status=ok` |
+
+  A terceira é o defeito de produção, demonstrado em vez de argumentado.

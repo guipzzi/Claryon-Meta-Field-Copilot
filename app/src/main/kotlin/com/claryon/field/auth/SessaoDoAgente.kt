@@ -46,9 +46,34 @@ object SessaoDoAgente {
     val redeConfigurada: Boolean =
         BuildConfig.SUPABASE_URL.isNotBlank() && BuildConfig.SUPABASE_ANON_KEY.isNotBlank()
 
+    /**
+     * A configuração do canal — **uma só**, e é de propósito.
+     *
+     * [tokenDoAgente] é função e não string porque o JWT do Supabase vive **60
+     * min** (medido, não suposto). A doc é explícita: sem receber token novo pelo
+     * canal, o cliente é desconectado no vencimento. Guardar uma cópia daria um
+     * rádio que morre sozinho no meio do turno, e isso falha em campo — não na
+     * bancada. `tokenValido()` já renova com margem e é seguro chamar sempre.
+     *
+     * [privado] liga a política da migração `0012`. Ligado depois de exercitada
+     * com o par headless, na ordem que o cabeçalho da migração prescreve:
+     *
+     * ```
+     * agente do grupo, canal privado ....... phx_reply status=ok
+     * agente FORA do grupo, canal privado .. Unauthorized: You do not have
+     *                                        permissions to read from this
+     *                                        Channel topic
+     * agente FORA do grupo, canal público .. status=ok   ← o defeito de antes
+     * ```
+     *
+     * A terceira linha é a que justifica tudo: sem `private`, qualquer portador
+     * do APK entrava em qualquer guarnição.
+     */
     val config = ConfigRealtime(
         projetoUrl = BuildConfig.SUPABASE_URL.trimEnd('/'),
         apiKey = BuildConfig.SUPABASE_ANON_KEY,
+        tokenDoAgente = { instancia?.tokenValido() },
+        privado = true,
     )
 
     @Volatile
