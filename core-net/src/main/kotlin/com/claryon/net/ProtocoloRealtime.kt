@@ -46,11 +46,55 @@ object ProtocoloRealtime {
 
     fun topico(talkGroupId: String): String = "realtime:tg-$talkGroupId"
 
-    /** Entrada no canal do talk group. */
-    fun join(talkGroupId: String, ref: Int): String = envelope(
+    /**
+     * Entrada no canal do talk group.
+     *
+     * `access_token` vai no **topo** do payload, irmão de `config` — não dentro
+     * dele. Confirmado na doc oficial do Supabase em 18/08 e anotado em
+     * `DECISIONS.md`; dentro de `config` o servidor ignora em silêncio e o canal
+     * segue autorizado só pela chave anon, que é exatamente o defeito que este
+     * parâmetro existe para fechar. Silêncio é o pior modo de falha aqui, e é por
+     * isso que `oJoinLevaOTokenNoTopoDoPayload` existe como teste.
+     *
+     * [privado] liga `config.private`, que faz o servidor consultar as políticas
+     * de `realtime.messages` (migração `0012`). Enquanto for `false` o canal é
+     * público e as políticas não são consultadas — o que permite aplicar a
+     * migração e exercitá-la com o par headless antes de mexer no rádio.
+     */
+    fun join(
+        talkGroupId: String,
+        ref: Int,
+        accessToken: String? = null,
+        privado: Boolean = false,
+    ): String = envelope(
         topico = topico(talkGroupId),
         evento = "phx_join",
-        payload = JSONObject().put("config", JSONObject().put("broadcast", JSONObject().put("ack", false))),
+        payload = JSONObject()
+            .put(
+                "config",
+                JSONObject()
+                    .put("broadcast", JSONObject().put("ack", false))
+                    .put("private", privado),
+            )
+            .apply { if (accessToken != null) put("access_token", accessToken) },
+        ref = ref,
+    )
+
+    /**
+     * Renovação do JWT sem refazer o `join`.
+     *
+     * A doc é explícita: *"se um novo JWT nunca for recebido no canal, o cliente é
+     * desconectado quando o JWT expira"*. Sem isto o rádio do agente **cai sozinho
+     * no meio do turno** — e falha em campo, não na bancada, que é a pior classe
+     * de defeito deste produto.
+     *
+     * Não há resposta em caso de sucesso; em caso de falha vem um evento `system`
+     * e o canal fecha. Por isso o silêncio aqui é o resultado esperado.
+     */
+    fun renovarToken(talkGroupId: String, token: String, ref: Int): String = envelope(
+        topico = topico(talkGroupId),
+        evento = "access_token",
+        payload = JSONObject().put("access_token", token),
         ref = ref,
     )
 

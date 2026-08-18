@@ -19,7 +19,21 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 /** Credenciais do projeto Supabase. Carregadas em runtime, nunca versionadas. */
-data class ConfigRealtime(val projetoUrl: String, val apiKey: String)
+/**
+ * @param tokenDoAgente devolve o JWT **atual** do agente, ou `null` se não houver
+ *   sessão. É função e não string porque o token expira: o transporte precisa
+ *   pedir um novo a cada renovação, e guardar uma cópia daria um canal que morre
+ *   junto com o primeiro token.
+ * @param privado liga `config.private` no `phx_join`. Deixado `false` de propósito
+ *   até a política da migração `0012` ser exercitada pelo par headless — virar a
+ *   chave antes disso é apostar o rádio numa política nunca testada.
+ */
+data class ConfigRealtime(
+    val projetoUrl: String,
+    val apiKey: String,
+    val tokenDoAgente: suspend () -> String? = { null },
+    val privado: Boolean = false,
+)
 
 /**
  * [TransporteAoVivo] sobre o WebSocket do Supabase Realtime.
@@ -103,8 +117,15 @@ class TransporteRealtime(
                     val ws = webSocket
                     aberto = true
                     reconexao.aoConectar()
-                    ws.send(ProtocoloRealtime.join(tg, ref.getAndIncrement()))
-                    escopo.launch { baterCoracao(ws) }
+                    // O token é obtido em corrotina: `onOpen` não é contexto de
+                    // suspensão e buscá-lo aqui bloquearia a linha do OkHttp.
+                    escopo.launch {
+                        val token = runCatching { config.tokenDoAgente() }.getOrNull()
+                        if (socket !== ws || !aberto) return@launch
+                        ws.send(ProtocoloRealtime.join(tg, ref.getAndIncrement(), token, config.privado))
+                        launch { baterCoracao(ws) }
+                        launch { renovarToken(ws, tg) }
+                    }
                 }
 
                 override fun onMessage(webSocket: WebSocket, text: String) {
@@ -140,6 +161,48 @@ class TransporteRealtime(
             ws.send(ProtocoloRealtime.heartbeat(ref.getAndIncrement()))
         }
     }
+
+    /**
+     * Empurra um JWT novo antes de o atual expirar.
+     *
+     * A doc do Supabase: *"se um novo JWT nunca for recebido no canal, o cliente é
+     * desconectado quando o JWT expira"*. Um rádio operacional que cai sozinho
+     * depois de uma hora é pior que um rádio sem JWT, porque falha em campo.
+     *
+     * O prazo sai do `exp` do próprio token, não de um intervalo chutado: sessão
+     * de turno é mais longa que qualquer palpite e o valor do projeto pode mudar
+     * no painel sem ninguém avisar o aplicativo. Renova com [MARGEM_TOKEN_MS] de
+     * antecedência, e nunca mais rápido que [RENOVACAO_MINIMA_MS] — token ilegível
+     * ou já vencido não pode virar laço quente batendo no servidor.
+     */
+    private suspend fun renovarToken(ws: WebSocket, tg: String) {
+        while (aberto && socket === ws) {
+            val token = runCatching { config.tokenDoAgente() }.getOrNull()
+            val esperaMs = expiracaoMs(token)
+                ?.let { it - System.currentTimeMillis() - MARGEM_TOKEN_MS }
+                ?.coerceAtLeast(RENOVACAO_MINIMA_MS)
+                ?: RENOVACAO_SEM_EXP_MS
+            delay(esperaMs)
+            if (!aberto || socket !== ws) break
+            val novo = runCatching { config.tokenDoAgente() }.getOrNull() ?: continue
+            ws.send(ProtocoloRealtime.renovarToken(tg, novo, ref.getAndIncrement()))
+            Log.i(TAG, "JWT do canal renovado")
+        }
+    }
+
+    /**
+     * `exp` do JWT em milissegundos, ou `null` se o token não for legível.
+     *
+     * Lê o payload sem validar assinatura — de propósito. Aqui não se decide
+     * autorização nenhuma (quem valida é o servidor); decide-se **quando pedir
+     * outro**. Validar exigiria a chave pública do projeto e não mudaria o
+     * agendamento em nada.
+     */
+    private fun expiracaoMs(token: String?): Long? = runCatching {
+        val corpo = token?.split(".")?.getOrNull(1) ?: return null
+        val json = String(android.util.Base64.decode(corpo, android.util.Base64.URL_SAFE))
+        org.json.JSONObject(json).getLong("exp") * 1_000L
+    }.getOrNull()
 
     private suspend fun reagendar() {
         val espera = reconexao.proximoAtrasoMs()
@@ -193,6 +256,22 @@ class TransporteRealtime(
     companion object {
         private const val TAG = "ClaryonField"
         private const val HEARTBEAT_MS = 30_000L
+
+        /**
+         * Antecedência da renovação do JWT. Cinco minutos cobrem uma renovação
+         * lenta de rede sem deixar o canal chegar perto do vencimento — e o
+         * vencimento é fatal, não degradado: o servidor desconecta.
+         */
+        private const val MARGEM_TOKEN_MS = 5 * 60_000L
+
+        /** Piso: token ilegível ou já vencido não pode virar laço quente. */
+        private const val RENOVACAO_MINIMA_MS = 60_000L
+
+        /**
+         * Sem `exp` legível, renova a cada 10 min. Abaixo de qualquer expiração
+         * plausível do Supabase (o padrão é 1 h) e barato: é um quadro de texto.
+         */
+        private const val RENOVACAO_SEM_EXP_MS = 10 * 60_000L
 
         /**
          * `TCP_NODELAY` é o ponto: o algoritmo de Nagle agruparia quadros de
