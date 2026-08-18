@@ -1514,3 +1514,39 @@ um cético que reexecutava os comandos. Sete perguntas, e o resultado mudou o pl
 - **Correção de método, não de fato:** três citações do ROADMAP apontavam linhas que derivaram
   (`MainActivity.kt:236-237`, `RadioViewModel.kt:450`, migração `0012`). Especificação deve
   citar **símbolo**, não linha — linha envelhece a cada commit.
+
+---
+
+## 2026-08-18 — As duas assinaturas que a Fase 3 exigia confirmar antes do diff
+
+O `ROADMAP.md` manda, em dois itens da Fase 3, confirmar a API na doc oficial **antes**
+de qualquer código. Confirmado, e anotado aqui para não ser rederivado — nem reescrito
+de memória, que é como este projeto já errou com `pedir_piso`.
+
+- **JWT no canal Realtime.** O `access_token` vai **no topo do payload do `phx_join`**,
+  irmão de `config` — **não** dentro dele. Canal privado é `config.private: true`, e
+  exige política RLS em `realtime.messages` usando `realtime.topic()` e
+  `extension in ('broadcast')`.
+
+  E há uma consequência operacional que não estava no roadmap: *"se um novo JWT nunca for
+  recebido no canal, o cliente é desconectado quando o JWT expira"*. Renovação se faz por
+  um evento `access_token` com `{"access_token": "<novo>"}` — **sem resposta em caso de
+  sucesso**, e com erro de sistema mais fechamento do canal em caso de falha. Sem laço de
+  renovação, **o rádio do agente cai no meio do turno**. Isso vira requisito do item, não
+  refinamento: um PTT que morre sozinho depois de uma hora é pior que um PTT sem JWT,
+  porque falha em campo e não na bancada.
+
+- **`cron.schedule`** tem duas formas: `cron.schedule(schedule text, command text)` e
+  `cron.schedule(job_name text, schedule text, command text)`, ambas devolvendo `bigint`.
+  Desagenda por `cron.unschedule(job_name text)` **ou** `cron.unschedule(job_id bigint)`.
+  O histórico exigido pelo aceite está em `cron.job_run_details`, cujas colunas são
+  `jobid, runid, job_pid, database, username, command, status, return_message,
+  start_time, end_time` — o aceite pede `status`, e ele existe com esse nome.
+
+  A doc do Supabase **não** traz as assinaturas; ela remete ao repositório do `pg_cron`,
+  que é de onde isto saiu.
+
+- **Achado de escopo, junto:** `ClienteDePisoRemoto` **já está instanciado**
+  (`RadioViewModel:551`), com `ClienteDePisoLocal` como fallback na linha 548. O item do
+  roadmap descreve o estado de antes; hoje ele é verificação da condição de escolha, não
+  implementação. Uma sessão a menos na fase — se a condição estiver certa.
