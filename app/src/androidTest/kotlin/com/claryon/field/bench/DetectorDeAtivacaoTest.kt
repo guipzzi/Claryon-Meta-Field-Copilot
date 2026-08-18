@@ -158,6 +158,56 @@ class DetectorDeAtivacaoTest {
         }
     }
 
+    /**
+     * **O teste que derrubou a versão 1, e por isso é o que mais importa aqui.**
+     *
+     * Com 3,8 s de negativo o detector parecia perfeito. Com 3,65 min de leitura
+     * contínua ele deu **26 disparos — 428 por hora**, contra a meta de 0,5/h do
+     * roadmap para o que só toca earcon. A causa não era o limiar: o treino tinha
+     * visto **três** negativos humanos e nunca fala corrida.
+     *
+     * A cabeça v2 aprendeu com a primeira metade da leitura; esta medição roda na
+     * **segunda metade**, que o treino não viu. Sem esse corte no tempo o número
+     * seria zero por construção e não valeria nada.
+     *
+     * ⚠️ 1,8 min de material retido dá limite superior de ~99 falsos/h com 95% de
+     * confiança. **Isto não prova a meta de 0,5/h** — para isso são ~6 h de fala com
+     * zero disparo. O que está provado é a direção, e ela é grande: 428 → 0.
+     */
+    @Test
+    fun oDetectorFicaCaladoEmLeituraContinua() {
+        val leitura = File(pasta, "leitura-tp_guido.wav")
+        Assume.assumeTrue("áudio ausente", leitura.exists())
+        val d = detector()
+        Assume.assumeTrue("o detector não subiu", d != null)
+
+        d!!.use {
+            val pcm = lerWav(leitura)
+            // Só a metade retida: a primeira treinou a cabeça.
+            val metade = pcm.size / 2
+            var disparos = 0
+            var i = metade
+            while (i < pcm.size) {
+                val n = minOf(320, pcm.size - i)
+                if (it.aceitar(pcm.copyOfRange(i, i + n))) disparos++
+                i += n
+            }
+            val horas = (pcm.size - metade) / 16000.0 / 3600.0
+            android.util.Log.i(
+                "ClaryonField",
+                """
+                |ATIVAÇÃO — FALSO POSITIVO em leitura contínua (metade retida)
+                |  ${"%.1f".format(horas * 60)} min de fala que o treino nunca viu
+                |  disparos ......... $disparos  →  ${"%.1f".format(disparos / horas)} por hora
+                |  a versão 1, treinada com 3 negativos, dava 428/h
+                |  meta do roadmap .. 0,5/h para o que só toca earcon
+                |  ⚠️ com este material o limite superior de 95% é ~99/h. A meta exige ~6 h.
+                """.trimMargin(),
+            )
+            assertTrue("o detector disparou $disparos vez(es) em leitura contínua", disparos == 0)
+        }
+    }
+
     @Test
     fun oDetectorFicaCaladoEmFalaQueNaoEComando() {
         val negativo = File(pasta, "na-escuta_guido.wav")
