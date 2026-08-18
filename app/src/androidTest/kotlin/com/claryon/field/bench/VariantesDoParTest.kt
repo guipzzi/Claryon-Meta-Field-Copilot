@@ -14,43 +14,40 @@ import org.junit.runner.RunWith
 import java.text.Normalizer
 
 /**
- * **"Hey Claryon" com lista de variantes MEDIDA — a decisão de manter a marca.**
+ * **A lista de variantes escrita à mão — e a premissa dela, REFUTADA em 17/08.**
  *
- * A revisão humana de 17/08 decidiu manter `Hey Claryon` e perguntou se dá para
- * "treinar" o sistema a reconhecer que a conversa começou assim. Treinar o modelo é
- * inviável — exigiria dados rotulados, compute e reconversão para `ggml`. Mas há um
- * mecanismo mais barato e que a medição justifica: **o decodificador erra sempre do
- * mesmo jeito.**
+ * Este arquivo nasceu de uma afirmação que eu escrevi com confiança e que a medição
+ * derrubou no mesmo dia: *"o decodificador erra sempre do mesmo jeito"*. A base eram
+ * seis amostras em que `Eclareon` apareceu duas vezes e `clarion` pareceu consistente.
+ *
+ * `BancoDeFormasTest` refez a coleta com protocolo de treino e teste separados, e a
+ * estabilidade não existe:
  *
  * ```
- * "Hey Claryon, mudar para guarnição 3"  →  "Eclareon, mudar para a guarnição 3"
- * "Hey Claryon, mudar para guarnição 4"  →  "Eclareon, mudar para a Guarnição 4"
- * "Hey Claryon, onde está a guarnição 3" →  "E clarion, onde está a guarni são 3"
+ * valium · parion · fladeon · varyon · quarion · carion · karyon · vadiom · variom
+ * falion · declareao · qual o alhao · fair · vario · farem · fariam · e a sua vida
  * ```
  *
- * `Eclareon` duas vezes, `Clarion` de forma consistente. Isso não é ruído: é a
- * sequência de tokens que o modelo **prefere** para aquele som, e ela é estável.
+ * Dezoito rendições, dezoito formas, nenhuma repetida. A causa foi medida depois:
+ * o Piper **não é determinístico** (`RepetibilidadeDaBancadaTest` — VITS sorteia a
+ * duração de cada fonema), então cada rendição é um áudio novo e o decodificador
+ * responde com uma grafia nova. Uma lista escrita à mão sobre seis amostras estava
+ * decorando ruído.
  *
- * ## Isto NÃO é o casamento aproximado que a spec proíbe
+ * ## O que sobreviveu da ideia
  *
- * A proibição de `troca-de-grupo-por-voz.spec.md` é sobre **distância de edição**:
- * computar similaridade e aceitar o "mais parecido" converte erro de transcrição em
- * erro de despacho, e o agente não tem como saber. Uma **lista explícita, curta e
- * derivada de medição** é outra coisa: não computa similaridade, reconhece saídas
- * observadas de um decodificador determinístico.
+ * Não a lista, mas a observação que estava embaixo dela: **o erro tem estrutura.**
+ * Ele é aleatório no *ataque* (/kl/ vira /v/, /f/, /h/, /p/) e estável na *rima*
+ * (`-yon`, `-ion`, `-eon`). Isso virou `PortaoPelaRimaTest`, que mede a propriedade
+ * estrutural em vez de bancar grafias — e que também não chegou à meta: 66,7% de
+ * recall com 3 falsos positivos em 30, contra 33,3% e zero da marca exata.
  *
- * E a diferença de consequência é decisiva. Errar o **grupo** manda a voz do agente
- * para outra guarnição sem que ele saiba. Errar o **portão** abre o canal quando não
- * devia — e isso é medível diretamente, é o falso positivo, e está aqui no mesmo teste.
+ * ## Por que o arquivo fica
  *
- * ## O que valida a lista, e o que a invalidaria
- *
- * A lista só entra se **os dois** números fecharem: recall ≥ 90% e falso positivo
- * **zero** contra fala operacional. Uma lista que suba o recall e comece a disparar
- * em ambiente está pior que não ter lista — foi assim que `Aurora` sozinha morreu.
- *
- * Toda medição em **banda estreita de 8 kHz**, porque a ordem das candidatas muda
- * com a banda e foi por medir em banda cheia que a análise de 14/08 errou.
+ * Porque a lista de sete variantes **ainda está no `src/main`**, e enquanto estiver
+ * este teste é o que impede que ela abra falso positivo sem ninguém ver. O número que
+ * ele produz não é evidência de que a lista funcione: é evidência de que ela não
+ * piora o portão. A decisão de produto está em `docs/AVALIACAO_DAS_PROPOSTAS_FASE_2.md`.
  */
 @RunWith(AndroidJUnit4::class)
 class VariantesDoParTest {

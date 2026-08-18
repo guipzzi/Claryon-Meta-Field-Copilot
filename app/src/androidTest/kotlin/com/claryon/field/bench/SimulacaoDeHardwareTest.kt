@@ -53,8 +53,15 @@ class SimulacaoDeHardwareTest {
     private val hfpHz = 8_000
     private val ctx get() = InstrumentationRegistry.getInstrumentation().targetContext
 
-    /** A palavra que venceu a medição de sobrevivência. */
-    private val ativacao = "Aurora"
+    /**
+     * A palavra de ativação do produto.
+     *
+     * Era `Aurora` até 17/08, quando a revisão humana a rejeitou — sem sentido de
+     * produto, e o falso positivo de 1/8 em `"a aurora boreal"` já a condenava.
+     * `Claryon` é marca e ativação, por decisão humana, e é ela que tem de ser
+     * medida aqui, mesmo que o número saia pior.
+     */
+    private val ativacao = "Claryon"
 
     private fun normalizar(t: String): String =
         Normalizer.normalize(t.lowercase().trim(), Normalizer.Form.NFD)
@@ -160,7 +167,7 @@ class SimulacaoDeHardwareTest {
             "A ocorrência foi encerrada, retornando à base.",
             "Solicito informação sobre o endereço anterior.",
             "Aguardando o apoio chegar para prosseguir.",
-            "A aurora boreal apareceu no noticiário ontem.",
+            "Ele clareou a situação para o comandante ontem.",
             "Ele mudou para a outra rua agora há pouco.",
         )
 
@@ -224,8 +231,8 @@ class SimulacaoDeHardwareTest {
         )
 
         // O aceite é ZERO disparo. Aqui a asserção é dura porque o custo do falso
-        // positivo é tomar o piso da guarnição — e "a aurora boreal apareceu no
-        // noticiário" é exatamente a armadilha que uma palavra real do léxico traz.
+        // positivo é tomar o piso da guarnição. As armadilhas agora são as vizinhas
+        // de "clar-", que é o que uma marca inventada tem de vizinho real na língua.
         assertTrue(
             "o portão disparou $disparos vez(es) em fala que NÃO era comando: $ondeDisparou",
             disparos == 0,
