@@ -183,6 +183,54 @@ de treino ele é inútil no melhor caso e nocivo no caso medido.
 O que decide agora é **gravação de pessoas**, e a boa notícia é a barra: 27 clipes de
 um locutor já generalizaram para três inéditos acima de 0,96.
 
+## O detector do Guido — funciona, em fluxo contínuo, com latência de Dot
+
+Com um locutor só e 27 elocuções, o que decide é **aumento de dados**: cada clipe vira
+15 versões — deslocado ±100 ms, com três ganhos, com ruído aditivo e pela banda
+estreita. Negativos: os `na escuta` aumentados igual, mais janelas de fundo da própria
+gravação (mesmo microfone, mesma sala). Cabeça linear sobre pilha de **3 embeddings**
+(≈1 s), decidindo a cada **80 ms**.
+
+Avaliação **não** por clipe recortado — por **janela deslizante sobre as gravações
+longas**, que é como o detector roda em produção:
+
+| gravação | esperado | disparos |
+|---|---|---|
+| repetições, 36 s | 26 elocuções | **26** |
+| comandos, 27 s | ~10 chamadas | **10**, e calado durante a cauda do comando |
+| pergunta, 6 s | 2 | **2** |
+| `na escuta`, 3,8 s | zero | **0** |
+
+As **9 elocuções retidas** — momentos que o treino não viu — deram escore mínimo
+**0,995**.
+
+### Latência
+
+| | |
+|---|---|
+| atraso após o fim da palavra | mediana **−20 ms** · p90 **50 ms** · máx **100 ms** |
+| mel + embedding (1 s de áudio) | **2,3 ms** |
+| cabeça | **0,06 ms** |
+| passo de decisão | 80 ms |
+
+Mediana negativa significa que a decisão sai **antes** de a palavra acabar: a janela de
+1 s já contém o bastante. Com a ressalva de que "fim da palavra" é o do segmentador por
+energia, que inclui a cauda de decaimento — parte da antecipação é isso. O que é sólido
+é a ordem de grandeza: **a decisão acompanha o fim da palavra**, sem esperar silêncio,
+que é a diferença estrutural para o caminho por transcrição.
+
+Números desta máquina. O custo no aparelho ainda não foi medido, e a folga é grande.
+
+### O que este resultado NÃO é
+
+- **Não é independente de locutor.** Treino e teste são o Guido. A generalização para
+  três locutores inéditos foi medida antes, com um arranjo mais simples e `n=4`.
+- **Não tem falso positivo medido.** `0 disparos` em 3,8 s de `na escuta` não é taxa —
+  é ausência de amostra. A métrica real é **falsos por hora** de fala espontânea, e
+  para ela faltam horas, não minutos. **É a maior lacuna que existe hoje.**
+- **Não passou por HFP.** As gravações são do microfone do celular; a banda estreita é
+  simulada.
+
 ## O que ainda não foi medido, e sem o que nada disso vira aceite
 
 - **Fala humana real.** Tudo acima é Piper: um detector treinado no Piper e avaliado
