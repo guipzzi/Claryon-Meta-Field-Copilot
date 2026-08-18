@@ -84,8 +84,47 @@ Enquanto a decisão não vem, o que **existe e funciona** é o copiloto por bot�
 STT, TTS e troca de grupo faladas — que é exatamente o escopo dos entregáveis de
 22/08 (Fase 0). O gatilho por voz não entra neles.
 
+## O teste que autoriza treinar — feito em 17/08, e passou
+
+Antes de qualquer dependência no Android, a pergunta que decide: **o embedding
+pré-treinado do openWakeWord (inglês) separa "Claryon" das vizinhas em português?**
+Era o risco que matou o KWS do sherpa, e repeti-lo custaria semanas.
+
+Corpus: 60 rendições de `Claryon.` isolado e 35 palavras negativas × 60 — vizinhas de
+*clar-*, rimas em `-on` (`cordon`, `cânon`, `elétron`, `batom`) e o vocabulário de
+rádio. Divisão dura: positivos por rendição, e **dez palavras negativas inteiras fora
+do treino**. Cabeça de regressão logística sobre o embedding congelado.
+
+| | banda cheia | banda estreita (HFP) |
+|---|---|---|
+| recall com **zero** falso positivo | **100%** (20/20) | **100%** (20/20) |
+| escore médio positivo × negativo | 1,000 × 0,244 | 1,000 × 0,248 |
+| pior positivo × pior negativo | 0,998 × **0,997** | 0,998 × **0,997** |
+
+**A conclusão que vale é a primeira linha: o embedding transfere.** A banda estreita
+não custa quase nada, o que já é o contrário do que acontecia por transcrição.
+
+**A ressalva que vale é a terceira:** a margem é de um milésimo, e quem chega lá é
+`cordon` — plantada de propósito por rimar. Uma cabeça linear sobre embedding cru é o
+classificador mais fraco possível e não houve aumento de dados; ainda assim, tratar
+`100%` como resultado seria repetir o erro do dia. O que está provado é **viabilidade**,
+não desempenho.
+
+### O primeiro erro desta medição, registrado porque quase passou
+
+A primeira rodada também deu 100%, e estava contaminada: três dos quatro positivos
+eram frases de 1,3 a 2,2 s e **todo** negativo era palavra isolada de até 0,85 s.
+Média e máximo sobre um número variável de janelas carregam o comprimento, e o
+classificador achou o atalho antes de olhar para a palavra. A correção foi recortar
+todo clipe em exatamente 1,0 s centrado na energia e manter só `Claryon.` isolado
+como positivo. Os números acima são os de depois.
+
 ## O que ainda não foi medido, e sem o que nada disso vira aceite
 
+- **Fala humana real.** Tudo acima é Piper: um detector treinado no Piper e avaliado
+  no Piper mede se ele reconhece o Piper. Quatro locutores foram oferecidos pela
+  revisão humana, e o protocolo exige **deixar um locutor inteiro de fora a cada
+  rodada** — treinar e testar nas mesmas quatro vozes mede memorização.
 - **30 pronúncias reais por HFP**, de pessoas, com sotaque e hesitação.
 - **Falso positivo em fala espontânea** com `n` grande o bastante para ter intervalo
   de confiança. `0/30` não é "zero": é `[0%; 11,6%]` com 95%.
@@ -101,3 +140,5 @@ STT, TTS e troca de grupo faladas — que é exatamente o escopo dos entregávei
 | `SilencioDeAtaqueTest` | silêncio à frente não explica o ataque perdido |
 | `RepetibilidadeDaBancadaTest` | o Piper sorteia; o whisper não |
 | `PortaoPelaRimaTest` | a rima dobra o recall e abre falso positivo |
+| `DespejoDeCorpusTest` | gera o corpus em WAV, nas duas bandas, com o Piper do projeto |
+| `ferramentas/ativacao/honesto.py` | o teste de separabilidade, já sem o atalho da duração |
