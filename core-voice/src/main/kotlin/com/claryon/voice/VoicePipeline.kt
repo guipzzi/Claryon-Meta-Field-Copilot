@@ -22,7 +22,9 @@ data class PcmAudio(val samples: ShortArray, val sampleRateHz: Int) {
 }
 
 /** Evento de wake word: a palavra "Claryon" foi detectada. */
-data class WakeEvent(val timestampMillis: Long, val score: Float)
+// `WakeEvent` saiu junto: era o tipo de retorno da interface removida acima e não
+// tinha nenhum outro uso. O escore da detecção viaja hoje em
+// `CopilotService.ativacoes`, que é um `SharedFlow<Float>` de processo.
 
 /**
  * Segmento de fala delimitado pelo VAD (janela fechada ⇒ pronto para o STT).
@@ -76,13 +78,20 @@ interface TtsEngine {
     suspend fun synthesize(text: String): Result<PcmAudio>
 }
 
-/**
- * Detector de wake word — modelo minúsculo, sempre ligado (openWakeWord).
- * É o único componente que roda continuamente; por isso precisa ser barato.
- */
-interface WakeWordDetector {
-    fun detect(pcm: Flow<ShortArray>): Flow<WakeEvent>
-}
+// A interface `WakeWordDetector` morava aqui, com zero implementações e zero
+// chamadores, desde a primeira versão deste arquivo. Removida em 20/08, quando a
+// palavra de ativação passou a existir de verdade.
+//
+// **Não foi implementada — foi apagada**, e a diferença importa. Uma abstração sem
+// implementação afirma que existe um ponto de troca: que dá para pôr outro detector
+// no lugar. Não dava, porque não havia nenhum. E ela custou caro além do espaço: o
+// relatório de telemetria imprimia "wake word: sem produtor (WakeWordDetector é
+// interface sem implementação)" e essa frase virou mentira no dia em que
+// `EscutaDeAtivacao` entrou, sem ninguém mexer nela.
+//
+// Quem faz o trabalho hoje é `com.claryon.field.voice.EscutaDeAtivacao`, e a costura
+// para teste é `OuvidoDeAtivacao` — no módulo do app, onde o detector é usado, e não
+// aqui, onde ele era só prometido.
 
 /** Detector de atividade de voz (Silero VAD): delimita e fecha a janela de fala. */
 interface VoiceActivityDetector {

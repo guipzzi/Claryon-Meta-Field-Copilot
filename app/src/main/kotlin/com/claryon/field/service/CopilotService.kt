@@ -28,6 +28,7 @@ import com.claryon.field.voice.comoOuvido
 import com.claryon.voice.DetectorDeAtivacao
 import com.claryon.common.Earcon
 import com.claryon.common.Result
+import com.claryon.common.Telemetry
 import com.claryon.common.Priority
 import com.claryon.agent.Utterance
 import com.claryon.field.auth.SessaoDoAgente
@@ -75,6 +76,10 @@ class CopilotService : Service() {
     private var coletor: ColetorDePosicao? = null
     private var escuta: EscutaDeAtivacao? = null
 
+    /** Id do ciclo aberto pela última detecção, para o ciclo de voz reaproveitar. */
+    @Volatile
+    private var ultimaAtivacao: String? = null
+
     override fun onCreate() {
         super.onCreate()
         criarCanal()
@@ -97,7 +102,9 @@ class CopilotService : Service() {
         // escuta e o earcon já sobreviviam à tela; o comando, não.
         escopo.launch {
             ativacoes.collect {
-                CopilotoDoAgente.de(applicationContext).cicloDeVoz()
+                // O MESMO id que a detecção abriu: é o que liga `WAKE_DETECTED` ao
+                // `EARCON_PLAYED` e faz a meta de 500 ms existir como número.
+                CopilotoDoAgente.de(applicationContext).cicloDeVoz(ultimaAtivacao)
             }
         }
         // Antes de o coletor começar: sem turno, toda publicação é recusada.
@@ -143,6 +150,18 @@ class CopilotService : Service() {
                 }
             },
             aoDetectar = { escore ->
+                // **Abrir o ciclo ANTES do earcon.** `SaidaUnica` marca
+                // `EARCON_PLAYED` no ciclo CORRENTE, no instante em que o som entra
+                // no `AudioTrack`. Sem um ciclo aberto aqui, o marco cairia no
+                // ciclo anterior — ou em nenhum — e a meta de 500 ms nunca fecharia.
+                val cicloId = "ativacao-${System.currentTimeMillis()}"
+                SaidaUnica.telemetriaDoCiclo.abrirCiclo(cicloId)
+                SaidaUnica.telemetriaDoCiclo.mark(
+                    cicloId,
+                    Telemetry.Stage.WAKE_DETECTED,
+                    System.currentTimeMillis(),
+                )
+                ultimaAtivacao = cicloId
                 // **O PRIMEIRO de dois earcons, e eles dizem coisas diferentes.**
                 // Este é "estou ouvindo, pode falar", e é dele que sai a meta `fim de
                 // "Hey Claryon" → earcon ≤ 500 ms` — que só existe se quem confirma a

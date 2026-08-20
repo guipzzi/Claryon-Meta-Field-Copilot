@@ -25,7 +25,7 @@ import com.claryon.net.Medicao
  *    "≤ 400 ms" que o relatório afirmaria.
  *
  * [Telemetry.Stage.WAKE_DETECTED] **não tem produtor** e é honesto que não
- * tenha: `WakeWordDetector` é interface sem implementação (Fase 2). O relatório
+ * tenha. Até 20/08 a palavra de ativação era o exemplo disso; hoje ela produz. O relatório
  * mostra "sem amostras" em vez de zero.
  *
  * ## Ciclo corrente
@@ -60,6 +60,25 @@ class TelemetriaDoCicloDeVoz(private val capacidade: Int = CAPACIDADE) : Telemet
 
     /** Transições que valem meta declarada. */
     enum class Transicao(val rotulo: String, val metaMs: Long?) {
+        /**
+         * **A meta da palavra de ativação**, do roadmap da Fase 2: *"fim de 'Hey
+         * Claryon' → início do earcon `OUVI_VOCE`, p95 ≤ 500 ms"*.
+         *
+         * Ficou sem produtor até 20/08, e o relatório dizia isso com estas
+         * palavras: *"wake word: sem produtor (WakeWordDetector é interface sem
+         * implementação)"*. A frase era verdadeira e virou falsa no dia em que
+         * `EscutaDeAtivacao` passou a existir — mas continuou impressa, que é como
+         * um relatório honesto vira um relatório errado sem ninguém mexer nele.
+         *
+         * O zero é `WAKE_DETECTED`, marcado quando a janela do detector fecha com
+         * escore acima do limiar. Isso é **depois** do fim da palavra falada, por
+         * até um passo do detector (80 ms) — então o número medido aqui é
+         * ligeiramente OTIMISTA em relação à régua do agente, que começa a contar
+         * quando ele para de falar. Registrado para não ser lido como se fosse a
+         * régua dele.
+         */
+        ATIVACAO_ATE_EARCON("palavra de ativação → earcon", 500),
+
         FIM_DA_FALA_ATE_EARCON("fim da fala → earcon", 500),
         FIM_DA_FALA_ATE_RESPOSTA("fim da fala → resposta falada", 2_000),
         /**
@@ -137,6 +156,16 @@ class TelemetriaDoCicloDeVoz(private val capacidade: Int = CAPACIDADE) : Telemet
     }
 
     private fun fecharTransicoes(cycleId: String, doCiclo: Map<Telemetry.Stage, Long>) {
+        // **Antes do `return`.** A ativação tem o próprio zero (`WAKE_DETECTED`) e
+        // não depende do VAD: pô-la depois da guarda faria a métrica só existir
+        // quando o ciclo chegasse ao fim da fala — e ela morreria justamente nos
+        // ciclos que falham, que são os que mais interessam medir.
+        doCiclo[Telemetry.Stage.WAKE_DETECTED]?.let { acordou ->
+            doCiclo[Telemetry.Stage.EARCON_PLAYED]?.let {
+                registrar(cycleId, Transicao.ATIVACAO_ATE_EARCON, it - acordou)
+            }
+        }
+
         val fim = doCiclo[Telemetry.Stage.VAD_WINDOW_CLOSED] ?: return
         doCiclo[Telemetry.Stage.EARCON_PLAYED]?.let {
             registrar(cycleId, Transicao.FIM_DA_FALA_ATE_EARCON, it - fim)
@@ -192,7 +221,10 @@ class TelemetriaDoCicloDeVoz(private val capacidade: Int = CAPACIDADE) : Telemet
                 val meta = t.metaMs?.let { "  (meta ≤ ${it}ms)" } ?: ""
                 appendLine("  ${t.rotulo}: ${m ?: "sem amostras"}$meta")
             }
-            appendLine("  wake word: sem produtor (WakeWordDetector é interface sem implementação)")
+            // A linha "wake word: sem produtor" morava aqui e era verdadeira até
+            // 20/08. Não foi substituída por outra frase fixa: quem diz se há
+            // amostra é o laço acima, que imprime "sem amostras" quando não há.
+            // Frase fixa sobre estado é como aquela envelheceu para mentira.
         }
     }
 

@@ -314,7 +314,15 @@ class CerebroDoCopiloto(private val app: Context) {
      * "ouvindo" mesmo quando a captura falhou ao abrir — que é exatamente o
      * instante em que o agente precisa saber a verdade.
      */
-    fun cicloDeVoz() {
+    /**
+     * @param cicloIdExterno o id que **já** foi aberto por quem disparou. A palavra
+     *   de ativação passa o dela: o earcon de "estou ouvindo" sai lá, antes deste
+     *   ciclo existir, e a meta de 500 ms só fecha se os dois marcos caírem no
+     *   MESMO ciclo. Gerar um id novo aqui faria `WAKE_DETECTED` e `EARCON_PLAYED`
+     *   caírem em ciclos diferentes e a métrica ficaria eternamente "sem amostras",
+     *   sem erro nenhum aparecendo.
+     */
+    fun cicloDeVoz(cicloIdExterno: String? = null) {
         // Fora da Main: o VAD calcula RMS de 50 janelas/s e o STT carrega um
         // modelo de ~75 MB. Na Main isso congela a UI e arrisca ANR justamente
         // na janela em que a meta é responder em ≤ 2,0 s.
@@ -377,8 +385,9 @@ class CerebroDoCopiloto(private val app: Context) {
             escopo.launch { SaidaUnica.aquecer(app) }
 
             // Um id, gerado uma vez, usado pelos dois lados da instrumentação.
-            val cicloId = "ciclo-${System.currentTimeMillis()}"
-            SaidaUnica.telemetriaDoCiclo.abrirCiclo(cicloId)
+            val cicloId = cicloIdExterno ?: "ciclo-${System.currentTimeMillis()}".also {
+                SaidaUnica.telemetriaDoCiclo.abrirCiclo(it)
+            }
 
             val cycle = VoiceCycle(
                 pcmInput = { audio.microfonePcm(prova) },
