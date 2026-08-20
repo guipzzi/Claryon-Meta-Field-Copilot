@@ -634,8 +634,22 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
      * achar que detêm o canal ao mesmo tempo e falar por cima. Quem opera precisa
      * saber que está nesse modo — por isso o log e o estado, não só o `else`.
      */
-    private fun pisoDoCanal(agenteId: String): ClienteDePiso {
-        val token = SessaoDoAgente.tokenCorrente
+    private suspend fun pisoDoCanal(agenteId: String): ClienteDePiso {
+        // **`tokenValido()`, não `tokenCorrente`.** O segundo é cache da última
+        // credencial JÁ validada, e logo depois do login ninguém validou nada
+        // ainda: a decisão caía em LOCAL e ficava assim o turno inteiro, porque é
+        // tomada uma vez só, aqui.
+        //
+        // O sintoma era visível e ninguém ligava os pontos: no emulador, um login
+        // bem-sucedido era seguido de "piso LOCAL: sem sessão" um segundo depois.
+        // Com piso local, dois agentes podem achar que detêm o canal e falar por
+        // cima — que é exatamente o que `ClienteDePisoRemoto` foi ligado para
+        // impedir, e ele estava sendo desligado por uma corrida de inicialização.
+        //
+        // Esta função já roda dentro do `launch` de `abrir`, então suspender aqui
+        // não custa nada — e `tokenValido()` de quebra popula o cache que as
+        // leituras síncronas seguintes vão usar.
+        val token = SessaoDoAgente.tokenValido(getApplication())
         if (token == null) {
             Log.w(TAG, "piso LOCAL: sem sessão. Sem arbitragem do servidor entre aparelhos.")
             pisoRemoto = false
