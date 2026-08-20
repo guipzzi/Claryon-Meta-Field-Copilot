@@ -1593,3 +1593,45 @@ de memória, que é como este projeto já errou com `pedir_piso`.
   Nota: o **histórico** já é confiável por outro caminho — `transmissions` tem
   `with check (false)` para INSERT direto (`0002_rls.sql`) e é escrito pela Edge
   Function `transmit`, que deriva o autor da sessão. O problema é só o anúncio ao vivo.
+
+## 2026-08-20 — A idade da posição é uma DURAÇÃO, não um instante
+
+**Decisão:** `publicar_posicao` recebe `idade_ms` e o servidor faz `now() - idade`.
+O cliente nunca envia um carimbo de tempo.
+
+**Alternativa descartada:** aceitar `medida_em` como parâmetro. Era o caminho óbvio
+e de uma linha.
+
+**Motivo:** ressuscitaria exatamente o buraco que a `0016` gastou uma migração
+inteira fechando — lá o exploit gravou `updated_at = 2099` e a linha ficou
+permanentemente "fresca" para a guarnição toda. E nem exigiria má-fé: celular com
+relógio adiantado publica posição do futuro sozinho. Com duração, a propriedade
+vale por construção: `now() - greatest(0, idade) ≤ now()` para qualquer entrada,
+inclusive negativa. `elapsedRealtimeNanos` é monotônico e imune a fuso, NTP e ao
+usuário mexendo no relógio.
+
+**Resíduo aceito:** a idade é calculada no cliente e o `now()` acontece depois da
+viagem, então `medida_em` fica otimista pelo tempo de ida — sempre nessa direção,
+que é a perigosa. São centenas de ms contra limiares de 120 s e 600 s: 0,4% do
+primeiro. Está escrito na `0020` para não ser redescoberto como defeito.
+
+## 2026-08-20 — O filtro de salto precisa de uma válvula, ou ele mente parado
+
+**Decisão:** `PortaDeCorrecao` aceita a quarta correção depois de três recusas
+seguidas, mesmo que continue discordando da referência.
+
+**Alternativa descartada:** recusar sempre que a velocidade implícita for
+implausível. É a forma que todo mundo escreve.
+
+**Motivo:** ela trava sozinha. A comparação é sempre contra a última ACEITA, então
+quando o salto é **verdadeiro** — agente entrou na viatura e andou 3 km enquanto o
+túnel comia o sinal — toda correção nova discorda de um ponto que não é mais
+verdade, e o marcador congela para o resto do turno. Isso é pior que sumir do mapa:
+sumir é honesto, congelado é uma afirmação falsa. O custo da válvula é três
+intervalos de correção num salto verdadeiro; o custo de não tê-la é um turno.
+
+Mesma lógica na porta de precisão, que é **relativa e temporal** em vez de um teto
+em metros: um teto fixo recusaria o modo Standby inteiro, que usa a rede de
+propósito e erra 100–1000 m. E no teste de salto, que compara contra a **incerteza
+combinada** dos dois pontos: 5 km entre duas correções com 3 km de erro cada não é
+salto, é ruído.

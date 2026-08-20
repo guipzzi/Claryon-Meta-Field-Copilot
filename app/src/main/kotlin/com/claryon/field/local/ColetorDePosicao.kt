@@ -10,7 +10,11 @@ import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import com.claryon.agent.ModoOperacao
+import com.claryon.agent.Correcao
+import com.claryon.agent.PlanoDePosicao
 import com.claryon.agent.PoliticaDePosicao
+import com.claryon.agent.PortaDeCorrecao
+import com.claryon.agent.Veredito
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
@@ -36,8 +40,27 @@ import kotlinx.coroutines.launch
  *     pausa. GPS só em Ativo e Ocorrência, que é quando metro importa.
  *
  *  3. **Deslocamento como gatilho, não só tempo.** Agente parado em ponto fixo —
- *     boa parte do turno — quase não publica. O `minDistance` faz o próprio
- *     sistema não nos acordar, então parado custa zero, não "pouco".
+ *     boa parte do turno — quase não publica. O filtro mora em [aoReceber]: o
+ *     `minDistance` do `requestLocationUpdates` fica em **zero**, de propósito.
+ *
+ *     Ele já esteve preenchido, e por 20/08 esta lista dizia que isso fazia "o
+ *     próprio sistema não nos acordar, então parado custa zero". Custava mais que
+ *     zero: custava o batimento inteiro. A moldura é explícita — *"if a potential
+ *     location update is closer to the last location update than the minimum
+ *     update distance, then the potential location update will not occur"* — então
+ *     um agente parado **não recebia callback nenhum**, `aoReceber` nunca rodava,
+ *     e a linha que testa o batimento era inalcançável. O parágrafo seguinte deste
+ *     mesmo KDoc afirmava que o batimento existia para o agente parado. Os dois
+ *     não podiam ser verdade, e o errado era este.
+ *
+ *     Quem sofria mais era o modo Ocorrência: o agente chega no local e fica
+ *     parado, que é exatamente quando a guarnição precisa saber onde ele está — e
+ *     era aí que ele esmaecia aos 2 min e virava "antigo" aos 10.
+ *
+ *     O que se perde com `minDistance = 0` é a supressão da ENTREGA, não o ciclo
+ *     do rádio de GPS, que é governado por `minTime`. Para um agente em
+ *     movimento, o tráfego no fio é idêntico ao de antes: o mesmo filtro, no
+ *     mesmo metro, só que num lugar onde o batimento também pode votar.
  *
  *  4. **Posição NUNCA vai para fila offline.** Se a publicação falha, a posição é
  *     descartada e a próxima correção carrega o dado novo. Isto contraria o padrão
@@ -51,10 +74,28 @@ import kotlinx.coroutines.launch
 class ColetorDePosicao(
     private val context: Context,
     private val escopo: CoroutineScope,
-    /** Publica no servidor. Recebe também a velocidade, que alimenta "deslocando". */
-    private val publicar: suspend (lat: Double, lon: Double, precisaoM: Float, velocidadeMs: Float?) -> Unit,
+    /**
+     * Publica no servidor. Recebe também a velocidade, que alimenta "deslocando",
+     * e o `elapsedRealtimeNanos` da correção, de onde sai a idade real.
+     */
+    private val publicar: suspend (
+        lat: Double,
+        lon: Double,
+        precisaoM: Float,
+        velocidadeMs: Float?,
+        nanosDaCorrecao: Long,
+    ) -> Unit,
     private val agoraMs: () -> Long = { SystemClock.elapsedRealtime() },
 ) {
+
+    /**
+     * Recriada a cada `ajustarPara`: a porta guarda a última correção aceita, e
+     * mudar de provedor troca a escala de precisão inteira (GPS 8 m ↔ rede
+     * 800 m). Carregar a referência do GPS para dentro do Standby faria a
+     * primeira correção de rede ser recusada por "degradação" três vezes seguidas
+     * até a válvula ceder — recusa correta pela regra, errada pelo mundo.
+     */
+    private var porta = PortaDeCorrecao()
 
     private val lm: LocationManager? =
         context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
@@ -91,13 +132,18 @@ class ColetorDePosicao(
             return
         }
 
-        val novo = LocationListener { local -> aoReceber(local, plano.deslocamentoMinimoM) }
+        val novo = LocationListener { local -> aoReceber(local, plano) }
         runCatching {
             @Suppress("MissingPermission")
             lm?.requestLocationUpdates(
                 provedor,
                 plano.intervaloMs,
-                plano.deslocamentoMinimoM,
+                // **Zero, e não `plano.deslocamentoMinimoM`.** O filtro de
+                // deslocamento continua existindo — mudou de lugar, para dentro de
+                // `aoReceber`, onde o batimento também pode votar. Ver o KDoc da
+                // classe: enquanto ele estava aqui, agente parado não recebia
+                // callback nenhum e o batimento era código inalcançável.
+                0f,
                 novo,
                 Looper.getMainLooper(),
             )
@@ -106,12 +152,14 @@ class ColetorDePosicao(
             return
         }
 
+        porta = PortaDeCorrecao()
         ouvinte = novo
         modoAtual = modo
         mapaVisivelAtual = mapaVisivel
         Log.i(
             TAG,
-            "coleta em $modo por $provedor: ${plano.intervaloMs}ms / ${plano.deslocamentoMinimoM}m",
+            "coleta em $modo por $provedor: ${plano.intervaloMs}ms, publica a cada " +
+                "${plano.deslocamentoMinimoM}m ou ${plano.batimentoEfetivoMs / 1000}s parado",
         )
     }
 
@@ -121,19 +169,41 @@ class ColetorDePosicao(
         modoAtual = null
     }
 
-    private fun aoReceber(local: Location, deslocamentoMinimoM: Float) {
+    private fun aoReceber(local: Location, plano: PlanoDePosicao) {
         if (!coordenadaValida(local)) return
+
+        // **A porta de qualidade vem antes da porta de cadência**, e a ordem
+        // importa: julgar a cadência primeiro faria uma correção-lixo "resetar" o
+        // relógio do batimento sem nunca ser publicada, e o agente sumiria do mapa
+        // exatamente enquanto o GPS estivesse ruim — que é quando ele mais precisa
+        // aparecer.
+        val correcao = Correcao(
+            latitude = local.latitude,
+            longitude = local.longitude,
+            precisaoM = if (local.hasAccuracy()) local.accuracy else Correcao.PRECISAO_DESCONHECIDA,
+            nanos = local.elapsedRealtimeNanos,
+        )
+        when (val v = porta.avaliar(correcao)) {
+            is Veredito.Recusada -> {
+                // Recusa silenciosa é a pior: some do mapa sem ninguém saber por quê.
+                Log.i(TAG, "correção recusada (${v.motivo}): ${v.detalhe}")
+                return
+            }
+            Veredito.Aceita -> Unit
+        }
 
         val anterior = ultimaPublicada
         val idadeDaUltima = agoraMs() - ultimaPublicacaoMs
         val andou = anterior == null ||
-            anterior.distanceTo(local) >= deslocamentoMinimoM
-        val batimentoVencido = idadeDaUltima >= BATIMENTO_MS
+            anterior.distanceTo(local) >= plano.deslocamentoMinimoM
+        val batimentoVencido = idadeDaUltima >= plano.batimentoMs
 
-        // Publicar só quando andou **ou** quando o batimento venceu. O
-        // `minDistance` já filtra a maior parte, mas o provedor de rede entrega
-        // correções por tempo mesmo parado — sem esta porta, um agente sentado na
-        // viatura publicaria a cada minuto pelo turno inteiro.
+        // Publicar só quando andou **ou** quando o batimento venceu. O filtro de
+        // deslocamento mora aqui — e não mais no `requestLocationUpdates` — porque
+        // lá ele suprimia o callback inteiro e o batimento nunca era avaliado.
+        // Para um agente EM MOVIMENTO o comportamento no fio é idêntico ao de
+        // antes; a diferença aparece só quando ele para, que é o caso que o
+        // batimento existe para cobrir.
         if (!andou && !batimentoVencido) return
 
         ultimaPublicada = local
@@ -146,6 +216,10 @@ class ColetorDePosicao(
                     local.longitude,
                     if (local.hasAccuracy()) local.accuracy else Float.MAX_VALUE,
                     if (local.hasSpeed()) local.speed else null,
+                    // A idade real da correção. O servidor faz `now() - idade`;
+                    // ver `0020_idade_real_da_correcao.sql` para por que não pode
+                    // ser um instante.
+                    local.elapsedRealtimeNanos,
                 )
             }.onFailure {
                 // Falhou: **descarta**. A próxima correção carrega dado novo, e uma
@@ -191,14 +265,5 @@ class ColetorDePosicao(
 
     private companion object {
         const val TAG = "ClaryonField"
-
-        /**
-         * 3 min. Agente parado precisa reaparecer antes de o marcador esmaecer
-         * (2 min) virar "antigo" (10 min) — some do mapa é o pior estado, porque
-         * companheiro que desaparece parece em perigo.
-         *
-         * Publicar a cada 3 min parado custa ~20 requisições por turno de 8 h.
-         */
-        const val BATIMENTO_MS = 3 * 60 * 1000L
     }
 }

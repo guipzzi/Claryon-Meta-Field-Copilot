@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.location.LocationManager
 import android.os.SystemClock
+import com.claryon.agent.EscolhaDeCorrecao
 import com.claryon.agent.PoliticaDePosicao
 import com.claryon.field.agent.Coordenada
 
@@ -55,12 +56,23 @@ class ProvedorDeLocal(private val context: Context) {
             }.getOrNull()
         }
 
-        // A mais recente entre os provedores. `elapsedRealtimeNanos` e não
-        // `time`: o relógio de parede pode ser ajustado (fuso, NTP, o próprio
-        // usuário) e uma correção de 10 s pareceria de uma hora atrás — ou o
-        // contrário, que é pior.
+        // A **melhor** entre os provedores, não a mais recente. `maxByOrNull { it
+        // .elapsedRealtimeNanos }` entregava sistematicamente o pior dado: a rede
+        // responde em milissegundos com 100–1000 m de erro, o GPS tem um ponto de
+        // 20 s atrás com 8 m, e a mais nova ganhava. A consulta por voz media a
+        // distância a partir do ponto de torre e devolvia um número com uma casa
+        // decimal — precisão de mentira sobre coordenada de mentira.
+        //
+        // `elapsedRealtimeNanos` e não `time`: o relógio de parede pode ser
+        // ajustado (fuso, NTP, o próprio usuário) e uma correção de 10 s pareceria
+        // de uma hora atrás — ou o contrário, que é pior.
         val agora = SystemClock.elapsedRealtimeNanos()
-        val melhor = candidatas.maxByOrNull { it.elapsedRealtimeNanos } ?: return null
+        val melhor = EscolhaDeCorrecao.melhor(
+            candidatas = candidatas,
+            agoraNanos = agora,
+            nanos = { it.elapsedRealtimeNanos },
+            precisaoM = { if (it.hasAccuracy()) it.accuracy else PRECISAO_DESCONHECIDA },
+        ) ?: return null
 
         val idadeS = ((agora - melhor.elapsedRealtimeNanos) / 1_000_000_000L).toInt()
         if (PoliticaDePosicao.marcadorObsoleto(idadeS)) return null

@@ -66,8 +66,8 @@ class CopilotService : Service() {
         coletor = ColetorDePosicao(
             context = this,
             escopo = escopo,
-            publicar = { lat, lon, precisao, velocidade ->
-                escritorDePosicao().publicar(lat, lon, precisao, velocidade)
+            publicar = { lat, lon, precisao, velocidade, nanos ->
+                escritorDePosicao().publicar(lat, lon, precisao, velocidade, nanos)
             },
         )
         // Antes de o coletor começar: sem turno, toda publicação é recusada.

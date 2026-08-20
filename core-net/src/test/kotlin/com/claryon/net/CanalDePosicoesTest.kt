@@ -29,7 +29,7 @@ class CanalDePosicoesTest {
         val publicadas = mutableListOf<Triple<Double, Double, Float?>>()
 
         override fun publicando() = ativo
-        override suspend fun publicar(lat: Double, lon: Double, precisaoM: Float, velocidadeMs: Float?) {
+        override suspend fun publicar(lat: Double, lon: Double, precisaoM: Float, velocidadeMs: Float?, nanosDaCorrecao: Long?) {
             publicadas += Triple(lat, lon, velocidadeMs)
         }
         /** Trava para segurar `assinarPares` no meio e reproduzir a corrida. */

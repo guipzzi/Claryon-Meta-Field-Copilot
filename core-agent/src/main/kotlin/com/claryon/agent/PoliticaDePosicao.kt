@@ -7,7 +7,26 @@ data class PlanoDePosicao(
     val altaPrecisao: Boolean,
     /** Assinar o canal de posições dos pares — só com o mapa à vista. */
     val assinarPares: Boolean,
-)
+    /**
+     * De quanto em quanto tempo publicar **mesmo parado**.
+     *
+     * Não pode ser menor que [intervaloMs]: o batimento só acontece quando uma
+     * correção chega, e correção só chega na cadência do provedor. O batimento
+     * **efetivo** é o primeiro múltiplo de [intervaloMs] que alcança este valor —
+     * é [batimentoEfetivoMs] quem calcula, e é ele que precisa caber embaixo de
+     * [PoliticaDePosicao.OBSOLETO_S], não este número.
+     */
+    val batimentoMs: Long,
+) {
+    /**
+     * O batimento que de fato acontece. Escrever `batimentoMs = 90_000` com
+     * `intervaloMs = 60_000` não dá 90 s: dá 120 s, porque a correção seguinte
+     * só chega aos 120. Foi essa aritmética que fez o número declarado e o
+     * número real divergirem sem ninguém notar.
+     */
+    val batimentoEfetivoMs: Long
+        get() = ((batimentoMs + intervaloMs - 1) / intervaloMs) * intervaloMs
+}
 
 /**
  * **Política de posição — a decisão que protege a bateria.**
@@ -33,28 +52,42 @@ object PoliticaDePosicao {
 
     fun planoPara(modo: ModoOperacao, mapaVisivel: Boolean): PlanoDePosicao = when (modo) {
 
-        // Pausa: cadência baixa, mas **nunca zero**.
+        // Pausa: cadência baixa, mas **nunca zero**. Aqui, e só aqui, o batimento
+        // efetivo (5 min) passa de OBSOLETO_S e o marcador aparece esmaecido a
+        // maior parte do tempo. É deliberado e é a leitura correta: a posição de
+        // um agente em pausa, colhida pela rede com 250 m de tolerância, **pode
+        // mesmo não ser mais verdade**. Esmaecer diz isso; publicar de minuto em
+        // minuto para manter o marcador cheio seria mentir com mais bateria.
         ModoOperacao.STANDBY -> PlanoDePosicao(
             intervaloMs = 5 * 60 * 1000,
             deslocamentoMinimoM = 250f,
             altaPrecisao = false,
             assinarPares = mapaVisivel,
+            batimentoMs = 5 * 60 * 1000,
         )
 
+        // 60 s parado, não 3 min. Com 3 min o batimento caía DEPOIS dos 120 s de
+        // OBSOLETO_S, e todo agente parado em serviço ficava esmaecido um terço
+        // do tempo — um indicador que acende no estado normal ensina a ignorá-lo,
+        // e aí ele não avisa mais nada quando importa.
         ModoOperacao.ATIVO -> PlanoDePosicao(
             intervaloMs = 60 * 1000,
             deslocamentoMinimoM = 50f,
             altaPrecisao = true,
             assinarPares = mapaVisivel,
+            batimentoMs = 60 * 1000,
         )
 
         // Ocorrência: a posição dos pares vira informação tática de segundo a
-        // segundo, e o custo de bateria é aceitável numa janela curta.
+        // segundo, e o custo de bateria é aceitável numa janela curta. É também o
+        // modo em que o agente MAIS fica parado — chegou no local e ficou — e
+        // portanto aquele em que o batimento inalcançável doía mais.
         ModoOperacao.OCORRENCIA -> PlanoDePosicao(
             intervaloMs = 15 * 1000,
             deslocamentoMinimoM = 10f,
             altaPrecisao = true,
             assinarPares = mapaVisivel,
+            batimentoMs = 60 * 1000,
         )
     }
 

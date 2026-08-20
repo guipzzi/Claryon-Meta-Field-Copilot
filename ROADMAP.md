@@ -364,10 +364,19 @@ existência de uma tabela.
   Resolve num diff o custo de 720 escritas/h, a escrita redundante, o apagamento de
   `speed_mps` e a falsificação de frescor — esforço: 1 sessão — depende: quebra do
   `DiagnosticsViewModel`.
-- [P2] Batimento alcançável com o agente parado, idade real da correção carimbada no
+- [P2] ~~Batimento alcançável com o agente parado, idade real da correção carimbada no
   servidor (`medida_em`, não hora do upload), porta de precisão com teste de salto, e
-  `ultimaPosicao()` escolhendo a **melhor** correção e não a mais nova — esforço: 2 sessões
-  — depende: dono único.
+  `ultimaPosicao()` escolhendo a **melhor** correção e não a mais nova~~ **FEITO em 20/08,
+  as quatro cláusulas.** (a) O batimento era **inalcançável**: o `minDistance` do
+  `requestLocationUpdates` suprime a entrega — *"the potential location update will not
+  occur"*, AOSP — então agente parado não recebia callback e a linha do batimento nunca
+  rodava. Medido no emulador, parado, 3,5 min: **5 publicações com o conserto, 1 sem**.
+  (b) `0020` + `private.instante_da_medicao`; o cliente manda **duração** de
+  `elapsedRealtimeNanos`, nunca instante — `now() - greatest(0, idade)` não produz futuro
+  por construção. Quatro leitores migrados juntos. (c) `PortaDeCorrecao`, relativa e com
+  incerteza combinada, mais a **válvula de 3 recusas** sem a qual um salto verdadeiro
+  congela o marcador. (d) `EscolhaDeCorrecao`, idade antes de precisão. 24 testes JVM
+  novos, cada um com contra-teste; verificador `0009` 17/17.
 - [P2] Arredondamento de distância dentro de `consultar_posicao` e `posicoes_do_grupo`. O
   arredondamento para 50/100 m existe em `locate.ts` e está morto; a função viva devolve
   precisão métrica crua — esforço: 0,3 sessão — depende: nada.

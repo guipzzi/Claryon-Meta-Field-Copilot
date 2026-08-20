@@ -223,7 +223,20 @@ interface PublicadorDePosicao {
     /** `true` se a posição própria está subindo. Pré-condição da reciprocidade. */
     fun publicando(): Boolean
 
-    suspend fun publicar(lat: Double, lon: Double, precisaoM: Float, velocidadeMs: Float?)
+    /**
+     * @param nanosDaCorrecao `elapsedRealtimeNanos` do instante em que o GPS
+     *   fixou o ponto — **não** a hora de parede. O servidor faz `now() - idade`,
+     *   e uma duração monotônica é imune a fuso, NTP e ao usuário mexendo no
+     *   relógio. Nulo quando a origem não soube dizer: o servidor trata como
+     *   "medido agora", que é o que ele já fazia antes de existir esta coluna.
+     */
+    suspend fun publicar(
+        lat: Double,
+        lon: Double,
+        precisaoM: Float,
+        velocidadeMs: Float?,
+        nanosDaCorrecao: Long? = null,
+    )
 
     suspend fun assinarPares(talkGroupId: String): Boolean
 

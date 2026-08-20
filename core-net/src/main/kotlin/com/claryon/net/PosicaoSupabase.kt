@@ -22,6 +22,8 @@ class PublicadorDePosicaoSupabase(
     private val config: ConfigRealtime,
     private val tokenDeSessao: suspend () -> String?,
     private val client: OkHttpClient = OkHttpClient(),
+    /** Injetável só para o teste conseguir provar a idade sem esperar de verdade. */
+    private val agoraNanos: () -> Long = { android.os.SystemClock.elapsedRealtimeNanos() },
 ) : PublicadorDePosicao {
 
     @Volatile
@@ -63,15 +65,27 @@ class PublicadorDePosicaoSupabase(
         lon: Double,
         precisaoM: Float,
         velocidadeMs: Float?,
+        nanosDaCorrecao: Long?,
     ) {
         val token = tokenDeSessao() ?: run {
             ultimaPublicacaoOk = false
             return
         }
         withContext(Dispatchers.IO) {
+            // **A idade sai daqui, e não de quem chamou.** Entre a correção do GPS
+            // e este ponto existe a fila do coletor, o `withContext` e a espera
+            // pelo token; calcular lá em cima congelaria um número que envelhece
+            // sozinho no caminho. Aqui falta só a viagem da requisição, que é o
+            // resíduo que a `0020` documenta e não tem como eliminar.
+            val idadeMs = nanosDaCorrecao?.let { (agoraNanos() - it) / 1_000_000L }
+
             val corpo = JSONObject()
                 .put("lat", lat)
                 .put("lon", lon)
+                // O servidor satura em [0, 1 h]; mandar nulo quando a origem não
+                // soube dizer é diferente de mandar zero, que seria a afirmação
+                // "medido exatamente agora" sem nada a sustentá-la.
+                .put("idade_ms", idadeMs ?: JSONObject.NULL)
                 // `Float.MAX_VALUE` é o sentinela de "o aparelho não soube dizer".
                 // Mandar esse número faria o servidor guardar uma precisão de
                 // 3×10³⁸ metros, que num relatório pareceria um dado real.
