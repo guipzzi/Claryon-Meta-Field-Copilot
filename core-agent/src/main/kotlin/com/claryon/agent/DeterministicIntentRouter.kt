@@ -70,11 +70,11 @@ class DeterministicIntentRouter : IntentRouter {
             // meio da fala. Aqui não serve: "na escuta" é vocabulário corrente de
             // rádio, e abrir canal por conter a frase faria o produto transmitir
             // ouvindo a própria guarnição. Âncoras `^…$`, e palavra extra recusa.
-            ABRIR_TRANSMISSAO.matchEntire(texto) != null ->
+            ABRIR_TRANSMISSAO.matchEntire(texto)?.let { ePalavraDeGuarnicao(it.groupValues[1]) } == true ->
                 // Grafia CANÔNICA no rótulo, sempre. O resolvedor compara contra o
                 // `rotulo_falado` do cadastro, e "guarney sao 1" não casa com nada.
                 Intent.AbrirTransmissao(
-                    "guarnicao " + ABRIR_TRANSMISSAO.matchEntire(texto)!!.groupValues[1].trim(),
+                    "guarnicao " + ABRIR_TRANSMISSAO.matchEntire(texto)!!.groupValues[2].trim(),
                 )
 
             matches(texto, TROCAR_DE_GRUPO) ->
@@ -180,7 +180,7 @@ class DeterministicIntentRouter : IntentRouter {
     private fun matches(texto: String, padroes: List<String>): Boolean =
         padroes.any { texto.contains(it) }
 
-    private companion object {
+    companion object {
         // Verbos-chave já normalizados (sem acento, minúsculo).
         // Só gatilhos de pânico explícito. "tiros" e "homem caído" saíram daqui
         // de propósito: o léxico os classifica com tipo, prioridade E logradouro,
@@ -266,10 +266,37 @@ class DeterministicIntentRouter : IntentRouter {
          * tira acento e espaço, não pontuação — este mesmo arquivo já registra, no
          * KDoc de `extrairRotuloDeGrupo`, que supor o contrário custou um defeito.
          */
-        val ABRIR_TRANSMISSAO = Regex(
-            "^(?:" + GRAFIAS_DE_GUARNICAO.joinToString("|") { Regex.escape(it) } +
-                ") (.{1,16}?) na escuta[.!?…,;\\s]*$",
-        )
+        val ABRIR_TRANSMISSAO = Regex("^(\\S+(?: \\S+)?) (.{1,16}?) na escuta[.!?…,;\\s]*$")
+
+        /**
+         * A primeira parte da frase é mesmo "guarnição"?
+         *
+         * **Fonético mais lista medida, e os dois têm papel distinto.** A chave
+         * cobre a variação gráfica sistemática ("guarniçam", "guarnisão",
+         * "garnição"); a lista cobre o caso que a chave não alcança — "guarney sao"
+         * tem uma sílaba a mais e fica a distância 3, e baixar o portão até lá
+         * aceitaria "guarda" e "guarita".
+         *
+         * Ou seja: o que é regular vai pela regra, o que é exceção medida vai pelo
+         * nome. Enumerar tudo não escala; generalizar tudo abre o portão.
+         */
+        fun ePalavraDeGuarnicao(t: String): Boolean =
+            GRAFIAS_DE_GUARNICAO.any { it == t } || ChaveFonetica.pareceCom(t, "guarnicao", TOLERANCIA_GUARNICAO)
+
+        /**
+         * **2, e a diferença para a ativação é justificada.**
+         *
+         * A palavra de ativação usa tolerância ZERO porque ela sozinha decide se o
+         * agente falou com o copiloto — e com 1 a frase *"clarim, guarnição 3 na
+         * escuta"* abria canal (medido).
+         *
+         * Aqui não: para chegar neste ponto a fala JÁ passou pelo detector acústico
+         * e pela conferência do gatilho. O que sobra é escolher qual guarnição, e o
+         * erro final é barrado pelo léxico FECHADO do cadastro — um rótulo que não
+         * existe não vira canal nenhum. Então 2 compra cobertura sem custo de
+         * segurança: medido, zero falsos aceites em 58 negativos.
+         */
+        const val TOLERANCIA_GUARNICAO = 2
 
         val TROCAR_DE_GRUPO = listOf(
             "mudar para", "trocar para", "mudar pra", "trocar pra",

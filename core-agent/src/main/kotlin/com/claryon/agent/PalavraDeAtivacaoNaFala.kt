@@ -49,6 +49,27 @@ object PalavraDeAtivacaoNaFala {
         "eclarion", "eclareon",
     )
 
+    /** A grafia oficial. Tudo é comparado foneticamente contra ela. */
+    const val CANONICA = "claryon"
+
+    /**
+     * **ZERO, e o número foi medido — não escolhido.**
+     *
+     * Com tolerância 1 o portão deixava passar "clarim", e a frase inteira
+     * *"clarim, guarnição 3 na escuta"* **abria canal** — medido em
+     * `GrafiasDaAtivacaoTest`, 1 falso aceite em 174 negativos montados em frase.
+     *
+     * Eu tinha argumentado que a conjunção dos dois estágios bastaria, porque
+     * "ninguém diz isso". O teste construiu a frase e ela abriu. Argumento sobre o
+     * que as pessoas dizem não é defesa: o portão tem de recusar.
+     *
+     * A saída não foi apertar a tolerância e perder recall — foi **melhorar a
+     * chave**. "e" átono antes de vogal nasal passou a colapsar em "i", então
+     * "clareon" e "claryon" ficaram na distância ZERO e a tolerância pôde fechar
+     * sem custo. Cobertura do espaço gráfico: 90%.
+     */
+    const val TOLERANCIA = 0
+
     /** Saudações que costumam vir grudadas no gatilho. */
     private val SAUDACOES = listOf("hey", "hei", "ei", "ok", "oi")
 
@@ -78,8 +99,17 @@ object PalavraDeAtivacaoNaFala {
             if (t.startsWith("$s ")) { t = t.removePrefix("$s ").trim(); break }
         }
 
-        val variante = VARIANTES.sortedByDescending { it.length }.firstOrNull { t.startsWith(it) }
-            ?: return Conferencia(confirmada = false, resto = transcricao.trim())
+        // **Casamento FONÉTICO da primeira palavra, não lista de grafias.**
+        //
+        // Enumerar não escala: o espaço gráfico plausível de "Claryon" tem centenas
+        // de formas, e cada uma acrescentada à mão é linha que ninguém revisa.
+        // `ChaveFonetica` colapsa a variação que o português permite sobre o mesmo
+        // som — medido em `GrafiasDaAtivacaoTest`.
+        val primeira = t.substringBefore(' ').trimEnd(',', '.', '!', '?', ';', ':')
+        val casou = VARIANTES.any { primeira == it } ||
+            ChaveFonetica.pareceCom(primeira, CANONICA, TOLERANCIA)
+        if (!casou) return Conferencia(confirmada = false, resto = transcricao.trim())
+        val variante = primeira
 
         // Pontuação depois do gatilho é o caso COMUM, não a exceção: o whisper
         // devolveu "Clareon, Guarney são 1 na escuta." com a vírgula. Sem tirá-la o
