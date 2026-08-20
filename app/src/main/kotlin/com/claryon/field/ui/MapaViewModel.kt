@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.claryon.agent.FalaDePosicao
 import com.claryon.field.auth.SessaoDoAgente
 import com.claryon.field.local.ProvedorDeLocal
+import com.claryon.field.radio.CanaisDoAgente
 import com.claryon.field.radio.CanalDoPiloto
 import com.claryon.field.mapa.TracoDoRastro
 import com.claryon.agent.Rumo
@@ -101,12 +102,12 @@ class MapaViewModel(app: Application) : AndroidViewModel(app) {
             // acessório e o agente não pode perder a guarnição de vista por causa
             // dele. Mas a falha é anotada, porque log que some em silêncio é o mesmo
             // que log nenhum.
-            sessaoDeMapa = historico.abrirMapa(CanalDoPiloto.ID)
+            sessaoDeMapa = historico.abrirMapa(CanaisDoAgente.grupoCorrenteId)
                 .onFailure { Log.w(TAG, "sessão de mapa não registrada", it) }
                 .getOrNull()
 
             while (true) {
-                val r = historico.posicoesDoGrupo(CanalDoPiloto.ID)
+                val r = historico.posicoesDoGrupo(CanaisDoAgente.grupoCorrenteId)
                 // **O rastro sobrevive ao redesenho.** `montarMapa` devolve um
                 // `EstadoDoMapa` NOVO, e os campos de rastro nasceriam vazios nele —
                 // o rastro carregava e era apagado em menos de cinco segundos, sem

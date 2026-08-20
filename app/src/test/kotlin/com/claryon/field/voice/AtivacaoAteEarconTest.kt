@@ -145,17 +145,13 @@ class AtivacaoAteEarconTest {
      * de checar o negativo: o par ficava envenenado e a transição não podia mais
      * ser registrada nunca, nem por um ciclo posterior saudável.
      *
-     * **A revisão superestimou o alcance, e a diferença importa.** `jaRegistradas`
-     * é chaveado por `(ciclo, transição)`, então o envenenamento é POR CICLO: um
-     * ciclo pelo botão, depois, registra normalmente. O que sobra é real e mais
-     * estreito — no caminho da voz a métrica de aceite da Fase 1 simplesmente **não
-     * tem amostra**, e some em silêncio à medida que a voz vira o caminho primário.
-     *
-     * Este teste fixa esse comportamento por escrito: nada de número negativo, nada
-     * de amostra na voz, e o botão continua medindo.
+     * **E não há botão.** O produto é acionado só por voz, então "a métrica sobrevive
+     * pelo outro caminho" não era consolo nenhum: seria zero amostra em produção,
+     * para sempre. O desempate está em `mark` — o primeiro earcon de um ciclo que já
+     * acordou e ainda não fechou o VAD é o da ativação; o seguinte é o do comando.
      */
     @Test
-    fun naVoz_aMetricaDoBotaoFicaSemAmostra_masNaoContaminaOBotao() {
+    fun noCaminhoDaVoz_asDUASMetricasMedem_cadaUmaComSeuEarcon() {
         val tel = TelemetriaDoCicloDeVoz()
 
         // Ciclo pela voz: wake → earcon#1 → fala → VAD fecha → earcon#2 (engolido).
@@ -165,11 +161,18 @@ class AtivacaoAteEarconTest {
         tel.mark("ativacao-1", Telemetry.Stage.VAD_WINDOW_CLOSED, 4_000)
         tel.mark("ativacao-1", Telemetry.Stage.EARCON_PLAYED, 4_120)
 
-        assertNull(
-            "o ciclo por VOZ produziu amostra de 'fim da fala → earcon'. Como o " +
-                "earcon que conta é o da ATIVAÇÃO (primeiro-marco-vence), qualquer " +
-                "número aqui seria earcon1 − fimDaFala, negativo por segundos",
-            tel.medicao(TelemetriaDoCicloDeVoz.Transicao.FIM_DA_FALA_ATE_EARCON),
+        // **Agora as DUAS medem, no mesmo ciclo por voz.** Antes o earcon da
+        // ativação consumia `EARCON_PLAYED` e esta métrica ficava vazia — o que,
+        // num produto SEM BOTÃO, significa zero amostras para sempre.
+        val doComando = tel.medicao(TelemetriaDoCicloDeVoz.Transicao.FIM_DA_FALA_ATE_EARCON)
+        assertNotNull("a métrica do comando ficou sem amostra no caminho da voz", doComando)
+        assertTrue("4120 − 4000 = 120 ms: $doComando", doComando!!.p50 == 120L)
+
+        val daAtivacao = tel.medicao(TelemetriaDoCicloDeVoz.Transicao.ATIVACAO_ATE_EARCON)
+        assertNotNull(daAtivacao)
+        assertTrue(
+            "a métrica da ativação pegou o earcon errado: $daAtivacao (devia ser 300)",
+            daAtivacao!!.p50 == 300L,
         )
 
         // O botão continua medindo: é o que prova que o envenenamento é por ciclo.

@@ -294,7 +294,28 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
             // O léxico é do processo e carrega uma vez. Aqui e não no login porque
             // é aqui que existe escopo suspenso com sessão garantida — e é
             // idempotente, então reabrir a tela não vai à rede de novo.
-            viewModelScope.launch { CanaisDoAgente.carregar(getApplication()) }
+            viewModelScope.launch {
+                val antes = CanaisDoAgente.grupoCorrenteId
+                CanaisDoAgente.carregar(getApplication())
+                // **Se o cadastro disse outro canal, muda para ele.**
+                //
+                // `abrir` acontece na composição, antes de a rede responder, e
+                // por isso começa no canal provisório. Sem esta reconciliação o
+                // agente ficaria no id fixo o turno inteiro — ouvindo e falando
+                // numa guarnição que não é a dele — e nada na tela denunciaria,
+                // porque o nome exibido também vinha da constante.
+                val agora = CanaisDoAgente.grupoCorrenteId
+                if (agora != antes) {
+                    Log.i(TAG, "canal reconciliado com o cadastro: ${CanaisDoAgente.grupoCorrenteNome}")
+                    if (novo.trocarDeGrupo(agora)) {
+                        nomeDoCanalAtual = CanaisDoAgente.grupoCorrenteNome
+                    } else {
+                        // Falha nunca é silêncio: seguir no canal errado achando
+                        // que trocou é o pior desfecho desta feature.
+                        Log.w(TAG, "NÃO consegui entrar no canal do cadastro — seguindo no provisório")
+                    }
+                }
+            }
             indicativoProprio = indicativo
             nomeDoCanalAtual = nomeDoCanal
             vigiaDeRede = viewModelScope.launch { vigiarRede(nomeDoCanal, transporte) }

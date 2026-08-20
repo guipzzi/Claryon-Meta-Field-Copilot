@@ -22,6 +22,7 @@ import com.claryon.field.auth.SessaoDoAgente
 import com.claryon.field.permissoes.PermissoesEssenciais
 import com.claryon.field.service.CopilotService
 import com.claryon.field.voice.EstadoDaEscuta
+import com.claryon.field.radio.CanaisDoAgente
 import com.claryon.field.radio.CanalDoPiloto
 import com.claryon.field.radio.RadioViewModel
 import com.claryon.field.ui.CascoTatico
@@ -179,9 +180,11 @@ private fun Operacao(
         // ter passado por esta linha — e o sistema recria o serviço por
         // `START_STICKY` sem tela nenhuma ter rodado.
         CopilotService.iniciar(contexto, ModoOperacao.ATIVO)
+        // O canal provisório é o ponto de partida; `RadioViewModel` reconcilia com
+        // o cadastro assim que o léxico chega. Ver `CanaisDoAgente.grupoCorrenteId`.
         radio.abrir(
-            canal = CanalDoPiloto.ID,
-            nomeDoCanal = CanalDoPiloto.NOME,
+            canal = CanaisDoAgente.grupoCorrenteId,
+            nomeDoCanal = CanaisDoAgente.grupoCorrenteNome,
             agenteId = AGENTE_DEMO,
             indicativo = INDICATIVO_DEMO,
         )

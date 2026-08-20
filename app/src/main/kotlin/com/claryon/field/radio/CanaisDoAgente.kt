@@ -49,6 +49,26 @@ import kotlinx.coroutines.withContext
  * processo — é um refactor grande e com risco próprio (ele carrega escopo, socket e
  * codec). Fica registrado como o caminho melhor que não foi tomado agora.
  */
+/**
+ * **Qual canal adotar quando o cadastro chega.**
+ *
+ * Pura de propósito: o ramo que importa — o agente cuja lotação NÃO inclui o canal
+ * provisório — não é alcançável no aparelho de teste, porque lá o agente pertence
+ * ao grupo do piloto. Extraída, ela vira testável sem rede e sem servidor.
+ *
+ * A regra tem duas linhas e uma consequência de segurança em cada uma. Se o canal
+ * corrente está na lista do agente, **fica** — trocar por trocar tiraria alguém de
+ * uma guarnição em que ele já estava operando. Se não está, assume o primeiro da
+ * lista: o agente não é daquela guarnição, e manter o id fixo o deixaria ouvindo e
+ * falando com uma guarnição que não é a dele, com o nome da constante na tela
+ * dizendo que está tudo certo.
+ *
+ * O nome vem SEMPRE do servidor, mesmo quando o id não muda: o da constante é chute
+ * de código, o do cadastro é fato.
+ */
+fun escolherCanal(atual: String, lista: List<GrupoFalado>): GrupoFalado =
+    lista.firstOrNull { it.id == atual } ?: lista.first()
+
 object CanaisDoAgente {
 
     private const val TAG = "ClaryonField"
@@ -60,8 +80,17 @@ object CanaisDoAgente {
     private var lexico: List<GrupoFalado>? = null
 
     /**
-     * O grupo em que estamos. Começa em [CanalDoPiloto], que é o provisório
-     * declarado — e sai de cena no dia em que o cadastro estiver populado.
+     * **O grupo em que estamos, decidido pelo SERVIDOR.**
+     *
+     * Nasce em [CanalDoPiloto] e é substituído por [carregar] pelo primeiro grupo
+     * que o cadastro do agente devolve. A constante deixou de ser o valor e virou
+     * o que ela sempre deveria ter sido: o que vale enquanto a rede não respondeu,
+     * e nada além disso.
+     *
+     * Isto não é arrumação. Enquanto o UUID era fixo, um agente de outra guarnição
+     * que instalasse o APK entrava **no canal do piloto** — ouvia e falava com uma
+     * guarnição que não é a dele. O servidor recusaria a escrita (RLS), mas o
+     * áudio do Realtime e o mapa vinham do id que o cliente pedisse.
      */
     @Volatile
     var grupoCorrenteId: String = CanalDoPiloto.ID
@@ -69,6 +98,17 @@ object CanaisDoAgente {
 
     @Volatile
     var grupoCorrenteNome: String = CanalDoPiloto.NOME
+        private set
+
+    /**
+     * `true` depois que o servidor disse quais são os grupos deste agente.
+     *
+     * Enquanto for `false`, o canal corrente é o provisório — e quem exibe estado
+     * precisa poder dizer isso em vez de mostrar um nome de guarnição como se fosse
+     * fato confirmado.
+     */
+    @Volatile
+    var canalConfirmadoPeloServidor: Boolean = false
         private set
 
     /** O que sabe trocar de verdade. Registrado por quem detém o `RadioTatico`. */
@@ -134,20 +174,37 @@ object CanaisDoAgente {
             Log.w(TAG, "léxico de canais: rede não configurada, seguindo com o canal do piloto")
             return@withLock false
         }
+        // Lista vazia é diferente de falha: o agente existe e não está em grupo
+        // nenhum. Assumir o canal do piloto aí seria inventar lotação.
         val lista = withContext(Dispatchers.IO) {
             RotulosFalados(
                 config = SessaoDoAgente.config,
                 tokenDeSessao = { SessaoDoAgente.tokenValido(context) },
             ).carregar().getOrNull()
         }
+        if (lista != null && lista.isEmpty()) {
+            Log.w(TAG, "o agente não pertence a nenhum talk group — sem canal")
+            return@withLock false
+        }
         if (lista == null) {
             Log.w(TAG, "léxico de canais NÃO carregou — troca por voz vai recusar, não adivinhar")
             return@withLock false
         }
         lexico = lista
-        // Se o canal do piloto está na lista, adota o nome dele de lá: o nome de
-        // exibição da constante é chute de código, o do servidor é cadastro.
-        lista.firstOrNull { it.id == grupoCorrenteId }?.let { grupoCorrenteNome = it.nome }
+        // **O canal corrente passa a ser do cadastro, não da constante.**
+        //
+        // Se o grupo provisório está na lista do agente, fica — e adota o nome de
+        // lá, porque o nome da constante é chute de código e o do servidor é
+        // cadastro. Se NÃO está, o agente não é daquela guarnição: assume o
+        // primeiro grupo dele. Continuar no id fixo colocaria um agente de outra
+        // lotação dentro do canal do piloto.
+        val escolhido = escolherCanal(grupoCorrenteId, lista)
+        if (escolhido.id != grupoCorrenteId) {
+            Log.i(TAG, "canal provisório não é deste agente — assumindo ${escolhido.nome}")
+        }
+        grupoCorrenteId = escolhido.id
+        grupoCorrenteNome = escolhido.nome
+        canalConfirmadoPeloServidor = true
         Log.i(TAG, "léxico de canais carregado: ${lista.size} grupo(s) endereçável(is) por voz")
         true
     }
@@ -157,6 +214,7 @@ object CanaisDoAgente {
         lexico = null
         grupoCorrenteId = CanalDoPiloto.ID
         grupoCorrenteNome = CanalDoPiloto.NOME
+        canalConfirmadoPeloServidor = false
         esquecerRadio()
     }
 

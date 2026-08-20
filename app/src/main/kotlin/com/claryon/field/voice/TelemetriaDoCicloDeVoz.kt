@@ -82,23 +82,21 @@ class TelemetriaDoCicloDeVoz(private val capacidade: Int = CAPACIDADE) : Telemet
          * quando ele para de falar. Registrado para não ser lido como se fosse a
          * régua dele.
          */
-        ATIVACAO_ATE_EARCON("palavra de ativação → earcon (voz)", 500),
+        ATIVACAO_ATE_EARCON("palavra de ativação → earcon", 500),
 
         /**
-         * **Mede o caminho do BOTÃO.** No caminho da palavra de ativação ela fica
-         * sem amostra, e não é defeito: lá os dois earcons são `OUVI_VOCE` e
-         * `EARCON_PLAYED` é primeiro-marco-vence, então o instante registrado é o do
-         * earcon da ATIVAÇÃO — anterior ao fim da fala. O número seria negativo.
+         * **Fim do comando → "ouvi, estou trabalhando".**
          *
-         * Quem mede a voz é [ATIVACAO_ATE_EARCON], e as duas perguntas são
-         * legítimas e diferentes: no botão o agente quer saber se foi ouvido depois
-         * de falar; na voz ele já foi confirmado antes de começar.
+         * Esta métrica quase morreu sem ninguém notar. No caminho da voz existem
+         * DOIS earcons `OUVI_VOCE` — o de "pode falar", na detecção, e este — e
+         * `EARCON_PLAYED` era primeiro-marco-vence: o instante registrado era o do
+         * primeiro, anterior ao fim da fala, e a conta dava negativo.
          *
-         * Está escrito aqui porque a voz virou o caminho primário, e uma métrica de
-         * aceite que esvazia sozinha enquanto o produto migra é do tipo que ninguém
-         * percebe até a banca perguntar.
+         * Enquanto havia botão isso era um buraco parcial. **Sem botão, seria
+         * total**: zero amostras em produção, para sempre, sem erro nenhum. O
+         * desempate mora em [mark].
          */
-        FIM_DA_FALA_ATE_EARCON("fim da fala → earcon (botão)", 500),
+        FIM_DA_FALA_ATE_EARCON("fim do comando → earcon", 500),
         FIM_DA_FALA_ATE_RESPOSTA("fim da fala → resposta falada", 2_000),
         /**
          * **O custo real do whisper**, de `STT_STARTED` a `STT_DONE`.
@@ -160,9 +158,39 @@ class TelemetriaDoCicloDeVoz(private val capacidade: Int = CAPACIDADE) : Telemet
      * sobrescreveria o instante e a métrica passaria a medir outra coisa,
      * atribuída ao ciclo errado.
      */
+    /**
+     * Instante do earcon da ATIVAÇÃO, separado do earcon do comando.
+     *
+     * Os dois são `Earcon.OUVI_VOCE` e chegam pelo mesmo estágio, então
+     * primeiro-marco-vence fazia o segundo desaparecer. Com o produto **sem botão**
+     * — a palavra de ativação é a única entrada —, isso deixaria
+     * `FIM_DA_FALA_ATE_EARCON`, que é meta de aceite, sem uma única amostra em
+     * produção. Não "com poucas": zero, para sempre, sem erro.
+     *
+     * Desambiguar aqui e não no `SaidaUnica`: quem sabe distinguir é quem conhece o
+     * ciclo. O reprodutor só sabe que tocou um som.
+     */
+    private val earconDaAtivacao = HashMap<String, Long>()
+
     override fun mark(cycleId: String, stage: Telemetry.Stage, epochMillis: Long) =
         synchronized(trava) {
             val doCiclo = marcos.getOrPut(cycleId) { LinkedHashMap() }
+
+            // O primeiro earcon de um ciclo que JÁ acordou e ainda NÃO fechou o VAD
+            // é o de "estou ouvindo". O seguinte é o de "ouvi o comando".
+            if (stage == Telemetry.Stage.EARCON_PLAYED &&
+                doCiclo.containsKey(Telemetry.Stage.WAKE_DETECTED) &&
+                !doCiclo.containsKey(Telemetry.Stage.VAD_WINDOW_CLOSED) &&
+                !earconDaAtivacao.containsKey(cycleId)
+            ) {
+                earconDaAtivacao[cycleId] = epochMillis
+                while (earconDaAtivacao.size > capacidade) {
+                    earconDaAtivacao.remove(earconDaAtivacao.keys.first())
+                }
+                fecharTransicoes(cycleId, doCiclo)
+                return@synchronized
+            }
+
             if (doCiclo.containsKey(stage)) return@synchronized
             doCiclo[stage] = epochMillis
             fecharTransicoes(cycleId, doCiclo)
@@ -180,7 +208,9 @@ class TelemetriaDoCicloDeVoz(private val capacidade: Int = CAPACIDADE) : Telemet
         // quando o ciclo chegasse ao fim da fala — e ela morreria justamente nos
         // ciclos que falham, que são os que mais interessam medir.
         doCiclo[Telemetry.Stage.WAKE_DETECTED]?.let { acordou ->
-            doCiclo[Telemetry.Stage.EARCON_PLAYED]?.let {
+            // O earcon da ativação, e não o do comando: no caminho da voz os dois
+            // existem, e usar `EARCON_PLAYED` aqui mediria o segundo.
+            (earconDaAtivacao[cycleId] ?: doCiclo[Telemetry.Stage.EARCON_PLAYED])?.let {
                 registrar(cycleId, Transicao.ATIVACAO_ATE_EARCON, it - acordou)
             }
         }
