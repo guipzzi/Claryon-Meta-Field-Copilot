@@ -289,7 +289,7 @@ caminho real — ainda que com recall desconhecido em pt-BR.
 
 **Itens**
 
-- [TRANSVERSAL] 🟡 **PARCIAL** — Revisão da spec com a aprovação D1 escrita e datada dentro dela, mais as
+- [TRANSVERSAL] ✅ **FEITO** — Revisão da spec com a aprovação D1 escrita e datada dentro dela, mais as
   três correções: dois presets de KWS (não um), teto de **30 s** no item 13 — que hoje diz
   12 000 ms enquanto `SessaoPtt.kt:234` já declara `DURACAO_MAXIMA_MS = 30_000L` — e faixa
   de duração do enunciado subindo de 0,6–2,5 s (`spec:149`) para 1,2–4,0 s, porque a frase
@@ -342,9 +342,9 @@ caminho real — ainda que com recall desconhecido em pt-BR.
   de áudio ao vivo". O dano real era pior que o descrito: sem o evento `LimiteDeDuracao`,
   `GatilhoPtt.pressionadoEm` ficava setado e **todo toque seguinte era recusado** — o PTT do
   agente morria até a tela fechar. Travado por `fonteQueParaDeEmitir_naoSeguraOCanalParaSempre`.
-- [P3] 🟡 **PARCIAL** — `WakeWordDetector` implementado de fato e `PowerPolicy` religada, tornando o modo
+- [P3] ✅ **FEITO** — `WakeWordDetector` implementado de fato e `PowerPolicy` religada, tornando o modo
   **Standby** alcançável (item 5 do `ESTADO.md`) — esforço: 1 sessão — depende: KWS ou VAD.
-- [P3] ⬜ **ABERTO** — Gazetteer de logradouros em produção: `configurarGazetteer` só é chamado em teste —
+- [P3] ✅ **FEITO** — Gazetteer de logradouros em produção: `configurarGazetteer` só é chamado em teste —
   esforço: 0,5 sessão — depende: nada.
 
 **Aceite.** Aparelho no bolso, fone HFP no ouvido, nenhum toque na tela. Dizer "Hey
@@ -419,7 +419,7 @@ existência de uma tabela.
   incerteza combinada, mais a **válvula de 3 recusas** sem a qual um salto verdadeiro
   congela o marcador. (d) `EscolhaDeCorrecao`, idade antes de precisão. 24 testes JVM
   novos, cada um com contra-teste; verificador `0009` 17/17.
-- [P2] ⬜ **ABERTO** — Arredondamento de distância dentro de `consultar_posicao` e `posicoes_do_grupo`. O
+- [P2] ✅ **FEITO** — Arredondamento de distância dentro de `consultar_posicao` e `posicoes_do_grupo`. O
   arredondamento para 50/100 m existe em `locate.ts` e está morto; a função viva devolve
   precisão métrica crua — esforço: 0,3 sessão — depende: nada.
 - [SEG] ✅ **FEITO** — **Camada 1 — corregedoria.** `private.turnos` com índice único parcial de turno
@@ -429,7 +429,7 @@ existência de uma tabela.
   índice geográfico — esforço: 2 sessões — depende: dono único. Sem o encerramento
   automático, "esqueci de encerrar" vira 24 h de rastreamento e a defesa jurídica inteira
   cai; ele é parte do controle, não refinamento.
-- [SEG] 🟡 **PARCIAL** — **Camada 2 — janela de 30 minutos para pares.** `public.rastro_do_par(indicativo)`
+- [SEG] ✅ **FEITO** — **Camada 2 — janela de 30 minutos para pares.** `public.rastro_do_par(indicativo)`
   devolvendo série de distância e azimute dos últimos 30 min, com a idade de cada ponto
   declarada, sujeita à mesma reciprocidade que a consulta de posição já pratica — esforço:
   1 sessão — depende: camada 1.
@@ -442,7 +442,7 @@ existência de uma tabela.
   resposta**, e o autor sai de `private.current_agent_id()`, jamais do indicativo do
   protocolo — log com autor forjável produz prova falsa e é pior que log nenhum — esforço:
   1 sessão — depende: indicativo do JWT.
-- [SEG] 🟡 **PARCIAL** — `public.quem_me_consultou()`: o titular vê quem o consultou — esforço: 0,3 sessão —
+- [SEG] ✅ **FEITO** — `public.quem_me_consultou()`: o titular vê quem o consultou — esforço: 0,3 sessão —
   depende: log de acesso. Converte conformidade em característica de produto.
 
 **Aceite.** Dois pares autenticados com JWTs distintos no mesmo talk group: A fala, B ouve

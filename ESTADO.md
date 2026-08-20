@@ -1,4 +1,4 @@
-# Onde estamos — 2026-08-20 · Palavra de ativação ligada e cérebro fora da tela
+# Onde estamos — 2026-08-20 · Ativação ligada, cérebro fora da tela, 8 dos 12 fechados
 
 **Reescrito a cada sessão, nunca acrescentado. Teto duro: 60 linhas.** O resto vai para `DECISIONS.md`.
 
@@ -37,21 +37,19 @@
 
 ## O que está quebrado, e nós sabemos
 
-1. **`rastro_do_par` e `quem_me_consultou`: migração aplicada, ZERO chamador Kotlin.** "Escrito,
-   não construído" de novo — e eu chamei a retenção de "inteira" num `ESTADO.md` anterior.
-2. **Falso positivo sem intervalo útil:** `0` em 1,8 min dá teto de **~99/h** contra a meta de
+1. **Falso positivo sem intervalo útil:** `0` em 1,8 min dá teto de **~99/h** contra a meta de
    0,5/h, e fechar exige ~6 h. Os 60 s de silêncio do emulador não contam — silêncio é o negativo
    mais fácil que existe. O modelo também é **de um locutor só**, 27 elocuções.
-3. **O `ROADMAP.md` mentia no presente** — 12 itens feitos escritos como pendentes, e 2 que a
-   decisão reverteu (o KWS cortado; a recusa nominal, que seria oráculo sobre a corporação).
-4. **`CaosDoDatTest` falha um teste por rodada**, variando qual; falha em `HEAD` limpo. E a
+2. **Os 4 que faltam dos 12** são uma feature só: abrir transmissão por voz (*"guarnição N na
+   escuta"*), fecho por silêncio, segunda instância do Silero e `CanalDoPiloto` com UUID fixo.
+3. **`CaosDoDatTest` falha um teste por rodada**, variando qual; falha em `HEAD` limpo. E a
    preempção de P1 **não alcança a fase de `render`** — o buraco do aceite (b).
-5. **Nada difícil é medido em ambiente próprio:** sem pilha de servidor separada (exige Docker)
+4. **Nada difícil é medido em ambiente próprio:** sem pilha de servidor separada (exige Docker)
    e sem GPS ruim de verdade — a porta de correção só viu teste sintético e emulador a 5 m.
-6. **`medida_em` é otimista pelo tempo de ida**, sempre nessa direção: 0,4% de 120 s (ver `0020`).
-7. **Gazetteer só em teste** · **fecho por silêncio não existe** · **distância sai crua** ·
-   `CanalDoPiloto` com UUID fixo · `errorStream` não coletado · `STOPPED` não terminal · câmera
-   do DAT nunca pedida · três cláusulas da Fase 2 presas a HFP · `security-crypto` em alpha.
+5. **`medida_em` é otimista pelo tempo de ida**, sempre nessa direção: 0,4% de 120 s (ver `0020`).
+6. **O gazetteer versionado tem 2 logradouros** — é semente, não gazetteer; a lista operacional
+   é dado da corporação. · `errorStream` não coletado · `STOPPED` não terminal · câmera do DAT
+   nunca pedida · três cláusulas da Fase 2 presas a HFP · `security-crypto` em alpha.
 
 ## O que vem a seguir
 
