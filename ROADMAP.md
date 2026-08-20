@@ -261,6 +261,13 @@ caminho real — ainda que com recall desconhecido em pt-BR.
   ficou mais longa — esforço: 0,5 sessão — depende: nada. **A aprovação precisa estar na
   spec, não só na conversa**: `CLAUDE.md` diz que sobrepor regra dura é decisão humana, e
   `docs/PADROES_DE_ENGENHARIA.md:190` continua dizendo o contrário até ser editado.
+- [P3] ~~Ligar o detector de ativação — sem chamador em `src/main`~~ **FEITO em 20/08.**
+  `EscutaDeAtivacao` no `CopilotService`, sob a mesma regra (`PowerPolicy.hfpAberto`) que decide
+  o tipo `MICROPHONE` do FGS. O buraco era maior: os pesos viviam em `androidTest/assets`, e
+  `preparar()` em produção teria devolvido `false` — o teste instrumentado lia os assets do
+  próprio APK de teste, verde sobre um caminho que o produto não percorre. Medido no aparelho:
+  1500 quadros em 30,0 s (50/s exatos); com PTT de 6 s, 300 calados = 6,0 s exatos. Falta o
+  **ciclo de voz no serviço**: hoje a escuta e o earcon sobrevivem à tela, o comando não.
 - [P3] Silero VAD substituindo o detector por energia RMS. `SileroVadModelConfig` está no
   AAR (verificado: a classe existe em `com/k2fsa/sherpa/onnx/`). **Duas instâncias, não
   uma**: a do gatilho quer segmentos curtos, a da transmissão precisa tolerar 30 s via
