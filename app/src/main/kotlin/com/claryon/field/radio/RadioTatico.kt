@@ -1,6 +1,7 @@
 package com.claryon.field.radio
 
 import android.util.Log
+import com.claryon.voice.VoiceActivityDetector
 import com.claryon.agent.ActionOutcome
 import com.claryon.agent.FalhaOperacional
 import com.claryon.agent.Utterance
@@ -29,6 +30,7 @@ import com.claryon.net.TransporteAoVivo
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
@@ -251,6 +253,9 @@ class RadioTatico(
      * pré-roll continuamente.
      */
     fun entrarEmModoAtivo(rota: GlassesAudioRoute) {
+        // Guardada para a abertura por VOZ: lá não há gesto que carregue a rota,
+        // porque não há gesto. Ver `abrirPorVoz`.
+        rotaAtiva = rota
         escopo.launch { transporte.conectar(talkGroupCorrente) }
 
         // **Aquece o codec agora, não no primeiro toque.**
@@ -405,6 +410,68 @@ class RadioTatico(
      * de volume chegou a ficar documentado como primário sem nunca existir em
      * código. Ver `DECISIONS.md`.
      */
+    /** A rota do modo ativo. `abrirPorVoz` não recebe rota: não há toque. */
+    @Volatile
+    private var rotaAtiva: GlassesAudioRoute? = null
+
+    /**
+     * **Abre transmissão por VOZ e fecha por SILÊNCIO** — *"guarnição 3 na escuta"*.
+     *
+     * A diferença para [aoPressionar] não é a origem do comando: é que não existe
+     * soltar. Com o botão, o dedo do agente delimita a fala nos dois lados. Aqui só
+     * há o começo, e o fim tem de ser inferido.
+     *
+     * ### Por que uma SEGUNDA instância do VAD, e não a do ciclo de voz
+     *
+     * As duas perguntas têm formato oposto. O ciclo de voz espera um COMANDO —
+     * curto, com teto de 12 s, e cortar cedo demais é o risco. Uma transmissão de
+     * rádio é RELATO: pode durar os 30 s do teto duro, e cortar no meio manda meia
+     * ocorrência para a guarnição.
+     *
+     * Reaproveitar a instância do ciclo cortaria toda transmissão aos 12 s, e o
+     * agente não teria como saber — do lado dele o áudio continuou saindo.
+     *
+     * ### O que acontece se o VAD não subir
+     *
+     * Abre assim mesmo, e o teto duro de 30 s de [SessaoPtt] fecha. É degradação
+     * honesta: perde-se o fecho natural, não a transmissão. O contrário — recusar
+     * abrir porque o VAD falhou — deixaria o agente mudo justamente quando ele
+     * pediu para falar.
+     */
+    suspend fun abrirPorVoz(vadDaTransmissao: VoiceActivityDetector?): Boolean {
+        val rota = rotaAtiva ?: run {
+            Log.w(TAG, "abertura por voz sem rota de áudio — o rádio não está ativo")
+            return false
+        }
+        if (gatilho.transmitindo) {
+            Log.i(TAG, "abertura por voz ignorada: já transmitindo")
+            return false
+        }
+
+        aoPressionar(rota)
+        if (!gatilho.transmitindo) return false
+
+        // O fecho por silêncio corre EM PARALELO com a transmissão, e não dentro
+        // dela: `SessaoPtt` consome o PCM ao vivo, e o `FonteUnicaDeMicrofone` faz
+        // fan-out — as duas assinaturas dividem um `AudioRecord` só.
+        if (vadDaTransmissao != null) {
+            fechoPorSilencio?.cancel()
+            fechoPorSilencio = escopo.launch {
+                semDerrubarOProcesso("fecho por silêncio") {
+                    // A PRIMEIRA janela que o VAD fecha encerra a transmissão. Não
+                    // a segunda: entre duas janelas há silêncio, e silêncio é
+                    // exatamente o sinal de que o agente terminou.
+                    vadDaTransmissao.segment(pcmDoMicrofone(rota)).first()
+                    Log.i(TAG, "fecho por silêncio: encerrando transmissão")
+                    aoSoltar()
+                }
+            }
+        }
+        return true
+    }
+
+    private var fechoPorSilencio: Job? = null
+
     fun aoPressionar(rota: GlassesAudioRoute, prioridade: PrioridadeTransmissao = PrioridadeTransmissao.P2_APOIO) {
         when (val d = gatilho.aoPressionar(agoraMs())) {
             DecisaoDeGatilho.IgnoradoPorRepique -> {

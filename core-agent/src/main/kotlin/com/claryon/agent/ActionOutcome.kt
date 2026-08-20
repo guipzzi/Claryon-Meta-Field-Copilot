@@ -65,6 +65,15 @@ sealed interface ActionOutcome {
      */
     data class GrupoNaoReconhecido(val rotuloFalado: String) : ActionOutcome
 
+    /**
+     * Transmissão aberta por voz — *"guarnição 3 na escuta"*.
+     *
+     * O nome é o do CADASTRO, resolvido pelo rótulo falado. Ecoar de volta o que o
+     * agente disse confirmaria a fala, não a ação: ele saberia que foi ouvido e
+     * continuaria sem saber em qual guarnição está falando.
+     */
+    data class TransmissaoAberta(val nomeDoGrupo: String) : ActionOutcome
+
     /** Par localizado (C2). A fala sai de [FalaDePosicao], nunca de coordenadas. */
     data class PosicaoEncontrada(val posicao: PosicaoRelativa) : ActionOutcome
 
@@ -132,6 +141,15 @@ enum class FalhaOperacional(val causaCurta: String) {
 
     /** Permissão de localização negada. Falha explícita, nunca degradação muda. */
     SEM_PERMISSAO_DE_LOCAL("Sem permissão de local."),
+    /**
+     * O piso do canal é de outro agente. Não é erro: é o rádio funcionando.
+     *
+     * Precisa de fala própria porque o desfecho silencioso é o pior — o agente que
+     * disse "guarnição 3 na escuta" e não ouve nada assume que está no ar e fala
+     * para ninguém, exatamente na hora em que precisava ser ouvido.
+     */
+    CANAL_OCUPADO("Canal ocupado."),
+
     NADA_A_REPETIR("Nada a repetir."),
 
     /**

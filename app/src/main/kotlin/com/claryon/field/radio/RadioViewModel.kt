@@ -4,6 +4,7 @@ import android.app.Application
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.claryon.field.voice.SileroVoiceActivityDetector
 import com.claryon.field.service.CopilotService
 import com.claryon.field.audio.AudioDoAgente
 import com.claryon.field.audio.SaidaUnica
@@ -289,6 +290,33 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
             CanaisDoAgente.registrarRadio(
                 trocar = { id -> novo.trocarDeGrupo(id) },
                 transmitindoAgora = { novo.transmitindo },
+                // **A SEGUNDA instância do Silero, com teto de 30 s.**
+                //
+                // A do ciclo de voz tem teto de 12 s porque espera um COMANDO. Uma
+                // transmissão de rádio é RELATO e pode durar os 30 s do teto duro
+                // de `SessaoPtt`. Reaproveitar a instância do ciclo cortaria toda
+                // transmissão aos 12 s — e o agente não teria como saber, porque do
+                // lado dele o áudio continuou saindo.
+                //
+                // Construída aqui, por abertura, e não guardada: o modelo tem
+                // 629 KB e o handle nativo tem `finalize()`. Ver o KDoc de
+                // `SileroVoiceActivityDetector.novoVad`.
+                abrir = {
+                    novo.abrirPorVoz(
+                        runCatching {
+                            SileroVoiceActivityDetector(
+                                assets = getApplication<Application>().assets,
+                                sampleRateHz = 16_000,
+                                falaMaximaS = 30.0f,
+                            )
+                        }.onFailure {
+                            // Degradação honesta: sem VAD a transmissão abre e o
+                            // teto duro fecha. Recusar aqui deixaria o agente mudo
+                            // justamente quando ele pediu para falar.
+                            Log.w(TAG, "VAD da transmissão não subiu — fecho só pelo teto", it)
+                        }.getOrNull(),
+                    )
+                },
             )
 
             // O léxico é do processo e carrega uma vez. Aqui e não no login porque

@@ -114,6 +114,12 @@ object CanaisDoAgente {
     /** O que sabe trocar de verdade. Registrado por quem detém o `RadioTatico`. */
     private var trocador: (suspend (String) -> Boolean)? = null
 
+    /**
+     * O que sabe pôr o agente no ar. Padrão que RECUSA, como o trocador: sem rádio
+     * registrado, "guarnição 3 na escuta" não pode parecer que funcionou.
+     */
+    private var abridor: suspend () -> Boolean = { false }
+
     /** Verdadeiro enquanto há transmissão no ar. Ver aceite 5 da spec. */
     private var transmitindo: () -> Boolean = { false }
 
@@ -143,15 +149,30 @@ object CanaisDoAgente {
     fun registrarRadio(
         trocar: suspend (String) -> Boolean,
         transmitindoAgora: () -> Boolean,
+        abrir: suspend () -> Boolean = { false },
     ) {
         trocador = trocar
         transmitindo = transmitindoAgora
+        abridor = abrir
     }
+
+    /**
+     * Abre transmissão no grupo CORRENTE, sem tocar em nada.
+     *
+     * O grupo já foi resolvido por [trocar] antes — a ordem é dela: resolver e só
+     * então abrir. Invertida, o agente ficaria no ar numa guarnição não confirmada.
+     *
+     * `false` quando o piso é de outro, e isso não é erro: é o rádio funcionando.
+     * Quem chama transforma em fala, porque o desfecho silencioso é o pior — o
+     * agente assume que está no ar e fala para ninguém.
+     */
+    suspend fun abrirTransmissao(): Boolean = abridor()
 
     /** Chamado no `onCleared` do dono. Sem isso, o lambda segura o ViewModel morto. */
     fun esquecerRadio() {
         trocador = null
         transmitindo = { false }
+        abridor = { false }
     }
 
     /**

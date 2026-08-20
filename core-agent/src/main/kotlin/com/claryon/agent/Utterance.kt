@@ -117,6 +117,20 @@ fun utteranceFor(outcome: ActionOutcome): Utterance = when (outcome) {
             Priority.RESPOSTA,
         )
 
+    is ActionOutcome.TransmissaoAberta ->
+        // **`GRAVANDO`, não `ACAO_EXECUTADA`.** O roadmap chama isto de "BIP de
+        // confirmação: está gravando e transmitindo", e é um estado que COMEÇA e
+        // dura — não uma ação que terminou. Um earcon de conclusão diria ao agente
+        // que acabou, quando na verdade acabou de começar.
+        //
+        // E o nome vem do CADASTRO, não do que ele falou: ecoar a fala confirmaria
+        // que foi ouvido e o deixaria sem saber em qual guarnição está no ar.
+        Utterance.SinalizarEFalar(
+            Earcon.GRAVANDO,
+            "No ar na ${nomeFalavelDeGrupo(outcome.nomeDoGrupo)}.",
+            Priority.RESPOSTA,
+        )
+
     is ActionOutcome.GrupoNaoReconhecido ->
         // **Não** distingue "não existe" de "existe e você não é membro": a
         // distinção é informação sobre a estrutura da corporação. Mesmo princípio

@@ -198,6 +198,10 @@ class CerebroDoCopiloto(private val app: Context) {
         // registra em `CanaisDoAgente`. Ver `specs/troca-de-grupo-por-voz.spec.md`.
         trocarDeGrupo = { rotulo -> CanaisDoAgente.trocar(rotulo) },
 
+        // Abrir transmissão por voz. O mesmo dono de processo que sabe o léxico
+        // sabe quem tem o rádio — ver `specs/fase-2-gatilho-por-voz.spec.md`.
+        abrirTransmissao = { _ -> CanaisDoAgente.abrirTransmissao() },
+
         // C2 fechado: sai por `ConsultaDePosicao` com o token da sessão. Sem
         // login, sem rede ou sem servidor configurado, devolve `Indisponivel` — o
         // agente ouve "Consulta indisponível." em vez de "Alfa Dois não

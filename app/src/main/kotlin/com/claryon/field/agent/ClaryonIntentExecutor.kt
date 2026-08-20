@@ -124,6 +124,14 @@ class ClaryonIntentExecutor(
      */
     private val trocarDeGrupo: suspend (String) -> TrocaDeGrupo =
         { TrocaDeGrupo.Falhou(FalhaOperacional.SEM_LEXICO_DE_CANAIS) },
+    /**
+     * Abre a transmissão no grupo já resolvido. `false` quando o piso é de outro.
+     *
+     * Padrão que recusa, pela mesma razão de [trocarDeGrupo]: um executor
+     * construído sem esta dependência não pode parecer capaz de pôr o agente no ar.
+     * Recusar é audível; parecer capaz e não abrir é o agente falando para ninguém.
+     */
+    private val abrirTransmissao: suspend (String) -> Boolean = { false },
 ) : IntentExecutor {
 
     /**
@@ -198,6 +206,24 @@ class ClaryonIntentExecutor(
 
         is Intent.TrocarDeGrupo -> when (val r = trocarDeGrupo(intent.rotuloFalado)) {
             is TrocaDeGrupo.Trocado -> ActionOutcome.GrupoTrocado(r.nome)
+            TrocaDeGrupo.NaoReconhecido -> ActionOutcome.GrupoNaoReconhecido(intent.rotuloFalado)
+            is TrocaDeGrupo.Falhou -> ActionOutcome.Falhou(r.falha)
+        }
+
+        // **Abrir transmissão por voz.** Resolve o grupo pelo MESMO caminho da
+        // troca por voz — o rótulo vem do cadastro, nunca do que o agente falou —
+        // e só então manda abrir. Duas etapas, e a ordem importa: abrir primeiro e
+        // resolver depois deixaria o agente no ar numa guarnição não confirmada.
+        is Intent.AbrirTransmissao -> when (val r = trocarDeGrupo(intent.rotuloFalado)) {
+            is TrocaDeGrupo.Trocado ->
+                if (abrirTransmissao(r.nome)) {
+                    ActionOutcome.TransmissaoAberta(r.nome)
+                } else {
+                    // O piso é de quem pediu primeiro. Não abrir é resultado
+                    // legítimo, e o agente precisa ouvir que NÃO está no ar —
+                    // achar que está e falar para ninguém é o pior desfecho.
+                    ActionOutcome.Falhou(FalhaOperacional.CANAL_OCUPADO)
+                }
             TrocaDeGrupo.NaoReconhecido -> ActionOutcome.GrupoNaoReconhecido(intent.rotuloFalado)
             is TrocaDeGrupo.Falhou -> ActionOutcome.Falhou(r.falha)
         }
