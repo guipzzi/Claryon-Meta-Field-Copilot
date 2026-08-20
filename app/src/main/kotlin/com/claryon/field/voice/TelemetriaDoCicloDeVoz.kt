@@ -24,9 +24,14 @@ import com.claryon.net.Medicao
  *    com uma emergência, e o agente ouviria o earcon segundos depois do
  *    "≤ 400 ms" que o relatório afirmaria.
  *
- * [Telemetry.Stage.WAKE_DETECTED] **não tem produtor** e é honesto que não
- * tenha. Até 20/08 a palavra de ativação era o exemplo disso; hoje ela produz. O relatório
- * mostra "sem amostras" em vez de zero.
+ * [Telemetry.Stage.WAKE_DETECTED] **passou a ter produtor em 20/08**:
+ * `CopilotService.aoDetectar`. Até lá ele era o exemplo desta regra — estágio sem
+ * quem o marque mostra "sem amostras", nunca zero, porque zero é uma medição e a
+ * ausência dela não é.
+ *
+ * Esta frase já esteve escrita nos dois tempos ao mesmo tempo ("não tem produtor …
+ * hoje ela produz"), o que é pior que estar só desatualizada: contradição no mesmo
+ * parágrafo faz o leitor escolher a metade que lhe convém.
  *
  * ## Ciclo corrente
  *
@@ -77,9 +82,23 @@ class TelemetriaDoCicloDeVoz(private val capacidade: Int = CAPACIDADE) : Telemet
          * quando ele para de falar. Registrado para não ser lido como se fosse a
          * régua dele.
          */
-        ATIVACAO_ATE_EARCON("palavra de ativação → earcon", 500),
+        ATIVACAO_ATE_EARCON("palavra de ativação → earcon (voz)", 500),
 
-        FIM_DA_FALA_ATE_EARCON("fim da fala → earcon", 500),
+        /**
+         * **Mede o caminho do BOTÃO.** No caminho da palavra de ativação ela fica
+         * sem amostra, e não é defeito: lá os dois earcons são `OUVI_VOCE` e
+         * `EARCON_PLAYED` é primeiro-marco-vence, então o instante registrado é o do
+         * earcon da ATIVAÇÃO — anterior ao fim da fala. O número seria negativo.
+         *
+         * Quem mede a voz é [ATIVACAO_ATE_EARCON], e as duas perguntas são
+         * legítimas e diferentes: no botão o agente quer saber se foi ouvido depois
+         * de falar; na voz ele já foi confirmado antes de começar.
+         *
+         * Está escrito aqui porque a voz virou o caminho primário, e uma métrica de
+         * aceite que esvazia sozinha enquanto o produto migra é do tipo que ninguém
+         * percebe até a banca perguntar.
+         */
+        FIM_DA_FALA_ATE_EARCON("fim da fala → earcon (botão)", 500),
         FIM_DA_FALA_ATE_RESPOSTA("fim da fala → resposta falada", 2_000),
         /**
          * **O custo real do whisper**, de `STT_STARTED` a `STT_DONE`.
@@ -195,8 +214,13 @@ class TelemetriaDoCicloDeVoz(private val capacidade: Int = CAPACIDADE) : Telemet
         // um histograma da ordem de chegada, não da latência. A chave é o ciclo
         // de ORIGEM do marco, não o corrente: os marcos de reprodução chegam
         // tarde, quando o corrente já pode ser outro.
-        if (!jaRegistradas.add(cycleId to t)) return
+        // **A guarda do negativo vem ANTES de consumir a vaga.** Ao contrário, uma
+        // duração impossível gastava o registro do par `(ciclo, transição)` e
+        // nenhuma medição válida daquele ciclo entrava depois. É defensivo — hoje
+        // primeiro-marco-vence torna o caso raro —, mas gastar a vaga com lixo é
+        // errado em qualquer ordem de chegada.
         if (duracaoMs < 0) return
+        if (!jaRegistradas.add(cycleId to t)) return
         val fila = duracoes.getOrPut(t) { ArrayDeque() }
         fila.addLast(duracaoMs)
         while (fila.size > capacidade) fila.removeFirst()

@@ -132,6 +132,61 @@ class AtivacaoAteEarconTest {
     }
 
     /**
+     * **A regressão que a revisão adversarial achou, escrita como cenário.**
+     *
+     * No caminho da palavra de ativação os DOIS earcons são `OUVI_VOCE`: o de
+     * "estou ouvindo" na detecção e o de "ouvi o comando" no fechamento do VAD. E
+     * o ciclo é UM só, porque `cicloDeVoz` reaproveita o id da ativação — sem
+     * isso a métrica dos 500 ms não fecharia.
+     *
+     * Consequência: `EARCON_PLAYED` é primeiro-marco-vence, fica com o instante do
+     * earcon #1, e `FIM_DA_FALA_ATE_EARCON` calcula `earcon1 − fimDaFala`, que é
+     * **negativo** por segundos. Pior, `registrar` fazia `jaRegistradas.add` ANTES
+     * de checar o negativo: o par ficava envenenado e a transição não podia mais
+     * ser registrada nunca, nem por um ciclo posterior saudável.
+     *
+     * **A revisão superestimou o alcance, e a diferença importa.** `jaRegistradas`
+     * é chaveado por `(ciclo, transição)`, então o envenenamento é POR CICLO: um
+     * ciclo pelo botão, depois, registra normalmente. O que sobra é real e mais
+     * estreito — no caminho da voz a métrica de aceite da Fase 1 simplesmente **não
+     * tem amostra**, e some em silêncio à medida que a voz vira o caminho primário.
+     *
+     * Este teste fixa esse comportamento por escrito: nada de número negativo, nada
+     * de amostra na voz, e o botão continua medindo.
+     */
+    @Test
+    fun naVoz_aMetricaDoBotaoFicaSemAmostra_masNaoContaminaOBotao() {
+        val tel = TelemetriaDoCicloDeVoz()
+
+        // Ciclo pela voz: wake → earcon#1 → fala → VAD fecha → earcon#2 (engolido).
+        tel.abrirCiclo("ativacao-1")
+        tel.mark("ativacao-1", Telemetry.Stage.WAKE_DETECTED, 1_000)
+        tel.mark("ativacao-1", Telemetry.Stage.EARCON_PLAYED, 1_300)
+        tel.mark("ativacao-1", Telemetry.Stage.VAD_WINDOW_CLOSED, 4_000)
+        tel.mark("ativacao-1", Telemetry.Stage.EARCON_PLAYED, 4_120)
+
+        assertNull(
+            "o ciclo por VOZ produziu amostra de 'fim da fala → earcon'. Como o " +
+                "earcon que conta é o da ATIVAÇÃO (primeiro-marco-vence), qualquer " +
+                "número aqui seria earcon1 − fimDaFala, negativo por segundos",
+            tel.medicao(TelemetriaDoCicloDeVoz.Transicao.FIM_DA_FALA_ATE_EARCON),
+        )
+
+        // O botão continua medindo: é o que prova que o envenenamento é por ciclo.
+        tel.abrirCiclo("ciclo-2")
+        tel.mark("ciclo-2", Telemetry.Stage.VAD_WINDOW_CLOSED, 10_000)
+        tel.mark("ciclo-2", Telemetry.Stage.EARCON_PLAYED, 10_305)
+
+        val depois = tel.medicao(TelemetriaDoCicloDeVoz.Transicao.FIM_DA_FALA_ATE_EARCON)
+        assertNotNull(
+            "o ciclo pelo botão não registrou depois de um ciclo por voz — o " +
+                "envenenamento vazou entre ciclos e a métrica da Fase 1 morreria",
+            depois,
+        )
+        assertTrue("a medição do botão devia ser 305 ms: $depois", depois!!.p50 == 305L)
+    }
+
+    /**
      * O relatório não pode mais afirmar que não há produtor: a frase fixa foi
      * removida justamente porque envelheceu para mentira. Quem informa ausência é
      * o "sem amostras" calculado.

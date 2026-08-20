@@ -60,10 +60,23 @@ data class PontoDoRastro(
     val idadeS: Int,
 )
 
+/**
+ * Um `OkHttpClient` por processo, não por instância.
+ *
+ * Cada `OkHttpClient()` novo traz um `ConnectionPool` e um `Dispatcher` com pool de
+ * threads próprios, e o pool segura socket ocioso por 5 minutos. `QuemMeConsultouViewModel`
+ * constrói um `HistoricoDoCanal` a cada visita ao Perfil — dez visitas eram dez pools
+ * vivos, num app que roda em serviço de primeiro plano o turno inteiro.
+ *
+ * Compartilhar é o que a própria doc do OkHttp recomenda, e o construtor continua
+ * aceitando um cliente injetado: é assim que o teste põe um `Interceptor` no lugar.
+ */
+private val CLIENTE_COMPARTILHADO: OkHttpClient by lazy { OkHttpClient() }
+
 class HistoricoDoCanal(
     private val config: ConfigRealtime,
     private val tokenDeSessao: suspend () -> String?,
-    private val client: OkHttpClient = OkHttpClient(),
+    private val client: OkHttpClient = CLIENTE_COMPARTILHADO,
 ) {
 
     suspend fun falas(talkGroupId: String, limite: Int = 50): Result<List<FalaDoCanal>> =

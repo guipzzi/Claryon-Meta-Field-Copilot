@@ -177,13 +177,39 @@ select 'e o filtro antigo, por updated_at, devolveria 1', '1',
 -- Consertar a escrita e esquecer um leitor daria duas telas com idades
 -- diferentes para a mesma posição, que destrói a confiança nas duas.
 
+-- **Esta régua olhava o TOKEN, não o conceito, e por isso deixou passar.**
+--
+-- A versão anterior casava só `now() - <alias>.updated_at`. `rastro_do_par` calcula
+-- idade sobre a TRILHA, onde a coluna de upload se chama `em` — passou limpo, e a
+-- `0022` teve de consertar depois, com o rastro inteiro reportando "agora" para um
+-- trajeto de 20 minutos.
+--
+-- Consertar o código e deixar a régua é o modo mais barato de o mesmo defeito
+-- voltar: o próximo leitor vê ✓ e conclui que a classe inteira está coberta.
+-- Agora a lista é de COLUNAS DE UPLOAD, e `medida_em` é a única de medição.
 insert into r
-select 'nenhuma funcao viva calcula idade por updated_at', '0',
-       coalesce(string_agg(p.proname, ', '), '0'),
+select 'nenhuma funcao viva calcula idade por coluna de UPLOAD', '0',
+       coalesce(string_agg(p.proname || ' (' || m[1] || ')', ', '), '0'),
        count(*) = 0
-  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+  from pg_proc p
+  join pg_namespace n on n.oid = p.pronamespace
+  cross join lateral regexp_matches(
+    p.prosrc, 'now\(\)\s*-\s*(?:coalesce\()?[a-z_]+\.(updated_at|em|criado_em|inserido_em)\M', 'g'
+  ) as m
  where n.nspname in ('public', 'private')
-   and p.prosrc ~ 'now\(\)\s*-\s*[a-z_]+\.updated_at';
+   -- `coalesce(tr.medida_em, tr.em)` é legítimo: o `em` ali é o FALLBACK das linhas
+   -- anteriores à 0020, e a expressão inteira já foi conferida. O que a régua caça
+   -- é a coluna de upload usada SOZINHA como se fosse a hora da medição.
+   and p.prosrc !~ 'coalesce\([a-z_]+\.medida_em';
+
+-- E a régua da régua: se ela não pegar mais nada, é porque parou de funcionar.
+-- Uma função de teste com o defeito de propósito prova que o padrão ainda casa.
+insert into r
+select 'a regua AINDA pega o defeito quando ele existe', '1', count(*)::text, count(*) = 1
+  from (
+    select 'select extract(epoch from (now() - tr.em))::integer' as prosrc
+  ) falsa
+ where falsa.prosrc ~ 'now\(\)\s*-\s*(?:coalesce\()?[a-z_]+\.(updated_at|em|criado_em|inserido_em)\M';
 
 insert into r
 select 'publicar_posicao aceita idade_ms', 'true',

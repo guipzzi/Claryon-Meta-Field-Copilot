@@ -342,7 +342,7 @@ caminho real — ainda que com recall desconhecido em pt-BR.
   de áudio ao vivo". O dano real era pior que o descrito: sem o evento `LimiteDeDuracao`,
   `GatilhoPtt.pressionadoEm` ficava setado e **todo toque seguinte era recusado** — o PTT do
   agente morria até a tela fechar. Travado por `fonteQueParaDeEmitir_naoSeguraOCanalParaSempre`.
-- [P3] ✅ **FEITO** — `WakeWordDetector` implementado de fato e `PowerPolicy` religada, tornando o modo
+- [P3] ✅ **FEITO (20/08), com desfecho diferente do pedido** — `WakeWordDetector` foi **apagada**, não implementada: zero implementações, e a abstração afirmava um ponto de troca inexistente. Quem faz o trabalho é `EscutaDeAtivacao`. `PowerPolicy` religada, tornando o modo
   **Standby** alcançável (item 5 do `ESTADO.md`) — esforço: 1 sessão — depende: KWS ou VAD.
 - [P3] ✅ **FEITO** — Gazetteer de logradouros em produção: `configurarGazetteer` só é chamado em teste —
   esforço: 0,5 sessão — depende: nada.

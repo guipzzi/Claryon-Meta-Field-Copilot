@@ -3,7 +3,8 @@
 // nativo do Android), para permitir plano B sem reescrita. Implementado e
 // verificado em aparelho: WhisperCppStt (JNI/NDK), PiperTts (sherpa-onnx),
 // AndroidTts e AndroidOnDeviceStt (fallbacks), EnergyVoiceActivityDetector.
-// Ainda sem implementação: WakeWordDetector (o acionamento é push-to-talk).
+// A palavra de ativação NÃO mora aqui: `EscutaDeAtivacao` vive no módulo do app,
+// onde o microfone e a saída já têm dono único. Este módulo expõe `DetectorDeAtivacao`.
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)

@@ -63,7 +63,7 @@ formato que o treino já espera. Sem ela a gravação sai pelo microfone do celu
 não vale para a cláusula — que é precisamente o buraco em que as 27 atuais caíram.
 
 **Enquanto o dispositivo não chega:** o bloco de código da Fase 2 fecha sem ele —
-fiação do detector, `WakeWordDetector` com `PowerPolicy`, gazetteer em produção,
+fiação do detector (feita em 20/08: `EscutaDeAtivacao` sob `PowerPolicy.hfpAberto`), gazetteer em produção,
 duas instâncias de Silero, fecho por silêncio e as três marcas p95. A fase fica
 com as três cláusulas marcadas como pendentes de hardware, no mesmo padrão que o
 D7 já estabeleceu para o segundo aparelho na Fase 3.

@@ -40,20 +40,41 @@ insert into r select 'a funcao MUDA a maioria dos valores (nao e identidade)', '
 
 -- As três portas vivas usam a função. Consertar duas e esquecer a terceira daria
 -- granularidades diferentes para o mesmo par em telas diferentes.
+-- **A contagem, e não só o predicado.** Sem ela, apagar ou renomear uma das portas
+-- faz a consulta devolver ZERO linhas: o relatório fica uma linha mais curto e
+-- continua todo ✓. Verificação que some junto com o que verifica não verifica.
+insert into r
+select 'as TRES portas existem', '3', count(*)::text, count(*) = 3
+  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+ where n.nspname in ('public', 'private')
+   and p.proname in ('posicao_relativa', 'posicoes_do_grupo', 'rastro_do_par');
+
 insert into r
 select 'porta ' || p.proname || ' arredonda', 'true',
        (pg_get_functiondef(p.oid) ~ 'distancia_arredondada')::text,
        pg_get_functiondef(p.oid) ~ 'distancia_arredondada'
   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
- where p.proname in ('posicao_relativa', 'posicoes_do_grupo', 'rastro_do_par');
+ where n.nspname in ('public', 'private')
+   and p.proname in ('posicao_relativa', 'posicoes_do_grupo', 'rastro_do_par');
 
--- O azimute NÃO é arredondado, e isso é decisão: rumo grosso manda o agente
--- para o lado errado do quarteirão. Se alguém "uniformizar" um dia, cai aqui.
-insert into r select 'azimute continua cru, de proposito', 'true',
-  (pg_get_functiondef(p.oid) !~ 'distancia_arredondada\(degrees')::text,
-  pg_get_functiondef(p.oid) !~ 'distancia_arredondada\(degrees'
-  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
- where n.nspname = 'private' and p.proname = 'posicao_relativa';
+-- O azimute NÃO é arredondado, e isso é decisão: rumo grosso manda o agente para o
+-- lado errado do quarteirão.
+--
+-- **A versão anterior afirmava a ausência de um literal** — `!~ 'distancia_arredondada\(degrees'`
+-- — e passava com o defeito de volta: bastava `round(degrees(...)::numeric, -1)`, ou
+-- uma função nova, ou um espaço a mais. Agora a afirmação é COMPORTAMENTAL: dois
+-- pontos escolhidos para dar azimute com casas decimais, e o resultado tem de
+-- conservá-las. Nenhum arredondamento sobrevive a isto, escrito de que jeito for.
+insert into r
+select 'azimute conserva casas decimais (nao foi arredondado)', 'true',
+       round(az::numeric, 4)::text,
+       az <> round(az::numeric, 0)::double precision
+  from (
+    select degrees(public.ST_Azimuth(
+      public.ST_SetSRID(public.ST_MakePoint(-49.2500, -16.6800), 4326)::public.geography::public.geometry,
+      public.ST_SetSRID(public.ST_MakePoint(-49.2537, -16.6871), 4326)::public.geography::public.geometry
+    )) as az
+  ) t;
 
 select case passou when true then '✓' else '✗ FALHOU' end as st, verificacao, esperado, obtido
   from r order by verificacao;

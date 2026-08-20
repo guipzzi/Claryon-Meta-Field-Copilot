@@ -60,9 +60,22 @@ do **que está montado no app** — a diferença é o trabalho que resta.
 | **Privacidade e dados** | On-device no caminho crítico; **zero** reconhecimento facial; fala de terceiros não transcrita (rota HFP é pré-condição da captura); cofre `EncryptedFile` + Keystore com cadeia de hash — adulterar 1 byte aponta o segmento | ⚠️ o cofre **nunca é instanciado** pelo app | `core-evidence/…/EncryptedEvidenceVault.kt`, `HashChain.kt` |
 | **Eficiência de bateria** | Modos Standby/Ativo/Ocorrência como política pura e testada; FGS com tipos derivados do modo; freio térmico com `NaN` tratado; WorkManager em duas faixas | ✅ **montado** — verificado em aparelho | `core-agent/…/PowerPolicy.kt`, `ThermalGovernor.kt`, `app/…/service/CopilotService.kt` |
 
-**Não afirmamos** ter openWakeWord nem Silero VAD: `WakeWordDetector` é interface
-sem implementação e o VAD é por energia. O acionamento é **push-to-talk**, que o
-Un12 §12.13.3.7.4 endossa como primeiro passo legítimo.
+**Isto mudou em 20/08, e a versão anterior desta linha dizia o contrário.** Ela
+afirmava que não temos openWakeWord nem Silero VAD, que `WakeWordDetector` é
+interface sem implementação e que o acionamento é push-to-talk. As três deixaram de
+ser verdade e o parágrafo ficou parado — que é como um documento de conformidade
+passa a mentir a favor de si mesmo.
+
+**O que existe hoje:** detector acústico próprio, treinado sobre os *embeddings* do
+openWakeWord (`melspectrogram.onnx` + `embedding_model.onnx`, 2,4 MB no APK) com uma
+cabeça logística de 289 floats. Roda no serviço em primeiro plano, mede **26/26** em
+fluxo com p50 de 3,5 ms por decisão, e a interface `WakeWordDetector` foi **apagada**
+— ela tinha zero implementações e afirmava um ponto de troca que não existia. O VAD é
+o **Silero** (`assets/models/silero_vad.onnx`), não energia.
+
+**O que continua honesto dizer:** o push-to-talk segue sendo o caminho garantido, e o
+Un12 §12.13.3.7.4 o endossa. E o recall de ≥90% em 30 pronúncias reais por fone HFP
+**ainda não foi medido** — o modelo é de um locutor só, com 27 elocuções.
 
 ---
 
@@ -99,7 +112,7 @@ Legenda: ✅ feito · ⚠️ parcial · ❌ não feito · ⚪ não se aplica.
 - ✅ `AndroidTts.speak()` só após `onInit` (enfileira em `ready`); agora com timeout e id por utterance. *(Un12 p.100)*
 - ✅ Assinaturas de whisper.cpp e sherpa-onnx confirmadas nos repos oficiais. *(Un12 p.101)*
 - ❌ Validar tudo em **modo avião** (nenhum byte sai) — não registrado. *(Un12 p.98)*
-- ❌ Wake word: `WakeWordDetector` é interface **sem implementação**. Acionamento é push-to-talk.
+- ⚠️ Wake word: detector acústico **ligado** no `CopilotService` desde 20/08 (26/26 em fluxo, p50 3,5 ms, 1500 quadros/30 s medidos no aparelho). O que falta é a **medida com hardware**: recall em 30 pronúncias reais por fone HFP, e o falso positivo em fala espontânea — hoje só há limite superior de ~99/h contra meta de 0,5/h.
 
 ### M6 — Visão e evidência
 

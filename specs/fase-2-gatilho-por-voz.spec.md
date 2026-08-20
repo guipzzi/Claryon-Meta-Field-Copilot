@@ -55,7 +55,7 @@ Tudo abaixo foi lido no arquivo, não lembrado.
 | `Telemetry.Stage` tem 8 valores; **nenhum** de canal (`CANAL_ABERTO`, `PRIMEIRO_QUADRO`, `FECHO_POR_SILENCIO`, `FECHO_POR_TETO`) | `core-common/.../Telemetry.kt:21-30` |
 | `FIM_DA_FALA_ATE_EARCON` (meta 500) é **uma fila só**, sem saber por qual caminho o ciclo veio | `app/.../voice/TelemetriaDoCicloDeVoz.kt:63,142` |
 | `jaRegistradas` (`HashSet`) **nunca é podado**; `marcos`/`duracoes` são | `TelemetriaDoCicloDeVoz.kt:103,109,161,173` |
-| `WakeWordDetector` é interface **sem implementação** | `core-voice/.../VoicePipeline.kt:83` (único outro hit: o próprio relatório de telemetria, `:195`) |
+| ~~`WakeWordDetector` é interface **sem implementação**~~ **apagada em 20/08** | Quem faz o trabalho é `app/.../voice/EscutaDeAtivacao.kt`; a costura de teste é `OuvidoDeAtivacao`, no módulo do app |
 | `EventoPtt.Transmitindo -> Unit` (**não há BIP**) e `Encerrada` só faz `Log.i` (**fecho é mudo**) | `RadioTatico.kt:423,444` |
 | `QuadrosNaoEntregues -> Log.w(...)` e nada mais — rede caída no meio é **silêncio** | `RadioTatico.kt:443` |
 | `Earcon.FALHA` já carrega 3 fatos distintos (`CanalOcupado`, `CanalPerdido`, `LimiteDeDuracao`) | `RadioTatico.kt:427,433,438` |
@@ -417,7 +417,7 @@ CLAUDE.md §2 proíbe, "sem versão, sem flag, sem exceção": *"Transcrever, cl
 
 ## 8. Fora de escopo desta fase, com motivo escrito
 
-- **KWS como adiantamento do earcon.** Sai. Não há preset streaming em pt; o achado que elegeu `Aurora` (token 40663, `yon`→`ion`) é propriedade do **vocabulário BPE do whisper** e **não transfere** para openWakeWord. Implementar `WakeWordDetector` (`core-voice/.../VoicePipeline.kt:83`) com um portão textual seria dar corpo à abstração errada e deixar o nome mentindo — o arquivo fica **intocado**, e o `TelemetriaDoCicloDeVoz.kt:195` continua verdadeiro.
+- **KWS como adiantamento do earcon.** Sai. Não há preset streaming em pt; o achado que elegeu `Aurora` (token 40663, `yon`→`ion`) é propriedade do **vocabulário BPE do whisper** e **não transfere** para openWakeWord. Implementar `WakeWordDetector` com um portão textual seria dar corpo à abstração errada e deixar o nome mentindo. **Atualização de 20/08:** a conclusão valeu, o desfecho foi outro — a interface e `WakeEvent` foram **apagadas** de `VoicePipeline.kt`, porque uma abstração com zero implementações afirma um ponto de troca inexistente. Quem faz o trabalho é `EscutaDeAtivacao` (detector acústico treinado, não preset). E a linha do `TelemetriaDoCicloDeVoz` que dizia "sem produtor" **deixou de ser verdadeira** no mesmo dia: `ATIVACAO_ATE_EARCON` coleta.
 - **Earcon `NO_AR` periódico** (itens 15-16 da spec). Sai: sem `CANAL_ABERTO`/`CANAL_FECHADO` decididos (PROPOSTA-3), acrescentar um terceiro tom de rádio à mesma família é desenhar no escuro.
 - **TTL de 15 s do piso por voz** (item 20). Sai: `ClienteDePisoRemoto` fixa o TTL na **construção** (`ClientesDePiso.kt:57`) e `ClienteDePiso.pedir` não tem o parâmetro. Exigiria mudar a interface ou instanciar um segundo cliente, e **não é aceite da Fase 2**. Fica registrado como dívida em vez de entrar de contrabando.
 - **Fecho por palavra ("câmbio").** Já fora de escopo e continua: exigiria KWS fora do idioma, e um falso fecho trunca mensagem operacional. "Câmbio" é **hábito** que produz a pausa, não gatilho.

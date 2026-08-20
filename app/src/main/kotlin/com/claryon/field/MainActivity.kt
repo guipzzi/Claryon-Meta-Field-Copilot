@@ -16,6 +16,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.ui.platform.LocalContext
+import com.claryon.agent.LexicoDeOcorrencias
 import com.claryon.agent.ModoOperacao
 import com.claryon.field.auth.SessaoDoAgente
 import com.claryon.field.permissoes.PermissoesEssenciais
@@ -227,6 +228,7 @@ private fun Operacao(
                     registro.name,
                     estadoMapa.assinado,
                     escuta,
+                    LexicoDeOcorrencias.gazetteer.size,
                 ),
                 consultas = consultas,
                 aoSair = aoEncerrarTurno,
@@ -243,11 +245,21 @@ private fun Operacao(
  * saber por quê é pior que não saber: o agente tenta de novo, no meio da rua, em
  * vez de trocar de plano.
  */
+/**
+ * Abaixo disto a lista é semente, não gazetteer.
+ *
+ * Não é um número medido — é uma ordem de grandeza: nenhuma cidade tem 50
+ * logradouros, então qualquer lista menor que isso é claramente de teste. O papel
+ * da constante é impedir que a semente passe por capacidade viva.
+ */
+private const val LISTA_UTIL = 50
+
 private fun capacidadesDe(
     ptt: com.claryon.field.ui.componentes.EstadoDoPtt,
     registro: String,
     mapaAssinado: Boolean,
     escuta: EstadoDaEscuta,
+    logradouros: Int,
 ): List<Capacidade> {
     val pttVivo = ptt !is com.claryon.field.ui.componentes.EstadoDoPtt.Indisponivel
     return listOf(
@@ -288,6 +300,28 @@ private fun capacidadesDe(
         //
         // Motivo derivado do estado, nunca string fixa — a linha do mapa, logo
         // acima, registra o que acontece quando é fixa: ela mente.
+        // **O cabeçalho do asset AFIRMAVA que esta linha existia**, e ela não
+        // existia — a promessa foi escrita no mesmo commit que ligou o gazetteer.
+        // Sem ela, o único sinal era um `Log.i`, e uma lista vazia por asset
+        // faltando no APK falharia exatamente em silêncio.
+        Capacidade(
+            nome = "Logradouros conhecidos",
+            // **`>= LISTA_UTIL`, e não `> 0`.** Com `> 0` a semente de duas entradas
+            // acendia VERDE — e o painel só mostra o motivo nas capacidades mortas,
+            // então o aviso "isto é semente" nunca apareceria. Um instrumento que
+            // diz OK sobre uma lista que não reconhece rua nenhuma é pior que
+            // instrumento nenhum: ele encerra a pergunta.
+            viva = logradouros >= LISTA_UTIL,
+            motivo = when {
+                logradouros == 0 ->
+                    "Nenhum carregado: o endereço da ocorrência não será reconhecido."
+                logradouros < LISTA_UTIL ->
+                    "$logradouros carregados — é semente de teste. A lista da " +
+                        "corporação ainda não entrou, e sem ela o endereço falado " +
+                        "vira nome de pessoa."
+                else -> "$logradouros logradouros."
+            },
+        ),
         Capacidade(
             nome = "Palavra de ativação",
             viva = escuta == EstadoDaEscuta.OUVINDO,

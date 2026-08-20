@@ -144,8 +144,17 @@ private fun QuemMeConsultou(estado: QuemMeConsultouViewModel.Estado) {
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
                         TextoCorpoMenor(c.indicativo, cor = Cores.Tinta)
-                        TextoCorpoMenor(c.em.take(16).replace('T', ' '), cor = Cores.TintaFraca)
+                        TextoCorpoMenor(c.quando, cor = Cores.TintaFraca)
                     }
+                }
+                // **Truncar em silêncio numa tela de auditoria esconde consulta.**
+                // O servidor devolve até 100 (`0017`); mostrar 20 sem dizer faria o
+                // agente concluir que ninguém mais o consultou.
+                if (estado.consultas.size > 20) {
+                    TextoCorpoMenor(
+                        "e mais ${estado.consultas.size - 20} consultas",
+                        cor = Cores.TintaFraca,
+                    )
                 }
             }
         }

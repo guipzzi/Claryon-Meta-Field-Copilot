@@ -151,11 +151,18 @@ class MapaViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun focarPar(indicativo: String?) {
         rastroJob?.cancel()
+        rastroJob = null
         if (indicativo == null) {
             _estado.value = _estado.value.copy(rastro = emptyList(), rastroDe = null)
             return
         }
-        val h = historicoDoMapa ?: return
+        val h = historicoDoMapa ?: run {
+            // Falha nunca é silêncio: a gaveta acende o foco e nada carrega. Sem
+            // isto o agente toca, não vê rastro, e não tem como saber se o par não
+            // andou ou se o mapa está fechado por baixo.
+            Log.w(TAG, "rastro de $indicativo pedido com o mapa fechado")
+            return
+        }
         rastroJob = viewModelScope.launch {
             val pontos = h.rastroDoPar(indicativo)
                 .onFailure { Log.w(TAG, "rastro de $indicativo indisponível", it) }
@@ -194,10 +201,16 @@ class MapaViewModel(app: Application) : AndroidViewModel(app) {
         // sem fim — o oposto do que a `0017` existe para provar. O escopo é o da
         // aplicação: `viewModelScope` morre junto com a tela, e é exatamente ao
         // sair da tela que este fechamento precisa acontecer.
+        // **Fora do `let`.** `historicoDoMapa` era anulado DENTRO dele, e `abrirMapa`
+        // tolera sessão nula de propósito ("o registro é acessório"). Quando
+        // `abrir_mapa` falhava, o `HistoricoDoCanal` — com o `OkHttpClient` dentro —
+        // sobrevivia à tela, e `focarPar` continuava puxando rastros de 30 minutos
+        // **sem nenhuma linha de sessão no log de acesso**. Era o buraco que a `0017`
+        // existe para fechar, reaberto sobre o dado mais sensível dos dois.
+        val h = historicoDoMapa
+        historicoDoMapa = null
         sessaoDeMapa?.let { id ->
-            val h = historicoDoMapa
             sessaoDeMapa = null
-            historicoDoMapa = null
             if (h != null) {
                 escopoDoFechamento.launch {
                     h.fecharMapa(id).onFailure { Log.w(TAG, "sessão de mapa não fechada", it) }

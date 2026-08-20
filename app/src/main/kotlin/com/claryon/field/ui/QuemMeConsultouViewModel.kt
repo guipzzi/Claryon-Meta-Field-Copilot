@@ -39,10 +39,18 @@ import kotlinx.coroutines.launch
  */
 class QuemMeConsultouViewModel(app: Application) : AndroidViewModel(app) {
 
+    /** Uma consulta pronta para a tela: indicativo e o instante **no fuso do aparelho**. */
+    data class ConsultaExibida(val indicativo: String, val quando: String)
+
     sealed interface Estado {
         data object Carregando : Estado
-        data class Lista(val consultas: List<ConsultaRecebida>) : Estado
+        data class Lista(val consultas: List<ConsultaExibida>) : Estado
         data class Indisponivel(val motivo: String) : Estado
+
+        companion object {
+            fun exibir(c: ConsultaRecebida) =
+                ConsultaExibida(c.indicativo, instanteLocalDaConsulta(c.em))
+        }
     }
 
     private val _estado = MutableStateFlow<Estado>(Estado.Carregando)
@@ -56,7 +64,7 @@ class QuemMeConsultouViewModel(app: Application) : AndroidViewModel(app) {
                 tokenDeSessao = { SessaoDoAgente.tokenValido(getApplication()) },
             )
             _estado.value = historico.quemMeConsultou().fold(
-                onSuccess = { Estado.Lista(it) },
+                onSuccess = { lista -> Estado.Lista(lista.map { Estado.exibir(it) }) },
                 onFailure = {
                     Log.w(TAG, "quem_me_consultou falhou", it)
                     Estado.Indisponivel("Não foi possível ler o registro agora.")
@@ -68,4 +76,32 @@ class QuemMeConsultouViewModel(app: Application) : AndroidViewModel(app) {
     private companion object {
         const val TAG = "ClaryonField"
     }
+}
+
+/**
+ * **O instante da consulta, no fuso de quem lê.**
+ *
+ * `quem_me_consultou()` devolve `timestamptz`, e o PostgREST serializa em **UTC**
+ * (`2026-08-20T18:24:09+00:00`). A primeira versão desta tela fazia
+ * `em.take(16).replace('T', ' ')` e mostrava o texto cru: no horário de Brasília,
+ * **três horas à frente**. Eu conferi essa tela no aparelho, li "18:20" e dei por
+ * verificada — o número estava lá, plausível, e errado.
+ *
+ * Numa tela de auditoria isso não é cosmético. O agente que vê "consultaram você às
+ * 18:20" e sabe que às 18:20 estava fora de serviço conclui coisa errada sobre um
+ * colega, a partir de um registro que o produto apresentou como fato.
+ *
+ * Pura e testável: recebe o texto do servidor, devolve o texto da tela.
+ */
+fun instanteLocalDaConsulta(
+    doServidor: String,
+    zona: java.time.ZoneId = java.time.ZoneId.systemDefault(),
+): String = runCatching {
+    java.time.OffsetDateTime.parse(doServidor)
+        .atZoneSameInstant(zona)
+        .format(java.time.format.DateTimeFormatter.ofPattern("dd/MM HH:mm"))
+}.getOrElse {
+    // Formato inesperado: mostra o cru em vez de esconder a linha. Uma consulta
+    // omitida do registro de auditoria é pior que uma com data feia.
+    doServidor.take(16).replace('T', ' ')
 }
