@@ -3,6 +3,7 @@ package com.claryon.field
 import android.app.Application
 import android.os.StrictMode
 import android.util.Log
+import com.claryon.agent.LexicoDeOcorrencias
 import com.claryon.common.Result
 import com.claryon.field.auth.SessaoDoAgente
 import com.claryon.field.voice.EscutaDoAgente
@@ -43,11 +44,48 @@ class ClaryonApp : Application() {
         SessaoDoAgente.aquecer(this)
         MapLibre.getInstance(this)
 
+        carregarGazetteer()
+
         val result = GlassesRuntime.initialize(this)
         if (result is Result.Failure) {
             // Falha nunca é silêncio: registra para diagnóstico. Em Developer
             // Mode com MockDeviceKit, o enable() reinicializa se necessário.
             Log.e(TAG, "Falha ao inicializar o DAT: ${result.error}")
+        }
+    }
+
+    /**
+     * **O gazetteer de logradouros, em produção.**
+     *
+     * `LexicoDeOcorrencias.configurarGazetteer` existia desde a Fase 1 e tinha
+     * chamador **só em teste** — o léxico rodava em produção com o mapa vazio, e
+     * nenhum logradouro era reconhecido como logradouro. O sintoma não é erro: é
+     * um alerta que sai sem endereço, ou com o nome da rua tratado como nome de
+     * pessoa envolvida.
+     *
+     * Carregado de asset, e não de constante no código, porque a lista muda por
+     * cidade e é dado da corporação — a semente versionada aqui cobre só o corpus
+     * de teste do projeto e diz isso no próprio cabeçalho do arquivo.
+     *
+     * Fora da Main: é leitura de disco, e o `StrictMode` instalado logo acima
+     * acusaria — corretamente.
+     */
+    private fun carregarGazetteer() {
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            val linhas = runCatching {
+                assets.open("gazetteer/logradouros.txt").bufferedReader().useLines { seq ->
+                    seq.map { it.trim() }
+                        .filter { it.isNotEmpty() && !it.startsWith("#") }
+                        .toList()
+                }
+            }.getOrElse {
+                Log.w(TAG, "gazetteer não carregado — logradouro não será reconhecido", it)
+                emptyList()
+            }
+            LexicoDeOcorrencias.configurarGazetteer(linhas)
+            // O número, não um "ok": uma semente de 2 linhas e um gazetteer de
+            // 8 000 dariam a mesma mensagem, e são capacidades diferentes.
+            Log.i(TAG, "gazetteer: ${linhas.size} logradouros")
         }
     }
 

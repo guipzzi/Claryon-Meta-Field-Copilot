@@ -1,0 +1,25 @@
+# Gazetteer de logradouros — CIDADE DO PILOTO
+#
+# Uma linha por logradouro, na grafia CANÔNICA: com maiúscula e acento, porque é
+# este texto que vai para o despachante. Linhas em branco e começadas por `#` são
+# ignoradas.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# ⚠️ ESTA É UMA SEMENTE, NÃO UM GAZETTEER.
+#
+# Contém apenas os logradouros que o corpus de teste do próprio projeto usa. Uma
+# lista de duas entradas não distingue "Rui Barbosa" (logradouro) de "Rui Barbosa"
+# (nome de pessoa) em nenhuma rua que não esteja aqui — e é exatamente para essa
+# distinção que o gazetteer existe.
+#
+# O arquivo operacional vem da corporação, e não deste repositório: nomes de
+# logradouro são dado do mundo real, e inventá-los produziria um alerta despachado
+# para uma rua que não existe. `LexicoDeOcorrencias` degrada com honestidade — sem
+# casamento, o produto pede repetição em vez de adivinhar.
+#
+# A prontidão no Perfil mostra quantos logradouros foram carregados, para que uma
+# lista curta ou ausente apareça em vez de falhar em silêncio.
+# ─────────────────────────────────────────────────────────────────────────────
+
+Rui Barbosa
+Praça Cívica
