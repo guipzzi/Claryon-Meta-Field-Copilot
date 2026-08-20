@@ -10,8 +10,6 @@ import com.claryon.field.radio.CanalDoPiloto
 import com.claryon.field.mapa.EstadoDoMapa
 import com.claryon.field.mapa.MapaDePares
 import com.claryon.net.HistoricoDoCanal
-import com.claryon.net.PublicadorDePosicao
-import com.claryon.net.PublicadorDePosicaoSupabase
 import com.claryon.net.RespostaDePosicao
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -47,14 +45,6 @@ import kotlinx.coroutines.launch
 class MapaViewModel(app: Application) : AndroidViewModel(app) {
 
     private val local = ProvedorDeLocal(app)
-
-    private val publicador = PublicadorDePosicaoSupabase(
-        config = SessaoDoAgente.config,
-        tokenDeSessao = { SessaoDoAgente.tokenValido(app) },
-    )
-
-    /** Exposto para o serviço em primeiro plano, que coleta com o app fechado. */
-    val publicadorDePosicao: PublicadorDePosicao get() = publicador
 
     private val _estado = MutableStateFlow(
         EstadoDoMapa.indisponivel("Abra o mapa para ver a guarnição."),

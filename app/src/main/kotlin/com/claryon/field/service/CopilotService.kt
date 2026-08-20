@@ -18,7 +18,9 @@ import com.claryon.agent.PowerPolicy
 import com.claryon.agent.ThermalGovernor
 import com.claryon.agent.TipoServico
 import com.claryon.field.local.ColetorDePosicao
+import com.claryon.field.auth.SessaoDoAgente
 import com.claryon.net.PublicadorDePosicao
+import com.claryon.net.PublicadorDePosicaoSupabase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -64,10 +66,28 @@ class CopilotService : Service() {
             context = this,
             escopo = escopo,
             publicar = { lat, lon, precisao, velocidade ->
-                publicador?.publicar(lat, lon, precisao, velocidade)
+                escritorDePosicao().publicar(lat, lon, precisao, velocidade)
             },
         )
     }
+
+    /**
+     * O escritor de posição, construído **aqui**, onde a escrita acontece.
+     *
+     * Preguiçoso e memoizado: o serviço pode ser recriado pelo sistema
+     * (`START_STICKY`) sem que nenhuma tela tenha rodado, e nesse caminho não há
+     * quem injete nada. Antes disso ele nascia coletando o GPS e descartando,
+     * porque `publicador` era nulo — o pior desperdício possível, já que o rádio
+     * acorda e o dado morre no caminho.
+     */
+    private fun escritorDePosicao(): PublicadorDePosicao =
+        publicador ?: escritorProprio ?: PublicadorDePosicaoSupabase(
+            config = SessaoDoAgente.config,
+            tokenDeSessao = { SessaoDoAgente.tokenValido(applicationContext) },
+        ).also { escritorProprio = it }
+
+    @Volatile
+    private var escritorProprio: PublicadorDePosicao? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // `intent == null` significa **recriação pelo sistema** (START_STICKY após
@@ -200,6 +220,16 @@ class CopilotService : Service() {
          * sessão do agente — o token vive no cofre cifrado do `app`. Nulo até o
          * login: sem sessão não há a quem publicar, e o coletor descarta em
          * silêncio em vez de acumular.
+         */
+        /**
+         * Injeção **para teste**. Em produção fica nulo e o serviço constrói o
+         * próprio escritor.
+         *
+         * Era por aqui que o publicador chegava, vindo do `MapaViewModel` pela
+         * `MainActivity` — propriedade invertida: a tela do mapa era dona do
+         * escritor de posição, e desde que o mapa deixou de publicar (`0016`) ela
+         * não tinha mais motivo nenhum para sê-lo. Pior, o serviço dependia de
+         * alguém ter passado por aquela linha antes de ele coletar.
          */
         @Volatile
         var publicador: PublicadorDePosicao? = null

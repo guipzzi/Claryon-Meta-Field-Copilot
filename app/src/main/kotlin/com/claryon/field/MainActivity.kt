@@ -163,10 +163,10 @@ private fun Operacao(
         //
         // Sobe daqui, de tela visível: iniciar um serviço em primeiro plano a
         // partir do background é `ForegroundServiceStartNotAllowedException`.
-        // E o publicador é injetado antes do `iniciar`, senão o serviço nasce
-        // coletando e descartando — o pior desperdício, porque o GPS acorda e o
-        // dado morre no caminho.
-        CopilotService.publicador = mapa.publicadorDePosicao
+        // O publicador **não** é injetado daqui: o serviço constrói o próprio,
+        // onde a escrita acontece. Injetar daqui fazia a coleta depender de alguém
+        // ter passado por esta linha — e o sistema recria o serviço por
+        // `START_STICKY` sem tela nenhuma ter rodado.
         CopilotService.iniciar(contexto, ModoOperacao.ATIVO)
         radio.abrir(
             canal = CanalDoPiloto.ID,
