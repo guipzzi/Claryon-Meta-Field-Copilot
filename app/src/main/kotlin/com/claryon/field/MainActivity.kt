@@ -20,6 +20,7 @@ import com.claryon.agent.ModoOperacao
 import com.claryon.field.auth.SessaoDoAgente
 import com.claryon.field.permissoes.PermissoesEssenciais
 import com.claryon.field.service.CopilotService
+import com.claryon.field.voice.EstadoDaEscuta
 import com.claryon.field.radio.CanalDoPiloto
 import com.claryon.field.radio.RadioViewModel
 import com.claryon.field.ui.CascoTatico
@@ -145,6 +146,7 @@ private fun Operacao(
     val noAr by radio.noAr.collectAsState()
     val copilotoOcupado by copiloto.copilotoOcupado.collectAsState()
     val estadoMapa by mapa.estado.collectAsState()
+    val escuta by CopilotService.estadoDaEscuta.collectAsState()
     val registro by oculos.registration.collectAsState()
 
     LaunchedEffect(Unit) {
@@ -211,7 +213,12 @@ private fun Operacao(
                 matricula = AGENTE_DEMO,
                 unidade = "GTA-3",
                 canal = CanalDoPiloto.NOME,
-                capacidades = capacidadesDe(estadoPtt, registro.name, estadoMapa.assinado),
+                capacidades = capacidadesDe(
+                    estadoPtt,
+                    registro.name,
+                    estadoMapa.assinado,
+                    escuta,
+                ),
                 aoSair = aoEncerrarTurno,
                 modifier = modifier,
             )
@@ -230,6 +237,7 @@ private fun capacidadesDe(
     ptt: com.claryon.field.ui.componentes.EstadoDoPtt,
     registro: String,
     mapaAssinado: Boolean,
+    escuta: EstadoDaEscuta,
 ): List<Capacidade> {
     val pttVivo = ptt !is com.claryon.field.ui.componentes.EstadoDoPtt.Indisponivel
     return listOf(
@@ -261,6 +269,23 @@ private fun capacidadesDe(
                 "Recebendo posições da guarnição."
             } else {
                 "Abra o mapa para começar a receber posições."
+            },
+        ),
+        // **A capacidade que passou uma fase inteira parecendo existir.** O
+        // detector media 26/26 em bancada e não tinha chamador nenhum em
+        // produção; os modelos estavam no APK de teste. Ninguém tinha como
+        // perceber, porque nada no aplicativo dizia se ele estava ouvindo.
+        //
+        // Motivo derivado do estado, nunca string fixa — a linha do mapa, logo
+        // acima, registra o que acontece quando é fixa: ela mente.
+        Capacidade(
+            nome = "Palavra de ativação",
+            viva = escuta == EstadoDaEscuta.OUVINDO,
+            motivo = when (escuta) {
+                EstadoDaEscuta.OUVINDO -> "Escutando \"Hey Claryon\"."
+                EstadoDaEscuta.EM_PAUSA -> "Em pausa o microfone fica fechado. Volte para o serviço."
+                EstadoDaEscuta.SEM_ROTA -> "Sem rota de áudio. Conecte os óculos ou o fone."
+                EstadoDaEscuta.SEM_MODELO -> "Modelo de ativação ausente no aplicativo."
             },
         ),
     )

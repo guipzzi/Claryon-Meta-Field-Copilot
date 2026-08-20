@@ -187,8 +187,15 @@ Capturar exige `GlassesAudioRoute`, e o único jeito de obter uma é rotear de f
 
 ## Rádio tático (C1) — regras duras
 
-- **Transmissão é sempre push-to-talk explícito.** Nunca por palavra de ativação: um falso
-  positivo difundiria para a guarnição inteira
+- **A palavra de ativação NUNCA abre canal sozinha.** Quem abre é a transcrição íntegra em
+  português contra léxico fechado, com o grupo resolvido e o piso concedido — o detector
+  acústico só antecipa o earcon. A frase é *"guarnição N na escuta"*, com o número, e o
+  casamento é integral: qualquer palavra extra recusa. Desligando o detector, o sistema
+  continua correto e perde só a sensação de resposta imediata. Deixar o detector decidir
+  sozinho faria o produto difundir para a guarnição inteira com tráfego de rádio ambiente.
+  (Isto aqui dizia "transmissão é sempre push-to-talk explícito, nunca por palavra de
+  ativação", e estava meio errado — a metade errada era a que importava, porque o fluxo
+  aprovado em D1 é mãos livres do início ao fim, inclusive abrir transmissão.)
 - **Áudio ao vivo, em quadros Opus de 20 ms, enquanto o agente fala.** Nunca gravar arquivo
   inteiro e depois enviar. O Storage é arquivamento assíncrono, jamais o caminho ao vivo
 - **A captura não bloqueia esperando a rede.** `AudioRecord` começa no instante do toque;
@@ -199,7 +206,11 @@ Capturar exige `GlassesAudioRoute`, e o único jeito de obter uma é rotear de f
   fixo. Se o PTT não for pressionado, o conteúdo se perde por definição
 - **Detector de palavra de ativação desligado** enquanto qualquer áudio sai pelos
   alto-falantes e enquanto o PTT está ativo. Alto-falante *open-ear* a centímetros do
-  microfone: sem isso, o produto conversa consigo mesmo
+  microfone: sem isso, o produto conversa consigo mesmo. Isto deixou de ser promessa em
+  20/08: `EscutaDeAtivacao` filtra pelo `SupressorDeSaidaPropria` de processo — o mesmo do
+  rádio — e por `RadioTatico.transmitindo`, e **reinicia o anel do detector nas duas bordas
+  da mudez**. Sem o reinício ele emendaria os dois lados e avaliaria uma janela que nunca
+  existiu no mundo, que é falso positivo por construção
 
 ## Localização e mapa (C2/C5)
 

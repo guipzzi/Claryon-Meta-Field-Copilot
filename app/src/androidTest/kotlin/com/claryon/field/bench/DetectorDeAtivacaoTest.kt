@@ -83,13 +83,26 @@ class DetectorDeAtivacaoTest {
         return ShortArray(0)
     }
 
+    /**
+     * **Os assets do APK DE PRODUÇÃO, não os do APK de teste.**
+     *
+     * Eles moravam em `androidTest/assets/ativacao/`, e por isso este arquivo lia de
+     * `ctxDoTeste` com o diretório passado à mão. O detector passava aqui e teria
+     * devolvido `false` em produção — `preparar()` procura em `models/ativacao`, que
+     * não existia no APK do app. Um teste verde sobre um caminho que o produto não
+     * percorre é precisamente o que o §6 chama de escrito, não construído.
+     *
+     * Agora o alvo é `targetContext` e o diretório é o default. Se alguém tirar os
+     * modelos do APK, este teste cai junto com a capacidade.
+     */
     private fun detector(): DetectorDeAtivacao? {
+        val assets = InstrumentationRegistry.getInstrumentation().targetContext.assets
         val bytes = runCatching {
-            ctxDoTeste.assets.open("ativacao/cabeca_guido.f32").use { it.readBytes() }
+            assets.open("${'$'}{DetectorDeAtivacao.ASSETS}/cabeca.f32").use { it.readBytes() }
         }.getOrNull() ?: return null
         val (pesos, vies) = DetectorDeAtivacao.cabecaDeBytes(bytes) ?: return null
         val d = DetectorDeAtivacao(pesos, vies)
-        return if (d.preparar(ctxDoTeste.assets, "ativacao")) d else null.also { d.close() }
+        return if (d.preparar(assets)) d else null.also { d.close() }
     }
 
     @Test

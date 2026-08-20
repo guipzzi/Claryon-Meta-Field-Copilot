@@ -18,7 +18,17 @@ import com.claryon.agent.ModoOperacao
 import com.claryon.agent.PowerPolicy
 import com.claryon.agent.ThermalGovernor
 import com.claryon.agent.TipoServico
+import com.claryon.field.audio.AudioDoAgente
+import com.claryon.field.audio.SaidaUnica
 import com.claryon.field.local.ColetorDePosicao
+import com.claryon.field.voice.EscutaDeAtivacao
+import com.claryon.field.voice.EstadoDaEscuta
+import com.claryon.field.voice.comoOuvido
+import com.claryon.voice.DetectorDeAtivacao
+import com.claryon.common.Earcon
+import com.claryon.common.Result
+import com.claryon.common.Priority
+import com.claryon.agent.Utterance
 import com.claryon.field.auth.SessaoDoAgente
 import com.claryon.net.PublicadorDePosicao
 import com.claryon.net.PublicadorDePosicaoSupabase
@@ -28,7 +38,10 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import com.claryon.field.MainActivity
 import com.claryon.field.R
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -59,6 +72,7 @@ class CopilotService : Service() {
     private val escopo = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     private var coletor: ColetorDePosicao? = null
+    private var escuta: EscutaDeAtivacao? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -70,8 +84,72 @@ class CopilotService : Service() {
                 escritorDePosicao().publicar(lat, lon, precisao, velocidade, nanos)
             },
         )
+        escuta = construirEscuta().also { viva ->
+            escopo.launch { viva.estado.collect { _estadoDaEscuta.value = it } }
+        }
         // Antes de o coletor começar: sem turno, toda publicação é recusada.
         abrirTurno()
+    }
+
+    /**
+     * A escuta da palavra de ativação, no serviço e não num ViewModel.
+     *
+     * Pela mesma razão do coletor de posição: o agente guarda o celular no bolso e
+     * a tela apaga. Escuta presa a `viewModelScope` morreria com a composição, que
+     * é o oposto de "mãos livres" — e mãos livres é a justificativa operacional do
+     * produto inteiro, registrada em D1: com uma mão na pistola e outra no volante
+     * não há mão para tocar nos óculos.
+     */
+    private fun construirEscuta(): EscutaDeAtivacao {
+        val audio = AudioDoAgente.de(this)
+        lateinit var propria: EscutaDeAtivacao
+        propria = EscutaDeAtivacao(
+            escopo = escopo,
+            abrirMicrofone = {
+                when (val r = audio.iniciar()) {
+                    is Result.Success -> audio.microfonePcm(r.value)
+                    is Result.Failure -> {
+                        // **Não chamar `liberar()`.** `iniciar()` falhou e não contou
+                        // usuário nenhum; decrementar aqui deixaria um déficit que o
+                        // próximo `liberar()` do rádio cobraria, derrubando a rota SCO
+                        // por baixo de quem ainda captura.
+                        Log.w(TAG, "escuta sem rota HFP: ${r.error.message}")
+                        null
+                    }
+                }
+            },
+            fecharMicrofone = { audio.liberar() },
+            criarDetector = {
+                val bytes = runCatching {
+                    assets.open("${DetectorDeAtivacao.ASSETS}/cabeca.f32").use { it.readBytes() }
+                }.getOrNull()
+                val cabeca = bytes?.let { DetectorDeAtivacao.cabecaDeBytes(it) }
+                cabeca?.let { (pesos, vies) ->
+                    val d = DetectorDeAtivacao(pesos, vies)
+                    if (d.preparar(assets)) d.comoOuvido() else { d.close(); null }
+                }
+            },
+            aoDetectar = { escore ->
+                // **O PRIMEIRO de dois earcons, e eles dizem coisas diferentes.**
+                // Este é "estou ouvindo, pode falar", e é dele que sai a meta `fim de
+                // "Hey Claryon" → earcon ≤ 500 ms` — que só existe se quem confirma a
+                // escuta for quem ouviu a palavra. O `VoiceCycle` emite o segundo no
+                // fechamento do VAD: "ouvi o comando, estou trabalhando". Sem display,
+                // som é o único canal, e calar o segundo deixaria o agente sem
+                // resposta nenhuma nos ~2 s entre o fim da fala e a resposta falada.
+                SaidaUnica.de(applicationContext)
+                    .emitir(Utterance.Sinalizar(Earcon.OUVI_VOCE, Priority.RESPOSTA))
+                // Cala pela duração de um ciclo. O `VoiceCycle` tem teto de 8 s; os
+                // 10 s cobrem a resposta falada depois dele. Sem isto o copiloto
+                // ouviria a própria fala e o supressor sozinho não basta — ele cobre
+                // o que SAI por este processo, e o ciclo ainda vai ouvir o agente.
+                propria.silenciarPor(JANELA_DO_CICLO_MS)
+                _ativacoes.tryEmit(escore)
+            },
+            suprimido = { agora -> SaidaUnica.supressor.suprimido(agora) },
+            ocupadoNoRadio = { radioNoAr() },
+        )
+        return propria
     }
 
     /**
@@ -144,6 +222,10 @@ class CopilotService : Service() {
         // Standby também publica — sumir do mapa em pausa criaria a expectativa
         // errada, porque companheiro que desaparece parece em perigo.
         coletor?.ajustarPara(modo, mapaVisivel = false)
+        // A escuta acompanha o modo pela MESMA regra que decidiu o tipo do serviço
+        // logo acima: `hfpAberto`. Em Standby o serviço não pediu `MICROPHONE`, e
+        // abrir microfone sem o tipo declarado derruba o processo no Android 14+.
+        escuta?.ajustarPara(modo)
         // START_STICKY: se o sistema matar por memória, é recriado — e o ramo
         // acima decide (com segurança) o que fazer nessa recriação.
         return START_STICKY
@@ -169,6 +251,9 @@ class CopilotService : Service() {
         // porque não aparece em lugar nenhum da interface.
         coletor?.parar()
         coletor = null
+        escuta?.parar()
+        escuta = null
+        _estadoDaEscuta.value = EstadoDaEscuta.EM_PAUSA
         escopo.cancel()
         super.onDestroy()
     }
@@ -263,6 +348,39 @@ class CopilotService : Service() {
          */
         @Volatile
         var publicador: PublicadorDePosicao? = null
+
+        /**
+         * Cada palavra de ativação ouvida, com o escore. De processo, e não do
+         * serviço: quem consome é o ciclo de voz, que vive noutro objeto.
+         *
+         * `DROP_OLDEST` com buffer 1 porque duas ativações em sequência não são duas
+         * intenções — a segunda é eco ou insistência, e enfileirar rodaria dois
+         * ciclos, o segundo sobre a resposta falada do primeiro.
+         */
+        private val _ativacoes = MutableSharedFlow<Float>(
+            replay = 0,
+            extraBufferCapacity = 1,
+            onBufferOverflow = BufferOverflow.DROP_OLDEST,
+        )
+
+        /** Palavras de ativação ouvidas. O escore vai junto para o log honesto. */
+        val ativacoes: SharedFlow<Float> = _ativacoes
+
+        /**
+         * "O agente está com o PTT pressionado?" — registrado pelo `RadioViewModel`,
+         * que é quem tem o `RadioTatico`. Default `false`: sem rádio de pé, a escuta
+         * não pode ficar calada esperando por uma resposta que ninguém vai dar.
+         */
+        @Volatile
+        var radioNoAr: () -> Boolean = { false }
+
+        private val _estadoDaEscuta = MutableStateFlow(EstadoDaEscuta.EM_PAUSA)
+
+        /** A prontidão da palavra de ativação, para o perfil mostrar com a CAUSA. */
+        val estadoDaEscuta: StateFlow<EstadoDaEscuta> = _estadoDaEscuta
+
+        /** Teto do `VoiceCycle` (8 s) mais a resposta falada. */
+        const val JANELA_DO_CICLO_MS = 10_000L
 
         private val _modo = MutableStateFlow(ModoOperacao.STANDBY)
 

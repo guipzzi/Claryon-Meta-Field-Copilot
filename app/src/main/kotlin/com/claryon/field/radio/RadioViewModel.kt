@@ -4,6 +4,7 @@ import android.app.Application
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.claryon.field.service.CopilotService
 import com.claryon.field.audio.AudioDoAgente
 import com.claryon.field.audio.SaidaUnica
 import com.claryon.audio.GlassesAudioRoute
@@ -270,6 +271,11 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
             )
             novo.entrarEmModoAtivo(r)
             radio = novo
+            // **O portão que cala a palavra de ativação enquanto o agente
+            // transmite.** Vive aqui porque é aqui que o `RadioTatico` existe; a
+            // escuta mora no serviço e não tem como alcançá-lo. Um "Hey Claryon"
+            // dito no ar é conversa com pessoas, não comando para o copiloto.
+            CopilotService.radioNoAr = { novo.transmitindo }
             transporteAtual = transporte
 
             // **O registro que torna a troca por voz alcançável em runtime.**
@@ -470,6 +476,10 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Fecha o rádio e devolve a rota. Chamado ao sair da tela ou encerrar o turno. */
     fun fechar() {
+        // Desregistra: um lambda apontando para um `RadioTatico` morto deixaria a
+        // escuta calada para sempre, e o sintoma seria "a palavra de ativação parou
+        // de funcionar depois que fechei o rádio" — dos piores de rastrear.
+        CopilotService.radioNoAr = { false }
         cronometro?.cancel()
         cronometro = null
         vigiaDeRede?.cancel()

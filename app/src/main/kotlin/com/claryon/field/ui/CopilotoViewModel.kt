@@ -33,6 +33,7 @@ import com.claryon.field.permissoes.PermissoesEssenciais
 import com.claryon.field.voice.EscutaDoAgente
 import com.claryon.field.voice.Modelos
 import com.claryon.field.voice.SileroVoiceActivityDetector
+import com.claryon.field.service.CopilotService
 import com.claryon.field.voice.VoiceCycle
 import com.claryon.net.ConsultaDePosicao
 import com.claryon.sync.SemTransporteGateway
@@ -195,6 +196,23 @@ class CopilotoViewModel(app: Application) : AndroidViewModel(app) {
     init {
         // Paga a primeira resolução do `filesDir` fora da Main. Ver `despachante`.
         viewModelScope.launch(Dispatchers.IO) { despachante }
+
+        // **O outro lado da palavra de ativação.** Quem OUVE é o serviço, que
+        // sobrevive à tela apagada; quem RODA o ciclo é este objeto, onde vivem o
+        // whisper, o roteador e o executor. O earcon de "estou ouvindo" já saiu lá,
+        // então o agente tem confirmação mesmo quando este coletor não existe.
+        //
+        // Enquanto o ciclo não vive no serviço, esta é a fronteira honesta: com a
+        // Activity destruída pelo sistema, o agente ouve o bipe e o comando não
+        // roda. Está registrado no `ESTADO.md` como o que falta, e não como
+        // detalhe — mãos livres com a tela apagada é a justificativa do produto.
+        viewModelScope.launch {
+            CopilotService.ativacoes.collect { escore ->
+                Log.i(TAG, "ativação por voz (escore %.3f) — abrindo ciclo".format(escore))
+                _commandStatus.value = "ativação por voz — ouvindo…"
+                cicloDeVoz()
+            }
+        }
     }
 
     // Dono único da saída (`SaidaUnica`) — a mesma fila que o rádio usa para os
