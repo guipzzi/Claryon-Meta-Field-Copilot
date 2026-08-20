@@ -24,9 +24,8 @@
   bancada · **p50 3,5 ms** por decisão · **zero dependência nova**.
 - **Falso positivo do detector: 428/h → 0** na metade retida de 3,65 min de leitura, com
   recall intacto (9/9) — treinando com negativo duro, não mexendo no limiar.
-- **Ferramentas:** `par_headless.mjs` (segundo ouvinte do aceite, com `--falar` para testar
-  personificação) · `sonda_de_politica.py` (experimenta política com restauração em
-  `finally`; nasceu de erro meu, que deixou o broadcast fora do ar).
+- **Ferramentas:** `par_headless.mjs` (segundo ouvinte do aceite, com `--falar`) ·
+  `sonda_de_politica.py` (restaura em `finally` e recusa produção sem motivo escrito).
 
 ## O que está quebrado, e nós sabemos
 
@@ -34,16 +33,15 @@
    não construído — o erro que este projeto já cometeu seis vezes.
 2. **O falso positivo ainda não tem intervalo útil.** `0` em 1,8 min retidos dá limite
    superior de **~99/h** com 95%; a meta é **0,5/h**, e isso exige da ordem de **6 h**.
-3. **O modelo é de um locutor só**, 27 elocuções aumentadas. Generalizou para três locutores
-   inéditos (0,963 · 0,996 · 0,999), mas com `n=4`.
+3. **O modelo é de um locutor só**, 27 elocuções. Generalizou para três inéditos (0,963 ·
+   0,996 · 0,999), mas com `n=4`.
 4. **A via por transcrição tem teto estrutural** — 8 hipóteses, 6 refutadas. Marca exata
    33,3%. Detalhe em [`docs/PALAVRA_DE_ATIVACAO.md`](docs/PALAVRA_DE_ATIVACAO.md).
 5. **O Piper NÃO é determinístico** e como treino **piora**: derruba a margem de +0,109 a −0,020.
 6. **`CaosDoDatTest` falha um teste por rodada**, variando qual; falha em `HEAD` limpo.
 7. **Buraco no aceite (b):** a preempção de P1 não alcança a fase de `render`.
-8. **Não há ambiente separado para experimento de servidor.** A sonda restaura sozinha e
-   **recusa produção sem `--producao "motivo"`**, mas a pilha local exige Docker, que não
-   sobe nesta máquina. Com guarnição em rua, barreira não substitui ambiente.
+8. **Não há ambiente separado para experimento de servidor.** A sonda recusa produção sem
+   `--producao "motivo"`, mas a pilha local exige Docker, que não sobe nesta máquina.
 9. `errorStream` não coletado · `STOPPED` não terminal · câmera do DAT nunca pedida ·
    transcrição na origem (P1) não existe · SIGILL latente sem FEAT_FP16.
 
@@ -54,8 +52,12 @@ dispositivo HFP (ver `docs/VERIFICACOES_COM_HARDWARE.md`).
 
 Quatro itens fechados (JWT no canal, piso remoto conferido, revogação, autoria). Faltam:
 
-1. **Transcrição na origem** (P1, pilar do produto e hoje inexistente): acumulador do PCM
-   **que foi ao ar**, whisper no `finally`, quarto evento `fala.transcricao`.
+1. **Transcrição na origem** (P1) — **acumulador feito**: `AcumuladorDePcm` junta o PCM no
+   funil único de `SessaoPtt.enviar`, depois da codificação dar certo, e `aoAudioTransmitido`
+   entrega no `finally` fora do `withTimeoutOrNull`. **Faltam os dois de cima**: chamador que
+   rode o whisper em escopo de aplicação, e o quarto evento `fala.transcricao` no protocolo.
+   Sem eles isto é **escrito, não construído** — `grep aoAudioTransmitido` em `app/src/main`
+   devolve zero.
 2. **Dono único da escrita de posição**, e depois batimento com idade real do servidor.
 3. **Log de acesso** nas duas portas — autor de `current_agent_id()`, nunca do protocolo.
 4. Retenção em duas camadas — **ou entra inteira** (turno + job + log na mesma sessão)

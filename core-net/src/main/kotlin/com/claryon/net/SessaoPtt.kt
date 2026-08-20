@@ -1,5 +1,7 @@
 package com.claryon.net
 
+import android.util.Log
+
 import com.claryon.common.Result
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
@@ -79,6 +81,22 @@ class SessaoPtt(
     private val talkGroupId: String,
     private val agenteId: String,
     private val preRoll: PreRollBuffer,
+    /**
+     * Guarda o PCM que foi ao ar, para a transcrição na origem derivar **do mesmo
+     * áudio que os receptores ouviram**. `null` desliga o acúmulo sem tocar em
+     * nenhum outro caminho — a transcrição é acessória e não pode ser condição do
+     * rádio funcionar.
+     */
+    private val acumulador: AcumuladorDePcm? = null,
+    /**
+     * Recebe o PCM que foi ao ar, ao fim da transmissão, para transcrever na origem.
+     *
+     * Suspensa e chamada em `NonCancellable`: soltar o PTT é cancelamento, e uma
+     * transcrição disparada aqui morreria antes de começar. Quem implementa decide
+     * o escopo — o roadmap pede escopo de **aplicação**, não da tela, para a
+     * transcrição não morrer quando o agente troca de aba logo depois de falar.
+     */
+    private val aoAudioTransmitido: (suspend (String, ShortArray) -> Unit)? = null,
     private val codec: CodecDeVoz,
     private val transporte: TransporteAoVivo,
     private val piso: ClienteDePiso,
@@ -186,6 +204,11 @@ class SessaoPtt(
         }
 
         try {
+            // Zerado aqui e não no fim: se o encerramento anterior travou na rede,
+            // o resto dele não pode aparecer colado no começo desta fala — seria a
+            // voz de uma transmissão dentro do texto de outra.
+            acumulador?.limpar()
+
             // 1) Pré-roll: a fala que começou antes do dedo chegar ao botão.
             for (quadro in fatiar(preRoll.desdeOInicioDaFala())) {
                 naoEntregues += enviar(transmissaoId, { sequencia++ }, quadro)
@@ -267,6 +290,23 @@ class SessaoPtt(
                 // O pré-roll é limpo mesmo que a rede tenha travado o
                 // encerramento: áudio não sobrevive ao momento de uso.
                 preRoll.limpar()
+
+                // **A transcrição na origem sai daqui, e fora do `withTimeoutOrNull`
+                // acima de propósito.** Dentro dele, um socket lento comeria o
+                // orçamento e a transcrição seria abortada sem ninguém saber; o
+                // encerramento do canal e o reconhecimento de fala são urgências
+                // diferentes e não devem dividir relógio.
+                //
+                // `consumir()` e não `tudo()`: quem leva o áudio apaga o áudio. Voz
+                // em claro não fica esperando alguém lembrar de limpar.
+                val falado = acumulador?.consumir()
+                if (falado != null && falado.isNotEmpty()) {
+                    // Falha aqui não pode derrubar o encerramento: a fala já foi ao
+                    // ar e o rádio cumpriu o papel dele. Sem texto, o thread mostra
+                    // o balão sem transcrição — que é o comportamento de hoje.
+                    runCatching { aoAudioTransmitido?.invoke(transmissaoId, falado) }
+                        .onFailure { Log.w(TAG, "transcrição na origem falhou", it) }
+                }
             }
         }
     }
@@ -296,8 +336,14 @@ class SessaoPtt(
         val antesDaCodificacao = agoraMs()
         val pacotes = when (val c = codec.codificar(pcm)) {
             is Result.Success -> c.value
+            // Quadro que a codificação recusou não foi ao ar, e por isso não entra
+            // no acumulador: transcrever áudio que ninguém ouviu produziria um
+            // texto que o colega não consegue conferir contra o que escutou.
             is Result.Failure -> return 0
         }
+        // Depois do sucesso da codificação e antes do envio: é o funil por onde
+        // passam TANTO os quadros do pré-roll QUANTO os do `collect` ao vivo.
+        acumulador?.acrescentar(pcm)
         // Só mede quando o pipeline de fato emitiu: no aquecimento o codec
         // consome sem produzir, e contar isso como "codificação instantânea"
         // enviesaria o p50 para baixo justamente no início de cada fala.
@@ -343,6 +389,8 @@ class SessaoPtt(
     private class CanalTomado : CancellationException("canal tomado por emergência")
 
     companion object {
+        private const val TAG = "ClaryonField"
+
         /** Impede que um botão preso vire captação contínua. */
         const val DURACAO_MAXIMA_MS = 30_000L
         const val RENOVAR_MS = 5_000L

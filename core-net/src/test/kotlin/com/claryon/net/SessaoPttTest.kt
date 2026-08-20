@@ -12,6 +12,8 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -128,6 +130,8 @@ class SessaoPttTest {
         relogio: () -> Long = { 0L },
         duracaoMaximaMs: Long = 30_000,
         telemetria: TelemetriaDoRadio? = null,
+        acumulador: AcumuladorDePcm? = null,
+        aoAudioTransmitido: (suspend (String, ShortArray) -> Unit)? = null,
     ) = SessaoPtt(
         talkGroupId = "gta-3",
         agenteId = "alfa",
@@ -139,6 +143,8 @@ class SessaoPttTest {
         amostrasPorQuadro = amostrasPorQuadro,
         duracaoMaximaMs = duracaoMaximaMs,
         telemetria = telemetria,
+        acumulador = acumulador,
+        aoAudioTransmitido = aoAudioTransmitido,
     )
 
     private fun blocosDeFala(n: Int) = flow {
@@ -539,4 +545,79 @@ class SessaoPttTest {
 
         assertTrue(transporte.quadros.isNotEmpty())
     }
+    // ── Transcrição na origem: o que foi ao ar ────────────────────────────────
+
+    /**
+     * **A invariante do P1: transcreve-se o que os OUTROS ouviram.**
+     *
+     * Se o texto derivasse do que o microfone captou, ele incluiria o pré-roll
+     * descartado e o áudio de depois do corte — e o colega não teria como conferir
+     * o texto contra o que escutou. O acúmulo acontece no funil único, dentro de
+     * `enviar`, por onde passam tanto o pré-roll aproveitado quanto o ao vivo.
+     */
+    @Test
+    fun acumulaOAudioQueFoiAoAr() = runTest {
+        val acc = AcumuladorDePcm()
+        var recebido: ShortArray? = null
+        val log = mutableListOf<String>()
+        val s = sessao(
+            preRoll = preRollCom(2), codec = CodecFake(), transporte = TransporteFake(log = log),
+            piso = concede(log), acumulador = acc,
+            aoAudioTransmitido = { _, pcm -> recebido = pcm },
+        )
+        s.transmitir("tx1", PrioridadeTransmissao.P2_APOIO, "Alfa", blocosDeFala(3)) {}
+        advanceUntilIdle()
+
+        assertNotNull("a transcrição na origem não recebeu áudio", recebido)
+        // 2 quadros de pré-roll + 3 ao vivo, todos no mesmo funil.
+        assertEquals(5 * amostrasPorQuadro, recebido!!.size)
+        assertEquals("o acumulador tinha de ter sido esvaziado por quem consumiu", 0, acc.amostras)
+    }
+
+    /**
+     * **O contra-teste, e é ele que separa "foi ao ar" de "foi capturado".**
+     *
+     * Com o codec falhando, nenhum pacote sai — logo nenhum receptor ouve nada, e
+     * transcrever esse áudio produziria um texto que ninguém pode conferir. Um
+     * acumulador posto antes da codificação passaria neste cenário e estaria errado.
+     */
+    @Test
+    fun quadroRecusadoPelaCodificacaoNaoEntraNaTranscricao() = runTest {
+        val acc = AcumuladorDePcm()
+        var recebido: ShortArray? = null
+        val log = mutableListOf<String>()
+        val s = sessao(
+            preRoll = preRollCom(2), codec = CodecFake(falhar = true),
+            transporte = TransporteFake(log = log), piso = concede(log), acumulador = acc,
+            aoAudioTransmitido = { _, pcm -> recebido = pcm },
+        )
+        s.transmitir("tx1", PrioridadeTransmissao.P2_APOIO, "Alfa", blocosDeFala(3)) {}
+        advanceUntilIdle()
+
+        assertNull("áudio que não foi ao ar chegou à transcrição", recebido)
+    }
+
+    /**
+     * Uma fala não pode aparecer dentro do texto da seguinte. O acumulador é zerado
+     * no início de cada transmissão, e não só no fim — se o encerramento anterior
+     * travou na rede, o resto dele ficaria colado aqui.
+     */
+    @Test
+    fun aFalaAnteriorNaoVazaParaOTextoDaSeguinte() = runTest {
+        val acc = AcumuladorDePcm()
+        acc.acrescentar(ShortArray(amostrasPorQuadro) { 99 }) // sobra de uma fala travada
+        val tamanhos = mutableListOf<Int>()
+        val log = mutableListOf<String>()
+        val s = sessao(
+            preRoll = preRollCom(0), codec = CodecFake(), transporte = TransporteFake(log = log),
+            piso = concede(log), acumulador = acc,
+            aoAudioTransmitido = { _, pcm -> tamanhos += pcm.size },
+        )
+        s.transmitir("tx1", PrioridadeTransmissao.P2_APOIO, "Alfa", blocosDeFala(2)) {}
+        advanceUntilIdle()
+
+        assertEquals(listOf(2 * amostrasPorQuadro), tamanhos)
+    }
+
+
 }
