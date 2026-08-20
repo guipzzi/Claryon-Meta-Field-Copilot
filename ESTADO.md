@@ -8,24 +8,21 @@
 - **PTT:** toque→1º quadro **31–48 ms** (120) · P1 corta em **11 ms** (≤200) · **WER 3,4%** ·
   earcon **305 ms** (500). **REVOGAÇÃO** (`0014`) e **AUTORIA** (`0013`+`0015`) conferida
   contra `floor_grants`; divergência vira *"Origem não confirmada"*.
-- **CANAL PRIVADO POR JWT** (`0012`): não-membro recebe `Unauthorized`, e o token é renovado
-  pelo `exp` — o JWT vive 60 min. E o indicador parou de mentir: mostrava verde e mandou
-  **168 quadros para um canal em que não entrou**; agora `CanalRecusado` é evento.
+- **CANAL PRIVADO POR JWT** (`0012`): não-membro recebe `Unauthorized`; token renovado pelo `exp`.
+  E o indicador parou de mentir — mandava **168 quadros para um canal em que não entrou**.
 - **PALAVRA DE ATIVAÇÃO LIGADA.** Faltava mais que chamador: os pesos viviam em
-  `androidTest/assets`, então `preparar()` em produção devolveria `false` — e o teste passava
-  lendo os assets do próprio APK de teste. `EscutaDeAtivacao` roda no serviço e só onde
-  `PowerPolicy.hfpAberto`, a MESMA regra do tipo `MICROPHONE` do FGS. No aparelho: **1500 quadros
-  em 30,0 s** = 50/s exatos; com PTT de 6 s, **300 calados** = 6,0 s. Cala na
-  saída própria, no PTT e por um ciclo, e **reinicia o anel nas duas bordas da mudez** — senão
-  avaliaria uma janela que nunca existiu. Perfil mostra a causa, não um booleano.
-- **O CÉREBRO SAIU DO VIEWMODEL.** Escuta e earcon já sobreviviam à tela; o ciclo morria com a
-  Activity, e bipe que não leva a nada afirma ter ouvido. `CerebroDoCopiloto` é dono de
-  processo (como `SaidaUnica`/`AudioDoAgente`), a captura de evidência foi junto — custódia em
-  `viewModelScope` era defeito — e o ViewModel caiu de 596 para **65 linhas**. `cicloDeVoz()`
-  tem dois caminhos e **um objeto**: botão e voz. Provado sem tela: `CicloSemTelaTest` roda em
-  8,578 s (o teto do ciclo) sem construir ViewModel nenhum.
-- **TRANSCRIÇÃO NA ORIGEM (P1)**, ponta a ponta com fala humana e servidor real: acumulador com
-  **80 000 amostras** = os 5,0 s exatos → whisper → o par headless recebeu texto **idêntico**.
+  `androidTest/assets`, então `preparar()` em produção daria `false` — e o teste passava lendo os
+  assets do próprio APK de teste. Roda no serviço e só onde `PowerPolicy.hfpAberto`, a MESMA
+  regra do tipo `MICROPHONE` do FGS. No aparelho: **1500 quadros em 30,0 s** = 50/s exatos; com
+  PTT de 6 s, **300 calados** = 6,0 s. Cala na saída própria, no PTT e por um ciclo, e **reinicia
+  o anel nas duas bordas da mudez** — senão avaliaria uma janela que nunca existiu.
+- **O CÉREBRO SAIU DO VIEWMODEL.** O ciclo morria com a Activity, e bipe que não leva a nada
+  afirma ter ouvido. `CerebroDoCopiloto` é dono de processo; a captura de evidência foi junto
+  (custódia em `viewModelScope` era defeito) e o ViewModel caiu de 596 para **65 linhas**.
+  `cicloDeVoz()` tem dois caminhos e **um objeto**. `CicloSemTelaTest` roda em 8,578 s — o teto
+  do ciclo — sem construir ViewModel nenhum.
+- **TRANSCRIÇÃO NA ORIGEM (P1)**, com fala humana e servidor real: acumulador com **80 000
+  amostras** = os 5,0 s exatos → whisper → o par headless recebeu texto **idêntico**.
 - **DONO ÚNICO DA POSIÇÃO** (`0016`): políticas abertas foram **exploradas** (POST gravou
   `updated_at = 2099`). **LOG DE ACESSO** (`0017`+`0018`): mapa vira **sessão** de 1 h e nunca
   grava a resposta. **RETENÇÃO** (`0019`) com job no `pg_cron`.
@@ -33,9 +30,8 @@
   decisão se toma uma vez — dois agentes podiam achar que detinham o canal. Achado **pela tela**:
   o teste instrumentado constrói a sessão antes, o app não.
 - **BATIMENTO ALCANÇÁVEL** — ele não existia. O `minDistance` suprime a entrega (*"will not
-  occur"*, AOSP): agente parado não recebia callback e a linha do batimento nunca rodava — pior
-  em Ocorrência, onde o agente chega e fica. Emulador, parado, 3,5 min: **5 publicações com o
-  conserto, 1 sem**. E 3 min contra os 2 de `OBSOLETO_S` esmaeciam todo parado; agora 60 s.
+  occur"*, AOSP): agente parado não recebia callback e a linha nunca rodava — pior em Ocorrência,
+  onde ele chega e fica. Emulador, parado, 3,5 min: **5 publicações com o conserto, 1 sem**.
 - **IDADE REAL DA CORREÇÃO** (`0020`): `updated_at` é hora do UPLOAD e cinco funções a liam como
   idade — quem reconectava após 4 min entrava como `idade_s = 0` e `agentes_no_raio` o contava
   como "está perto". O cliente manda **duração**, nunca instante: `now() - greatest(0, idade)`
