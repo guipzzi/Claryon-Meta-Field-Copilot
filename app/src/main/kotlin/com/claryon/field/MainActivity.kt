@@ -31,6 +31,7 @@ import com.claryon.field.ui.MapaViewModel
 import com.claryon.field.ui.telas.Capacidade
 import com.claryon.field.ui.telas.TelaDeGuarnicao
 import com.claryon.field.ui.telas.TelaDeLogin
+import com.claryon.field.ui.QuemMeConsultouViewModel
 import com.claryon.field.ui.telas.TelaDePerfil
 import com.claryon.field.ui.telas.TelaDePermissoes
 import com.claryon.field.ui.telas.TelaDoMapa
@@ -147,6 +148,13 @@ private fun Operacao(
     val copilotoOcupado by copiloto.copilotoOcupado.collectAsState()
     val estadoMapa by mapa.estado.collectAsState()
     val escuta by CopilotService.estadoDaEscuta.collectAsState()
+    val quemMeConsultou: QuemMeConsultouViewModel = viewModel()
+    val consultas by quemMeConsultou.estado.collectAsState()
+    // Lê ao ENTRAR no perfil, não em laço: a tela não fica aberta, e sondar
+    // transformaria a própria consulta de transparência numa fonte de tráfego.
+    LaunchedEffect(destino) {
+        if (destino == Destino.PERFIL) quemMeConsultou.carregar()
+    }
     val registro by oculos.registration.collectAsState()
 
     LaunchedEffect(Unit) {
@@ -205,6 +213,7 @@ private fun Operacao(
                 estado = estadoMapa,
                 aoAbrir = mapa::abrirMapa,
                 aoFechar = mapa::fecharMapa,
+                aoFocar = mapa::focarPar,
                 modifier = modifier,
             )
 
@@ -219,6 +228,7 @@ private fun Operacao(
                     estadoMapa.assinado,
                     escuta,
                 ),
+                consultas = consultas,
                 aoSair = aoEncerrarTurno,
                 modifier = modifier,
             )

@@ -7,6 +7,8 @@ import com.claryon.agent.FalaDePosicao
 import com.claryon.field.auth.SessaoDoAgente
 import com.claryon.field.local.ProvedorDeLocal
 import com.claryon.field.radio.CanalDoPiloto
+import com.claryon.field.mapa.TracoDoRastro
+import com.claryon.agent.Rumo
 import com.claryon.field.mapa.EstadoDoMapa
 import com.claryon.field.mapa.MapaDePares
 import com.claryon.net.HistoricoDoCanal
@@ -105,8 +107,19 @@ class MapaViewModel(app: Application) : AndroidViewModel(app) {
 
             while (true) {
                 val r = historico.posicoesDoGrupo(CanalDoPiloto.ID)
+                // **O rastro sobrevive ao redesenho.** `montarMapa` devolve um
+                // `EstadoDoMapa` NOVO, e os campos de rastro nasceriam vazios nele —
+                // o rastro carregava e era apagado em menos de cinco segundos, sem
+                // erro nenhum no caminho. Foi assim que ele não apareceu na tela na
+                // primeira medição.
+                val anterior = _estado.value
                 _estado.value = r.fold(
-                    onSuccess = { lista -> montarMapa(lista) },
+                    onSuccess = { lista ->
+                        montarMapa(lista).copy(
+                            rastro = anterior.rastro,
+                            rastroDe = anterior.rastroDe,
+                        )
+                    },
                     onFailure = {
                         EstadoDoMapa.indisponivel("Não foi possível ler as posições da guarnição.")
                     },
@@ -117,6 +130,61 @@ class MapaViewModel(app: Application) : AndroidViewModel(app) {
                 delay(INTERVALO_DE_REDESENHO_MS)
             }
         }
+    }
+
+    /**
+     * **O rastro de 30 minutos do par focado.** Camada 2 da retenção (`0019`).
+     *
+     * A função `rastro_do_par` existia no banco desde 19/08 e passou dias sem um
+     * único chamador Kotlin — capacidade sem porta, que é o padrão que este
+     * projeto já cometeu seis vezes. Aqui está a porta: tocar num par da gaveta.
+     *
+     * Só grandeza. Cada ponto é distância e azimute **a partir de onde eu estou
+     * agora**, então o rastro reconstrói o trajeto do par *relativo a mim* — o que
+     * serve para ir ao encontro dele e não serve para vigiá-lo depois. Coordenada
+     * de terceiro não atravessa esta função, e `PontoDoRastro` nem tem campo onde
+     * guardá-la.
+     *
+     * `null` limpa. Tocar de novo no mesmo par desfoca, e o rastro tem de sumir
+     * junto: rastro de um par que não está mais em foco é dado de vigilância
+     * pendurado na tela.
+     */
+    fun focarPar(indicativo: String?) {
+        rastroJob?.cancel()
+        if (indicativo == null) {
+            _estado.value = _estado.value.copy(rastro = emptyList(), rastroDe = null)
+            return
+        }
+        val h = historicoDoMapa ?: return
+        rastroJob = viewModelScope.launch {
+            val pontos = h.rastroDoPar(indicativo)
+                .onFailure { Log.w(TAG, "rastro de $indicativo indisponível", it) }
+                .getOrDefault(emptyList())
+            _estado.value = _estado.value.copy(
+                rastro = pontos.map { p ->
+                    TracoDoRastro(
+                        distanciaFalada = FalaDePosicao.distanciaFalada(p.distanciaM.toInt()),
+                        rumoFalado = p.azimuteGraus?.let { Rumo.deGraus(it)?.falado }
+                            // `ST_Azimuth` devolve nulo para pontos coincidentes —
+                            // dupla na mesma viatura. Forçar "norte" inventaria rumo.
+                            ?: "rumo indefinido",
+                        idadeFalada = idadeDoTraco(p.idadeS),
+                    )
+                },
+                rastroDe = indicativo,
+            )
+        }
+    }
+
+    private var rastroJob: Job? = null
+
+    /**
+     * "agora", "há 4 min". Curto de propósito: são até 30 linhas na gaveta, e
+     * "posição de 4 minutos" (a forma que o marcador usa) viraria parede de texto.
+     */
+    private fun idadeDoTraco(segundos: Int): String = when {
+        segundos < 60 -> "agora"
+        else -> "há ${segundos / 60} min"
     }
 
     /** Chamado pelo `ON_STOP` da tela. Fecha a sondagem e descarta o espelho. */
@@ -136,6 +204,8 @@ class MapaViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
         }
+        rastroJob?.cancel()
+        rastroJob = null
         bomba?.cancel()
         bomba = null
         _estado.value = EstadoDoMapa.indisponivel("Abra o mapa para ver a guarnição.")

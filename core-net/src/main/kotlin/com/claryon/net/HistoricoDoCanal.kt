@@ -44,6 +44,22 @@ data class MembroDoCanal(
  * sozinha, então "online" passa a significar algo verificável — publicou faz
  * pouco tempo.
  */
+/** Uma consulta que alguém fez sobre a minha posição. Nunca traz a resposta. */
+data class ConsultaRecebida(val indicativo: String, val em: String)
+
+/**
+ * Um ponto do rastro de 30 minutos, em GRANDEZA.
+ *
+ * Não existe latitude nem longitude aqui, e a ausência é a garantia: o tipo não
+ * tem onde guardar coordenada de terceiro, então nenhum caminho futuro pode
+ * acidentalmente passar a carregá-la.
+ */
+data class PontoDoRastro(
+    val distanciaM: Double,
+    val azimuteGraus: Double?,
+    val idadeS: Int,
+)
+
 class HistoricoDoCanal(
     private val config: ConfigRealtime,
     private val tokenDeSessao: suspend () -> String?,
@@ -213,6 +229,59 @@ class HistoricoDoCanal(
                     corpoTexto.toLongOrNull() ?: 0L
                 }
             }.fold({ Result.success(it) }, { Result.failure(it) })
+        }
+
+    /**
+     * **Quem consultou a minha posição.** A contrapartida do log de acesso.
+     *
+     * A `0017` criou `quem_me_consultou()` com esta justificativa: *"saber onde um
+     * colega está é poder; um sistema que concede esse poder sem deixar rastro não
+     * distingue a consulta legítima da vigilância de um agente sobre outro"*. E o
+     * ponto dela é devolver o controle ao titular — conformidade vira
+     * característica em vez de promessa em documento.
+     *
+     * Só que a função ficou **três dias sem um único chamador Kotlin**: capacidade
+     * no banco, sem porta no produto. Um log de auditoria que o auditado não pode
+     * ler é vigilância com passo extra, não transparência.
+     *
+     * Sem parâmetro, e isso é da função: com um `agent_id` como argumento ela
+     * viraria "quem consultou fulano", e um agente leria o padrão de consultas da
+     * corporação inteira.
+     */
+    suspend fun quemMeConsultou(): Result<List<ConsultaRecebida>> =
+        chamarRpc("quem_me_consultou", org.json.JSONObject()) { arr ->
+            (0 until arr.length()).map { i ->
+                val o = arr.getJSONObject(i)
+                ConsultaRecebida(
+                    indicativo = o.optString("indicativo_de_quem_consultou"),
+                    em = o.optString("em"),
+                )
+            }
+        }
+
+    /**
+     * **O rastro do par nos últimos 30 minutos** — só em grandeza, nunca coordenada.
+     *
+     * Camada 2 da retenção (`0019`). Cada ponto é distância e azimute a partir de
+     * ONDE EU ESTOU AGORA, com a idade: o servidor nunca devolve latitude e
+     * longitude de terceiro, e por isso o rastro não reconstrói o trajeto absoluto
+     * de ninguém — reconstrói o trajeto **relativo a mim**, que é o que serve para
+     * ir ao encontro de um companheiro e não serve para vigiá-lo depois.
+     *
+     * A distância vem arredondada em faixas desde a `0021`. Sem isso, uma série de
+     * distâncias exatas com azimute e instante reconstrói a trajetória — é a
+     * função com mais superfície das três, e era a única sem arredondamento.
+     */
+    suspend fun rastroDoPar(indicativo: String): Result<List<PontoDoRastro>> =
+        chamarRpc("rastro_do_par", org.json.JSONObject().put("indicativo", indicativo)) { arr ->
+            (0 until arr.length()).map { i ->
+                val o = arr.getJSONObject(i)
+                PontoDoRastro(
+                    distanciaM = o.optDouble("distancia_m", Double.NaN),
+                    azimuteGraus = if (o.isNull("azimute")) null else o.optDouble("azimute"),
+                    idadeS = o.optInt("idade_s", Int.MAX_VALUE),
+                )
+            }.filter { it.distanciaM.isFinite() }
         }
 
     private suspend fun <T> chamarRpc(

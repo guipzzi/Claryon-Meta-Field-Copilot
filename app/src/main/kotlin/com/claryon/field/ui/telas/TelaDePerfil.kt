@@ -22,6 +22,7 @@ import com.claryon.field.ui.componentes.Fio
 import com.claryon.field.ui.componentes.PontoDeEstado
 import com.claryon.field.ui.componentes.TextoCorpoMenor
 import com.claryon.field.ui.componentes.TextoDado
+import com.claryon.field.ui.QuemMeConsultouViewModel
 import com.claryon.field.ui.tema.Cores
 import com.claryon.field.ui.tema.Espaco
 import com.claryon.field.ui.tema.Tipo
@@ -54,6 +55,8 @@ fun TelaDePerfil(
     unidade: String,
     canal: String,
     capacidades: List<Capacidade>,
+    /** Quem consultou a posição deste agente. Ver `QuemMeConsultouViewModel`. */
+    consultas: QuemMeConsultouViewModel.Estado,
     aoSair: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -81,6 +84,10 @@ fun TelaDePerfil(
 
         Box(Modifier.height(Espaco.Secao))
 
+        QuemMeConsultou(consultas)
+
+        Box(Modifier.height(Espaco.Secao))
+
         Column(Modifier.padding(horizontal = Espaco.Padrao)) {
             // "Encerrar turno" e não "sair": nomeia o que acontece no mundo do
             // agente, não a operação técnica. E o que acontece é sério — a
@@ -94,6 +101,59 @@ fun TelaDePerfil(
         }
 
         Box(Modifier.height(Espaco.Secao))
+    }
+}
+
+/**
+ * **Quem perguntou onde eu estou.**
+ *
+ * A outra metade do log de acesso da `0017`. Aquela migração registra o ATO de
+ * consultar — nunca a resposta — e o argumento dela é que um sistema que concede o
+ * poder de saber onde um colega está sem deixar rastro não distingue apoio a
+ * caminho de vigilância. Esta lista devolve esse rastro ao titular.
+ *
+ * **Nunca mostra o que foi respondido**, porque o servidor não guarda: distância,
+ * azimute e velocidade não entram na tabela. Um log que guardasse a resposta seria
+ * um histórico de posição com outro nome — exatamente o que a `0016` gastou uma
+ * migração para impedir.
+ *
+ * Lista vazia é afirmação, não espaço em branco: "ninguém consultou" é informação,
+ * e o silêncio seria ambíguo entre isso e uma falha de rede.
+ */
+@Composable
+private fun QuemMeConsultou(estado: QuemMeConsultouViewModel.Estado) {
+    Column(Modifier.padding(horizontal = Espaco.Padrao)) {
+        Etiqueta("Quem consultou sua posição")
+        Box(Modifier.height(Espaco.Curto))
+        when (estado) {
+            is QuemMeConsultouViewModel.Estado.Carregando ->
+                TextoCorpoMenor("Lendo o registro…", cor = Cores.TintaFraca)
+
+            is QuemMeConsultouViewModel.Estado.Indisponivel ->
+                TextoCorpoMenor(estado.motivo, cor = Cores.TintaMedia)
+
+            is QuemMeConsultouViewModel.Estado.Lista -> if (estado.consultas.isEmpty()) {
+                TextoCorpoMenor(
+                    "Ninguém consultou sua posição.",
+                    cor = Cores.TintaMedia,
+                )
+            } else {
+                estado.consultas.take(20).forEach { c ->
+                    Row(
+                        Modifier.fillMaxWidth().padding(vertical = Espaco.Micro),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        TextoCorpoMenor(c.indicativo, cor = Cores.Tinta)
+                        TextoCorpoMenor(c.em.take(16).replace('T', ' '), cor = Cores.TintaFraca)
+                    }
+                }
+            }
+        }
+        Box(Modifier.height(Espaco.Curto))
+        TextoCorpoMenor(
+            "O registro guarda quem perguntou — nunca o que foi respondido.",
+            cor = Cores.TintaFraca,
+        )
     }
 }
 

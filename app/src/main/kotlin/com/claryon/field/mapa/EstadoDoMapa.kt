@@ -27,6 +27,19 @@ enum class Frescor {
  * ferramenta de controle sobre o próprio efetivo, e o agente que sabe disso
  * desliga o app.
  */
+/**
+ * Um ponto do rastro, já em texto falável.
+ *
+ * Sem número cru e sem coordenada: o tipo carrega o que se DIZ, não o que se
+ * mede. A conversão acontece uma vez, no ViewModel, com as mesmas funções que a
+ * fala usa — assim a gaveta e o copiloto nunca divergem sobre a mesma distância.
+ */
+data class TracoDoRastro(
+    val distanciaFalada: String,
+    val rumoFalado: String,
+    val idadeFalada: String,
+)
+
 data class ParNoMapa(
     val indicativo: String,
     val distanciaFalada: String,
@@ -83,6 +96,15 @@ data class EstadoDoMapa(
      * agente. Ver `Coordenada.rumoGraus`.
      */
     val meuRumoGraus: Float? = null,
+    /**
+     * O rastro de 30 minutos do par em foco, em GRANDEZA — nunca coordenada.
+     *
+     * Vazio quando ninguém está focado, e **tem de esvaziar ao desfocar**: rastro
+     * de um par que já não está em foco é dado de vigilância pendurado na tela.
+     */
+    val rastro: List<TracoDoRastro> = emptyList(),
+    /** De quem é o [rastro]. Existe para a tela não mostrar rastro de um sob o outro. */
+    val rastroDe: String? = null,
 ) {
     companion object {
         /**

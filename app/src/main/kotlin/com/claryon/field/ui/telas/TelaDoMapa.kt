@@ -45,6 +45,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.claryon.field.mapa.EstadoDoMapa
 import com.claryon.field.mapa.Frescor
 import com.claryon.field.mapa.ParNoMapa
+import com.claryon.field.mapa.TracoDoRastro
 import com.claryon.field.ui.componentes.Etiqueta
 import com.claryon.field.ui.componentes.Fio
 import com.claryon.field.ui.componentes.MapaDeRuas
@@ -78,6 +79,8 @@ fun TelaDoMapa(
     estado: EstadoDoMapa,
     aoAbrir: () -> Unit,
     aoFechar: () -> Unit,
+    /** Focar um par carrega o rastro dele; `null` desfoca e **apaga** o rastro. */
+    aoFocar: (String?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val dono = LocalLifecycleOwner.current
@@ -165,13 +168,16 @@ fun TelaDoMapa(
             aberta = listaAberta,
             focado = foco,
             aoAlternar = { listaAberta = !listaAberta },
+            rastro = estado.rastro.takeIf { estado.rastroDe == foco }.orEmpty(),
             aoTocarPar = { indicativo ->
                 // Tocar de novo no mesmo par devolve a câmera ao portador.
                 if (foco == indicativo) {
                     foco = null
                     seguindo = true
+                    aoFocar(null)
                 } else {
                     foco = indicativo
+                    aoFocar(indicativo)
                     // Olhar um par suspende o acompanhamento: senão a próxima
                     // correção de GPS arrancaria a câmera de volta em 260 ms, e o
                     // toque do agente pareceria não ter funcionado.
@@ -270,6 +276,7 @@ private fun GavetaDaGuarnicao(
     pares: List<ParNoMapa>,
     aberta: Boolean,
     focado: String?,
+    rastro: List<TracoDoRastro>,
     aoAlternar: () -> Unit,
     aoTocarPar: (String) -> Unit,
     motivoIndisponivel: String?,
@@ -348,11 +355,50 @@ private fun GavetaDaGuarnicao(
                                 focado = par.indicativo == focado,
                                 aoTocar = { aoTocarPar(par.indicativo) },
                             )
+                            // O rastro fica DEBAIXO do par focado, e some com o
+                            // foco. Rastro pendurado na tela de um par que já não
+                            // está em foco é dado de vigilância à toa.
+                            if (par.indicativo == focado && rastro.isNotEmpty()) {
+                                RastroDoPar(rastro)
+                            }
                             Fio()
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * **Por onde o par passou nos últimos 30 minutos** — em grandeza, nunca coordenada.
+ *
+ * Cada linha é distância e rumo **a partir de onde eu estou agora**. Isso não é
+ * detalhe de implementação: é o que separa "ir ao encontro do companheiro" de
+ * "reconstruir por onde ele andou". O servidor nunca devolve latitude e longitude
+ * de terceiro, e por isso o trajeto absoluto dele não existe deste lado.
+ *
+ * Mais recente em cima: quem olha quer saber onde ele está agora e de onde veio,
+ * nessa ordem.
+ */
+@Composable
+private fun RastroDoPar(rastro: List<TracoDoRastro>) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(Cores.Vazio)
+            .padding(start = Espaco.Largo, end = Espaco.Padrao, top = Espaco.Curto, bottom = Espaco.Curto),
+    ) {
+        Etiqueta("Últimos 30 min", cor = Cores.TintaFraca)
+        Box(Modifier.height(Espaco.Curto))
+        rastro.asReversed().take(12).forEach { t ->
+            TextoCorpoMenor(
+                "${t.idadeFalada} · ${t.distanciaFalada.removePrefix("a ")} · ${t.rumoFalado}",
+                cor = Cores.TintaMedia,
+            )
+        }
+        if (rastro.size > 12) {
+            TextoCorpoMenor("e mais ${rastro.size - 12} pontos", cor = Cores.TintaFraca)
         }
     }
 }
