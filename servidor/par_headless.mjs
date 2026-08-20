@@ -135,7 +135,11 @@ function classificar(bruto) {
       break;
     case 'fala.quadros':
       contagem.quadros++;
-      { const t = transmissoes.get(dados.transmissaoId); if (t) t.quadros += (dados.quadros?.length ?? 0); }
+      // O campo é `q`, não `quadros` — conferido em ProtocoloRealtime:178. A
+      // primeira versão lia `dados.quadros`, que não existe, e o resumo dizia
+      // "0 quadro(s)" depois de receber 84 lotes. Instrumento que subnotifica é
+      // pior que instrumento ausente: ele faz um envio funcionando parecer quebrado.
+      { const t = transmissoes.get(dados.transmissaoId); if (t) t.quadros += (dados.q?.length ?? 0); }
       break;
     case 'fala.fim':
       contagem.fim++;

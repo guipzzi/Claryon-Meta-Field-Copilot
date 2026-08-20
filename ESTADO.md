@@ -24,10 +24,11 @@
   bancada · **p50 3,5 ms** por decisão · **zero dependência nova**.
 - **Falso positivo do detector: 428/h → 0** na metade retida de 3,65 min de leitura, com
   recall intacto (9/9) — treinando com negativo duro, não mexendo no limiar.
-- **TRANSCRIÇÃO NA ORIGEM (P1)**: `AcumuladorDePcm` junta o PCM **que foi ao ar** no funil
-  único de `SessaoPtt.enviar`; o whisper roda no `finally`, fora do `withTimeoutOrNull` e em
-  **escopo de aplicação**; o quarto evento `fala.transcricao` difunde o texto, roteado por
-  `transmissaoId` **fora do laço de reprodução**. Chamador verificado em `src/main`.
+- **TRANSCRIÇÃO NA ORIGEM (P1) — verificada ponta a ponta com fala humana e servidor real.**
+  5,0 s de gravação do agente → canal privado por JWT → acumulador **80 000 amostras = os
+  5,0 s exatos** → whisper → `fala.transcricao`. O par headless recebeu anúncio, **251
+  quadros**, fim e o texto **idêntico**: *"Clareon, Guarney são 1 na escuta…"*. Só o
+  microfone é simulado; do `SessaoPtt` em diante nada é.
 - **Ferramentas:** `par_headless.mjs` · `sonda_de_politica.py` (restaura em `finally` e
   recusa produção sem motivo escrito).
 

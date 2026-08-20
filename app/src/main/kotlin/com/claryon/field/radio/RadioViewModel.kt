@@ -359,16 +359,7 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
      * uma por vez) e o critério está escrito aqui em vez de virar coincidência.
      */
     private fun aplicarTexto(transmissaoId: String, texto: String, propria: Boolean) {
-        val lista = _falas.value
-        val alvo = if (propria) {
-            lista.indexOfLast { it.propria && it.texto.isBlank() }
-        } else {
-            lista.indexOfFirst { it.id == transmissaoId }
-        }
-        // Texto sem balão é descartado: criar um do zero produziria uma fala sem
-        // hora nem indicativo, e a interface estaria inventando conteúdo.
-        if (alvo < 0) return
-        _falas.value = lista.toMutableList().also { it[alvo] = it[alvo].copy(texto = texto) }
+        _falas.value = comTexto(_falas.value, transmissaoId, texto, propria)
     }
 
     private suspend fun carregarCanal(canal: String, historico: HistoricoDoCanal) {
