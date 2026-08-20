@@ -40,8 +40,10 @@
 1. **Falso positivo sem intervalo útil:** `0` em 1,8 min dá teto de **~99/h** contra a meta de
    0,5/h, e fechar exige ~6 h. Os 60 s de silêncio do emulador não contam — silêncio é o negativo
    mais fácil que existe. O modelo também é **de um locutor só**, 27 elocuções.
-2. **A transmissão por voz nunca foi exercitada com fala real** — o roteador, o piso e o fecho
-   têm teste, o caminho completo com áudio de verdade só com óculos e fone.
+2. **A abertura por voz NÃO dispara com a transcrição real.** Medido em 20/08 com fala humana:
+   o whisper devolve *"Clareon, Guarney são 1 na escuta"*. Dois defeitos independentes, cada um
+   suficiente sozinho — a palavra de ativação entra no prefixo (o padrão é ancorado) e "guarnição"
+   vira "Guarney são" (WER de pt-BR). O caminho limpo funciona; o do microfone, não.
 3. **`CaosDoDatTest` falha um teste por rodada**, variando qual; falha em `HEAD` limpo. E a
    preempção de P1 **não alcança a fase de `render`** — o buraco do aceite (b).
 4. **Nada difícil é medido em ambiente próprio:** sem pilha de servidor separada (exige Docker)
