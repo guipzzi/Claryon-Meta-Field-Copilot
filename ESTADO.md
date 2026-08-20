@@ -37,12 +37,15 @@
 
 ## O que está quebrado, e nós sabemos
 
-1. **Falso positivo sem intervalo útil:** `0` em 1,8 min dá teto de **~99/h** contra a meta de
-   0,5/h, e fechar exige ~6 h. Os 60 s de silêncio do emulador não contam — silêncio é o negativo
-   mais fácil que existe. O modelo também é **de um locutor só**, 27 elocuções.
-2. **O recall da abertura por voz é de UMA captura.** A transcrição medida abre, mas "guarney sao"
-   é a única grafia de "guarnição" com prova; as outras três do padrão são plausíveis, não
-   medidas. Fecha com 30 pronúncias reais por fone HFP, que é aceite de hardware.
+1. **FALSO POSITIVO MEDIDO: 89,85/h contra a meta de 0,5/h.** 81 disparos em 54,1 min de fala
+   espontânea de podcast (múltiplos locutores, sobreposição, música). Maior escore 0,997 contra
+   limiar 0,500 — não é margem, é o detector convicto. O teto estimado era ~99/h e a realidade
+   caiu no topo dele. **É o estágio 1**: a transcrição barra a maioria antes de virar comando,
+   mas o agente ouviria um bipe a cada ~40 s. O modelo é de **um locutor só**, 27 elocuções, e
+   agora existe material de negativo duro para retreinar.
+2. **Recall do gatilho: 3/4 locutores** (Bruna, Carla e Pedro sim; Guido virou "Blerium" — e é a
+   voz que TREINOU o detector). Quatro pronúncias por microfone de celular, não as 30 por fone
+   HFP que o aceite pede. E "na escuta" dito por 4 vozes humanas **não** abriu canal: 0/4.
 3. **`CaosDoDatTest` falha um teste por rodada**, variando qual; falha em `HEAD` limpo. E a
    preempção de P1 **não alcança a fase de `render`** — o buraco do aceite (b).
 4. **Nada difícil é medido em ambiente próprio:** sem pilha de servidor separada (exige Docker)
