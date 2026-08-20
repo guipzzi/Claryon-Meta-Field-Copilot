@@ -98,7 +98,7 @@ class DetectorDeAtivacaoTest {
     private fun detector(): DetectorDeAtivacao? {
         val assets = InstrumentationRegistry.getInstrumentation().targetContext.assets
         val bytes = runCatching {
-            assets.open("${'$'}{DetectorDeAtivacao.ASSETS}/cabeca.f32").use { it.readBytes() }
+            assets.open("${DetectorDeAtivacao.ASSETS}/cabeca.f32").use { it.readBytes() }
         }.getOrNull() ?: return null
         val (pesos, vies) = DetectorDeAtivacao.cabecaDeBytes(bytes) ?: return null
         val d = DetectorDeAtivacao(pesos, vies)
