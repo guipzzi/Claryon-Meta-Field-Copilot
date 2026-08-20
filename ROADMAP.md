@@ -303,7 +303,7 @@ caminho real — ainda que com recall desconhecido em pt-BR.
   próprio APK de teste, verde sobre um caminho que o produto não percorre. Medido no aparelho:
   1500 quadros em 30,0 s (50/s exatos); com PTT de 6 s, 300 calados = 6,0 s exatos. Falta o
   **ciclo de voz no serviço**: hoje a escuta e o earcon sobrevivem à tela, o comando não.
-- [P3] 🟡 **PARCIAL** — Silero VAD substituindo o detector por energia RMS. `SileroVadModelConfig` está no
+- [P3] ✅ **FEITO** — Silero VAD substituindo o detector por energia RMS. `SileroVadModelConfig` está no
   AAR (verificado: a classe existe em `com/k2fsa/sherpa/onnx/`). **Duas instâncias, não
   uma**: a do gatilho quer segmentos curtos, a da transmissão precisa tolerar 30 s via
   `maxSpeechDuration`. Confirmar a assinatura por `javap` antes de escrever — esforço: 1
@@ -313,7 +313,7 @@ caminho real — ainda que com recall desconhecido em pt-BR.
   `app/src/main/assets/models/`). Vira `object` de processo com liberação por política
   térmica — esforço: 1 sessão — depende: quebra do `DiagnosticsViewModel` — esforço: 1
   sessão.
-- [P3] 🟡 **PARCIAL** — Verificador do gatilho: VAD abre janela → whisper pt transcreve → casamento integral
+- [P3] ✅ **FEITO** — Verificador do gatilho: VAD abre janela → whisper pt transcreve → casamento integral
   contra léxico fechado → grupo resolvido → earcon → piso → BIP → quadros — esforço: 2
   sessões — depende: VAD + contexto quente + telemetria.
 - [P3] 🚫 **OBSOLETO** — KWS como adiantamento do earcon, atrás de flag, com o preset inglês e a grafia
@@ -325,7 +325,7 @@ caminho real — ainda que com recall desconhecido em pt-BR.
   `{rotulo_falado → id}` no login, que a RLS já limita ao que o agente pode ver; e
   `RadioTatico.trocarDeGrupo(id)` reconectando o transporte **sem tocar em `AudioDoAgente`**
   — esforço: 2 sessões — depende: verificador.
-- [P1] 🟡 **PARCIAL** — Matar o canal fixo: `CANAL_DEMO` e `NOME_DO_CANAL` em `MainActivity` e o
+- [P1] ✅ **FEITO** — Matar o canal fixo: `CANAL_DEMO` e `NOME_DO_CANAL` em `MainActivity` e o
   fallback `TALK_GROUP_PADRAO` em `RadioViewModel` — **mais** `TALK_GROUP_DEMO` em
   `MapaViewModel`, um terceiro literal gêmeo que a auditoria achou: hoje o mapa e o rádio
   apontam para o mesmo UUID por digitação, não por referência — esforço: 0,3
@@ -333,7 +333,7 @@ caminho real — ainda que com recall desconhecido em pt-BR.
 - [P3] 🚫 **OBSOLETO** — Recusa honesta e audível: falar um grupo a que o agente não pertence responde "você
   não é da guarnição 3", não silêncio. Descarte silencioso é para gatilho não reconhecido;
   autorização negada merece resposta — esforço: 0,3 sessão — depende: seleção por voz.
-- [P3] ⬜ **ABERTO** — Fecho por silêncio, escrito com honestidade na spec: *o sistema detecta ausência de
+- [P3] ✅ **FEITO** — Fecho por silêncio, escrito com honestidade na spec: *o sistema detecta ausência de
   fala, não ausência da fala do agente* — o isolamento depende do beamforming dos óculos.
   Parada por toque continua existindo e é a única que não depende do microfone — esforço:
   0,5 sessão — depende: VAD.
