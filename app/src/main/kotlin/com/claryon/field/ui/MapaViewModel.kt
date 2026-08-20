@@ -80,10 +80,6 @@ class MapaViewModel(app: Application) : AndroidViewModel(app) {
                 tokenDeSessao = { SessaoDoAgente.tokenValido(getApplication()) },
             )
 
-            // Reciprocidade: o servidor só devolve distâncias se souber de onde
-            // medir, e quem vê é visto.
-            publicarPosicao()
-
             while (true) {
                 val r = historico.posicoesDoGrupo(CanalDoPiloto.ID)
                 _estado.value = r.fold(
@@ -96,7 +92,6 @@ class MapaViewModel(app: Application) : AndroidViewModel(app) {
                 // depende do relógio. Um par que **parou** de publicar precisa
                 // esmaecer sozinho — é esse o caso que a regra existe para cobrir.
                 delay(INTERVALO_DE_REDESENHO_MS)
-                publicarPosicao()
             }
         }
     }
@@ -111,15 +106,32 @@ class MapaViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * Sobe a posição própria. É ela que dá ao servidor o ponto de onde medir a
-     * distância na consulta por voz — sem publicar, C2 responde "não sei de onde
-     * medir", que é honesto mas inútil.
+     * **O mapa NÃO publica posição.** `ColetorDePosicao` é o dono único da escrita.
+     *
+     * Até 18/08 este arquivo publicava na abertura e a cada 5 s dentro do laço, e
+     * isso causava quatro defeitos de uma vez:
+     *
+     * 1. **~720 escritas/hora**, contra 20–60/h do coletor — 12× a 60× mais, o que
+     *    contradizia toda a economia de bateria que `PoliticaDePosicao` documenta.
+     * 2. **Apagava `speed_mps`.** Passava `null` no quarto argumento, e
+     *    `publicar_posicao` é UPSERT total (`0008:55`): a velocidade que o coletor
+     *    tinha gravado sumia em no máximo 5 s. Com o mapa aberto, "deslocando"
+     *    praticamente nunca era exibido.
+     * 3. **Falsificava frescor.** Usava `ultimaPosicao()`, que aceita correção em
+     *    cache de até 120 s (`ProvedorDeLocal:66`), e o servidor a carimbava com
+     *    `now()` (`0008:61`). Uma medição de dois minutos atrás era republicada
+     *    como `idade_s = 0`, repetidamente, para a guarnição inteira.
+     * 4. **Matava a própria guarda de posição velha.** A checagem logo abaixo
+     *    compara a idade do solicitante com 120 s — e ela nunca disparava, porque
+     *    o laço acabava de publicar. A mensagem "sua posição está desatualizada"
+     *    era inalcançável. Removendo a publicação, ela volta a existir.
+     *
+     * **Reciprocidade continua valendo**, e era o argumento do código antigo: o
+     * servidor só devolve distância se souber de onde medir. Mas quem satisfaz isso
+     * é o coletor, que publica na primeira correção e depois por cadência e
+     * batimento. Se ele ainda não publicou, o mapa **diz isso** em vez de forjar
+     * uma posição para si mesmo — que é a diferença entre informar e inventar.
      */
-    suspend fun publicarPosicao() {
-        if (!SessaoDoAgente.redeConfigurada) return
-        val c = local.ultimaPosicao() ?: return
-        publicador.publicar(c.latitude, c.longitude, c.precisaoM, null)
-    }
 
     /**
      * Monta o estado do mapa a partir das grandezas que o servidor devolveu.
