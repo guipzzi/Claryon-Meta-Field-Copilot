@@ -29,6 +29,35 @@ class PublicadorDePosicaoSupabase(
 
     override fun publicando(): Boolean = ultimaPublicacaoOk
 
+    override suspend fun iniciarTurno(): Boolean = rpcSimples("iniciar_turno")
+
+    override suspend fun encerrarTurno() {
+        rpcSimples("encerrar_turno")
+    }
+
+    /**
+     * RPC sem argumento, para as duas portas de turno.
+     *
+     * Devolve `false` em vez de lançar: o turno é pré-condição da posição, mas a
+     * posição já degrada sozinha quando não sobe (`ultimaPublicacaoOk`), e derrubar
+     * o serviço porque o turno não abriu tiraria também o rádio, que não depende
+     * disso.
+     */
+    private suspend fun rpcSimples(nome: String): Boolean {
+        val token = tokenDeSessao() ?: return false
+        return withContext(Dispatchers.IO) {
+            runCatching<Boolean> {
+                val req = Request.Builder()
+                    .url("${config.projetoUrl}/rest/v1/rpc/$nome")
+                    .addHeader("apikey", config.apiKey)
+                    .addHeader("Authorization", "Bearer $token")
+                    .post("{}".toRequestBody("application/json".toMediaType()))
+                    .build()
+                client.newCall(req).execute().use { it.isSuccessful }
+            }.getOrDefault(false)
+        }
+    }
+
     override suspend fun publicar(
         lat: Double,
         lon: Double,

@@ -228,4 +228,18 @@ interface PublicadorDePosicao {
     suspend fun assinarPares(talkGroupId: String): Boolean
 
     suspend fun desassinarPares()
+
+    /**
+     * **Abre o turno.** Sem turno aberto, o servidor recusa `publicar_posicao`
+     * (`0019`) — a coleta sem recorte de turno é o que a defesa jurídica da
+     * retenção não sustenta.
+     *
+     * Idempotente do lado do servidor: reabrir a tela não fatia o turno.
+     * Padrão que não faz nada, para implementações de teste e para o modo
+     * degradado sem sessão continuarem compilando.
+     */
+    suspend fun iniciarTurno(): Boolean = false
+
+    /** Encerra o turno. O servidor também encerra por inatividade, como rede. */
+    suspend fun encerrarTurno() = Unit
 }

@@ -13,6 +13,7 @@ import android.os.PowerManager
 import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.core.app.NotificationCompat
+import kotlinx.coroutines.launch
 import com.claryon.agent.ModoOperacao
 import com.claryon.agent.PowerPolicy
 import com.claryon.agent.ThermalGovernor
@@ -69,6 +70,8 @@ class CopilotService : Service() {
                 escritorDePosicao().publicar(lat, lon, precisao, velocidade)
             },
         )
+        // Antes de o coletor começar: sem turno, toda publicação é recusada.
+        abrirTurno()
     }
 
     /**
@@ -80,6 +83,20 @@ class CopilotService : Service() {
      * porque `publicador` era nulo — o pior desperdício possível, já que o rádio
      * acorda e o dado morre no caminho.
      */
+    /**
+     * Abre o turno antes de a primeira posição subir.
+     *
+     * Sem turno aberto o servidor recusa `publicar_posicao` com `42501` (`0019`),
+     * e o coletor acordaria o GPS para nada. É idempotente do lado do servidor, o
+     * que torna seguro chamar a cada subida do serviço.
+     */
+    private fun abrirTurno() {
+        escopo.launch {
+            val ok = runCatching { escritorDePosicao().iniciarTurno() }.getOrDefault(false)
+            if (!ok) Log.w(TAG, "turno NÃO abriu — a posição não vai subir até abrir")
+        }
+    }
+
     private fun escritorDePosicao(): PublicadorDePosicao =
         publicador ?: escritorProprio ?: PublicadorDePosicaoSupabase(
             config = SessaoDoAgente.config,
@@ -134,6 +151,19 @@ class CopilotService : Service() {
 
     override fun onDestroy() {
         _modo.value = ModoOperacao.STANDBY
+        // **Fecha o turno onde a coleta termina.**
+        //
+        // O servidor também encerra por inatividade (`0019`), como rede — mas
+        // depender só disso daria 30 min de turno aberto depois de o agente ter
+        // largado o aparelho, e turno é o recorte que autoriza saber onde ele
+        // esteve. Fora do `escopo`, que morre na linha seguinte.
+        val escritor = escritorProprio ?: publicador
+        if (escritor != null) {
+            CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+                runCatching { escritor.encerrarTurno() }
+                    .onFailure { Log.w(TAG, "turno não encerrado", it) }
+            }
+        }
         // Soltar o GPS antes de morrer. Um listener sobrevivente mantém o rádio
         // de posição acordado sem ninguém consumindo — o pior custo possível,
         // porque não aparece em lugar nenhum da interface.
