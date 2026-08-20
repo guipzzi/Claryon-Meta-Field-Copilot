@@ -195,6 +195,12 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
                 agenteId = agenteId,
                 indicativo = indicativo,
                 resolverAutor = { id -> cadastroDoGrupo[id] },
+                // Fecha o residual que a resolução local deixou: um membro do grupo
+                // reivindicando o id de outro membro. `floor_grants.agent_id` vem do
+                // JWT em `pedir_canal`, então ninguém obtém piso em nome de terceiro.
+                conferirAutor = { tx ->
+                    historicoDoCanal?.autorDaTransmissao(tx)?.getOrNull()
+                },
                 transporte = transporte,
                 codec = codec(),
                 // **Derivada do gerente, não constante.** `RadioTatico` tinha

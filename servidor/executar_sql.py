@@ -127,6 +127,11 @@ def main() -> None:
     p.add_argument("arquivo", nargs="?", help="arquivo .sql a executar")
     p.add_argument("-c", "--comando", help="SQL inline")
     p.add_argument(
+        "--json",
+        action="store_true",
+        help="devolve as linhas como JSON cru, para consumo por outro programa",
+    )
+    p.add_argument(
         "--somente-leitura",
         action="store_true",
         help="recusa qualquer escrita — use ao inspecionar produção",
@@ -144,7 +149,15 @@ def main() -> None:
     else:
         sql = sys.stdin.read()
 
-    imprimir(executar(sql, somente_leitura=args.somente_leitura))
+    linhas = executar(sql, somente_leitura=args.somente_leitura)
+    # `--json` existe para outro programa consumir. `imprimir` formata com `str()`,
+    # que devolve repr de Python (aspas simples) e não JSON — a `sonda_de_politica`
+    # quebrou tentando reinterpretar isso, e reinterpretar tabela formatada seria
+    # frágil de qualquer jeito.
+    if args.json:
+        print(json.dumps(linhas, ensure_ascii=False))
+    else:
+        imprimir(linhas)
 
 
 if __name__ == "__main__":

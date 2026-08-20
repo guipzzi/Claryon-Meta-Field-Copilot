@@ -117,6 +117,23 @@ class HistoricoDoCanal(
             }
         }
 
+    /**
+     * **Quem o SERVIDOR diz que é o autor da transmissão** — `null` se não souber.
+     *
+     * É a prova que o payload não pode dar. `pedir_canal` grava
+     * `floor_grants.agent_id` a partir do JWT, então ninguém obtém piso em nome de
+     * outro; conferir contra ele fecha a personificação **entre membros do mesmo
+     * grupo**, que o cadastro sozinho não fechava.
+     *
+     * Vale durante a fala (piso vivo) e depois dela (`transmissions`, escrito pela
+     * Edge Function) — a função de servidor confere as duas janelas.
+     */
+    suspend fun autorDaTransmissao(transmissaoId: String): Result<String?> =
+        chamarRpc(
+            "autor_da_transmissao",
+            org.json.JSONObject().put("p_transmissao_id", transmissaoId),
+        ) { arr -> if (arr.length() > 0) arr.optString(0).takeIf { it.isNotEmpty() } else null }
+
     suspend fun membros(talkGroupId: String): Result<List<MembroDoCanal>> =
         posicoesDoGrupo(talkGroupId).map { lista ->
             lista.map { p ->

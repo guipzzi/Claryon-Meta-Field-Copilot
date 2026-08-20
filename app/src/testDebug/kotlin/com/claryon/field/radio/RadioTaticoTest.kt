@@ -159,6 +159,8 @@ class RadioTaticoTest {
         supressor: SupressorDeSaidaPropria = SupressorDeSaidaPropria(),
         /** Cadastro do grupo. Vazio no padrão: nada resolve, tudo é não confirmado. */
         cadastro: Map<String, String> = emptyMap(),
+        /** O que o servidor responde sobre a autoria. `null` = "não sei". */
+        autorNoServidor: (String) -> String? = { null },
         corpo: suspend (Bancada) -> Unit,
     ) {
         val escopo = CoroutineScope(UnconfinedTestDispatcher(testScheduler) + Job())
@@ -173,6 +175,7 @@ class RadioTaticoTest {
             agenteId = "alfa",
             indicativo = "Alfa Um",
             resolverAutor = { id -> cadastro[id] },
+            conferirAutor = { tx -> autorNoServidor(tx) },
             aoMudarQuemFala = { quemFalou += it },
             transporte = transporte,
             codec = CodecFake(),
@@ -483,6 +486,67 @@ class RadioTaticoTest {
                 b.quemFalou.none { it == "Alfa Um" },
             )
             assertEquals(listOf("Origem não confirmada"), b.quemFalou)
+        }
+    }
+
+
+    /**
+     * **O que fecha a personificação entre colegas do mesmo grupo.**
+     *
+     * O cadastro sozinho não fechava: um membro pode escrever o `agentId` de outro
+     * membro, que **está** no cadastro e resolve. A prova que o payload não dá vem
+     * de `floor_grants`, onde `pedir_canal` carimba o autor a partir do JWT —
+     * ninguém obtém piso em nome de terceiro.
+     */
+    @Test
+    fun autoriaDivergenteDoPisoDerrubaONome() = runTest {
+        comRadio(
+            cadastro = mapOf("colega" to "Alfa Dois", "impostor" to "Bravo Um"),
+            autorNoServidor = { "impostor" },
+        ) { b ->
+            b.radio.entrarEmModoAtivo(rota)
+            advanceTimeBy(50)
+            b.transporte.entrada.emit(
+                EventoDeRede.Anuncio(
+                    AnuncioDeFala(
+                        transmissaoId = "tx-3",
+                        autorIndicativo = "Alfa Dois",
+                        autorAgenteId = "colega", // está no cadastro, mas não tem o piso
+                        prioridade = PrioridadeTransmissao.P1_EMERGENCIA,
+                    ),
+                ),
+            )
+            advanceTimeBy(300)
+            assertEquals(
+                "o nome do colega ficou de pé mesmo com o piso sendo de outro",
+                "Origem não confirmada",
+                b.quemFalou.last(),
+            )
+        }
+    }
+
+    /**
+     * **Rede caída não pode transformar toda fala em suspeita.**
+     *
+     * "Não sei" é diferente de "divergiu". Se a conferência falhar por rede — e é
+     * exatamente na queda que o rádio mais importa — o rótulo resolvido pelo
+     * cadastro fica de pé. Só a divergência derruba.
+     */
+    @Test
+    fun servidorSemRespostaNaoDerrubaONomeResolvido() = runTest {
+        comRadio(
+            cadastro = mapOf("colega" to "Alfa Dois"),
+            autorNoServidor = { null },
+        ) { b ->
+            b.radio.entrarEmModoAtivo(rota)
+            advanceTimeBy(50)
+            b.transporte.entrada.emit(
+                EventoDeRede.Anuncio(
+                    AnuncioDeFala("tx-4", "qualquer coisa", "colega", PrioridadeTransmissao.P2_APOIO),
+                ),
+            )
+            advanceTimeBy(300)
+            assertEquals("Alfa Dois", b.quemFalou.last())
         }
     }
 

@@ -80,6 +80,14 @@ class RadioTatico(
      * de volta na string livre, que é o defeito.
      */
     private val resolverAutor: (String) -> String? = { null },
+    /**
+     * Pergunta ao servidor quem de fato detém/deteve o piso da transmissão.
+     *
+     * `null` no padrão — "não sei" — e "não sei" **não** derruba o rótulo: derrubar
+     * por falta de rede transformaria toda fala em suspeita durante uma queda, que
+     * é justamente quando o rádio mais importa. Só a **divergência** derruba.
+     */
+    private val conferirAutor: suspend (String) -> String? = { null },
     private val transporte: TransporteAoVivo,
     private val codec: CodecDeVoz,
     private val piso: ClienteDePiso,
@@ -479,9 +487,24 @@ class RadioTatico(
                 // exibir nada, porque dá autoridade à mentira. Vira origem não
                 // confirmada, e o áudio toca do mesmo jeito: calar uma voz que
                 // pode ser um pedido de apoio real seria a falha oposta.
-                aoMudarQuemFala(
-                    resolverAutor(evento.anuncio.autorAgenteId) ?: AUTOR_NAO_CONFIRMADO,
-                )
+                val idAlegado = evento.anuncio.autorAgenteId
+                aoMudarQuemFala(resolverAutor(idAlegado) ?: AUTOR_NAO_CONFIRMADO)
+
+                // A conferência é DEPOIS, e de propósito: o áudio já está tocando.
+                // Mediar o envio poria uma ida e volta antes do anúncio, dentro do
+                // orçamento de 1 200 ms até o BIP; calar enquanto confere seria pior
+                // ainda, porque a fala pode ser um pedido de apoio real.
+                escopo.launch {
+                    val autorReal = conferirAutor(evento.anuncio.transmissaoId)
+                    if (autorReal != null && autorReal != idAlegado) {
+                        Log.w(
+                            TAG,
+                            "autoria divergente em ${evento.anuncio.transmissaoId}: " +
+                                "alegou $idAlegado, o piso é de $autorReal",
+                        )
+                        aoMudarQuemFala(AUTOR_NAO_CONFIRMADO)
+                    }
+                }
                 if (evento.anuncio.prioridade == PrioridadeTransmissao.P1_EMERGENCIA) {
                     sinalizar(Earcon.PRIORITARIA, Priority.EMERGENCIA)
                 }
