@@ -41,8 +41,9 @@
 5. **O Piper NÃO é determinístico** e como treino **piora**: derruba a margem de +0,109 a −0,020.
 6. **`CaosDoDatTest` falha um teste por rodada**, variando qual; falha em `HEAD` limpo.
 7. **Buraco no aceite (b):** a preempção de P1 não alcança a fase de `render`.
-8. **Experimento em servidor de produção não tem ambiente separado.** A sonda restaura
-   sozinha, mas com guarnição em rua isso deixa de bastar.
+8. **Não há ambiente separado para experimento de servidor.** A sonda restaura sozinha e
+   **recusa produção sem `--producao "motivo"`**, mas a pilha local exige Docker, que não
+   sobe nesta máquina. Com guarnição em rua, barreira não substitui ambiente.
 9. `errorStream` não coletado · `STOPPED` não terminal · câmera do DAT nunca pedida ·
    transcrição na origem (P1) não existe · SIGILL latente sem FEAT_FP16.
 

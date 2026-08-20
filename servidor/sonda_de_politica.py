@@ -25,18 +25,30 @@ O script tira uma fotografia das políticas da tabela, aplica o experimento, rod
 comando, e **recoloca as políticas originais aconteça o que acontecer**. No fim
 imprime a diferença entre o estado inicial e o final — se não for vazia, ele grita.
 
-## O que ele NÃO faz
+## Produção exige intenção declarada, não descuido
 
-Não cria ambiente separado. Isso continua sendo o certo quando houver gente de
-verdade usando o sistema, e está anotado como pendência. Enquanto o piloto tem três
-agentes de teste, uma janela de segundos com restauração garantida é aceitável; com
-uma guarnição em rua, não é — e nesse dia esta ferramenta deixa de ser suficiente.
+A restauração já não depende de memória — depende de `finally`. Faltava a outra
+metade: **nada impedia a sonda de apontar para produção sem ninguém decidir isso**.
+Agora ela recusa por padrão. Para insistir é preciso `--producao "<motivo>"`, com
+motivo escrito, que vai para a tela e para o registro. Não se passa por acidente e
+não se passa em pressa.
+
+O certo continua sendo pilha separada, e quando houver Docker na máquina ela existe
+de graça:
+
+    supabase start                      # Postgres + Realtime + GoTrue locais
+    export SUPABASE_URL=http://127.0.0.1:54321
+    # e a sonda deixa de reclamar, porque o alvo não é mais o projeto de produção
+
+Verificado em 18/08: `docker` e `supabase` estão instalados nesta máquina, mas o
+daemon não sobe (não há Docker Desktop). Enquanto for assim, a barreira é esta.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -100,7 +112,43 @@ def main() -> int:
     ap.add_argument("--tabela", required=True, help="ex.: realtime.messages")
     ap.add_argument("--sql", required=True, help="o experimento")
     ap.add_argument("--comando", required=True, help="como observar o efeito")
+    ap.add_argument(
+        "--producao",
+        metavar="MOTIVO",
+        help="autoriza apontar para o projeto de produção, com o motivo escrito",
+    )
     a = ap.parse_args()
+
+    # ── A barreira ──────────────────────────────────────────────────────────
+    #
+    # Sem isto, apontar para produção era o **padrão**: a sonda usa o mesmo
+    # `executar_sql.py` do dia a dia, que lê o projeto de `local.properties`. Foi
+    # assim que um experimento deixou o broadcast fora do ar. A restauração já é
+    # garantida por `finally`; esta parte garante que ninguém chegue lá sem querer.
+    # O alvo sai de `local.properties`, que é o que `executar_sql.py` lê — **não**
+    # de `SUPABASE_URL`. A primeira versão desta barreira olhava a variável de
+    # ambiente e criava uma saída que PARECIA segura: com
+    # `SUPABASE_URL=http://127.0.0.1` ela liberava a passagem e o comando ia para
+    # produção do mesmo jeito. Guarda com desvio que imita o caminho certo é pior
+    # que guarda nenhum, porque dá confiança.
+    #
+    # Enquanto `executar_sql.py` só souber falar com a Management API, **todo alvo
+    # é produção** — e a barreira diz isso em vez de fingir alternativa.
+    if not a.producao:
+        print("recusando: o alvo é o projeto de PRODUÇÃO.")
+        print()
+        print("  `executar_sql.py` fala com a Management API do projeto de")
+        print("  `local.properties`. Não há alvo local hoje — `SUPABASE_URL` não muda isso.")
+        print()
+        print("   · para insistir: --producao \"motivo pelo qual precisa ser em produção\"")
+        print("   · para eliminar a necessidade: `supabase start` e um modo local no")
+        print("     executor (precisa de Docker, que não sobe nesta máquina hoje)")
+        print()
+        print("  A restauração é garantida por `finally`, mas uma janela de segundos")
+        print("  sem política é rádio mudo para quem estiver em campo neste instante.")
+        return 3
+    if a.producao:
+        print(f"⚠️  EXPERIMENTO EM PRODUÇÃO — motivo: {a.producao}", flush=True)
 
     print(f"fotografando as políticas de {a.tabela}…", flush=True)
     antes = fotografar(a.tabela)
