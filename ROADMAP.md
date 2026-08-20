@@ -67,6 +67,41 @@ indefensável em documento — a meta vira afirmação sem medida.
 
 ---
 
+## Reconciliação de 20/08 — por que há marcadores nos itens
+
+O texto de cada item é do dia em que foi escrito e está no **presente**: "hoje X está
+quebrado". Isso envelhece mal. Em 20/08 o item da `0012` ainda dizia que "qualquer
+portador do APK entra em `realtime:tg-<uuid>`", o que deixou de ser verdade em 18/08 —
+e este é o documento que o `CLAUDE.md` aponta como *"o que vem, em que ordem"*. Um
+roadmap que descreve um projeto que não existe mais rotea a próxima sessão para o lugar
+errado, e é o tipo de mentira que este projeto mais persegue.
+
+Cada item ganhou o veredito de uma auditoria feita **contra o código**, não contra a
+memória: `grep` do símbolo em `src/main`, migração em `servidor/migracoes/`, régua do §6
+do `CLAUDE.md` (chamador alcançável em runtime; classe testada sem chamador é *escrita*).
+
+| | significado |
+|---|---|
+| ✅ **FEITO** | existe e tem chamador ou migração aplicada. O texto abaixo dele é **história**, não estado |
+| 🟡 **PARCIAL** | metade existe. Quase sempre: servidor pronto, cliente sem porta |
+| ⬜ **ABERTO** | não começou, e o texto continua literalmente verdadeiro |
+| 🚫 **OBSOLETO** | a decisão mudou. **Executar o item seria regressão** — leia o motivo antes |
+
+**Os dois OBSOLETO merecem leitura, porque parecem pendências.** O KWS por preset foi
+cortado em `specs/fase-2-gatilho-por-voz.spec.md:420` ("não há preset streaming em pt") e
+substituído pelo detector acústico treinado. E a "recusa honesta" que diria *"você não é
+da guarnição 3"* foi rejeitada no desenho: `Utterance.kt:120-129` documenta que dois
+textos distintos — "não existe" e "existe e você não é membro" — transformariam o produto
+num oráculo sobre a estrutura da corporação. A recusa audível existe; o texto nominal não
+volta.
+
+**O padrão que a auditoria revelou** aparece nos 🟡 da Fase 3: `rastro_do_par` e
+`quem_me_consultou` têm migração aplicada e **zero chamador Kotlin**. É "construir, testar
+e não ligar" pela sétima vez, agora do lado do servidor — capacidade que existe no banco e
+não tem porta no produto.
+
+---
+
 ## Fases
 
 ### FASE 0 — MVP mínimo demonstrável e a entrega da Etapa 5 (16/08 a 22/08, prazo duro)
@@ -82,42 +117,42 @@ sessão sobre um app que já funciona; não é entrega e não dita prioridade.
 
 **Itens**
 
-- [P1] Passar `sampleRateHz = 16_000` na construção de `RadioTatico` (`RadioTatico.kt:88`
+- [P1] ✅ **FEITO** — Passar `sampleRateHz = 16_000` na construção de `RadioTatico` (`RadioTatico.kt:88`
   é o default de 8 kHz que ninguém sobrescreve) e alinhar o codec — esforço: 0,5 sessão —
   depende: nada.
-- [P1] `AudioTrack` único e serial na recepção, substituindo a criação por quadro de 20 ms
+- [P1] ✅ **FEITO** — `AudioTrack` único e serial na recepção, substituindo a criação por quadro de 20 ms
   em `GlassesAudioManagerImpl` — esforço: 1 sessão — depende: 16 kHz.
-- [P3] Porta de entrada do copiloto por **botão** em `TelaDeGuarnicao` chamando
+- [P3] ✅ **FEITO** — Porta de entrada do copiloto por **botão** em `TelaDeGuarnicao` chamando
   `cicloDeVoz()`. Não é o desenho final (o final é a Fase 2), é o caminho alcançável que
   prova que C2/C3/C4 existem — esforço: 0,5 sessão — depende: nada.
-- [P1] Chamar a Edge Function `transmit` a partir do Kotlin. Hoje `grep "functions/v1"
+- [P1] ✅ **FEITO** — Chamar a Edge Function `transmit` a partir do Kotlin. Hoje `grep "functions/v1"
   --include=*.kt` devolve zero, logo `transmissions` nunca recebe INSERT e
   `HistoricoDoCanal.falas()` devolve lista vazia **sempre**: o fio do canal mostra só
   inserções otimistas que somem na recarga — esforço: 1 sessão — depende: nada.
-- [SEG] Deletar `supabase/functions/locate (apagada)` e derivar identidade do JWT em `transmit.ts`
+- [SEG] ✅ **FEITO** — Deletar `supabase/functions/locate (apagada)` e derivar identidade do JWT em `transmit.ts`
   e `ack.ts`. `locate.ts:21-23` aceita `solicitante_id` do corpo e chama
   `private.posicao_relativa` com `service_role`, reabrindo na borda a trilateração que a
   migração 0006 fechou no banco — violação direta de regra dura do `AGENTS.md` — esforço:
   0,5 sessão — depende: nada. Melhor relação risco/esforço do projeto.
-- [UX] Devolver o âmbar ao uso único, que é a regra escrita no próprio
+- [UX] ✅ **FEITO** — Devolver o âmbar ao uso único, que é a regra escrita no próprio
   `ui/tema/Cores.kt` ("o âmbar tem um significado só: você está no ar"). Hoje `Cores.NoAr`
   aparece em `MapaDeRuas.kt:420,432,455`, `TelaDoMapa.kt:245,246,255`, `TelaDeLogin.kt:203,240`
   e `TelaDeGuarnicao.kt:172` — esforço: 0,5 sessão — depende: nada. Entra aqui porque custa
   quase nada e conserta toda captura de tela que for para o documento.
-- [REFAT] `CopilotService`: `stopSelf()` em `:80` e `:89` acontecem antes de qualquer
+- [REFAT] ✅ **FEITO** — `CopilotService`: `stopSelf()` em `:80` e `:89` acontecem antes de qualquer
   `startForeground()` (que só existe em `:133`/`:135`), e `parar()` usa `startService` em
   `:215` em vez de `startForegroundService` — esforço: 0,3 sessão — depende: nada. Duas
   linhas, e o sintoma é crash de ciclo de vida em aparelho que a equipe não escolheu.
-- [TRANSVERSAL] Reler a proposta da Etapa 1 e conferir se ela menciona WhatsApp ou IA em
+- [TRANSVERSAL] ✅ **FEITO** — Reler a proposta da Etapa 1 e conferir se ela menciona WhatsApp ou IA em
   nuvem. §14.1 veda mudança de domínio; melhoria dentro do domínio está confirmada com os
   avaliadores (D6). O documento é continuidade com detalhamento, nunca pivô — esforço: 0,5
   sessão — depende: nada.
-- [TRANSVERSAL] Escrever o documento e o deck no template da organização (20 a 22/08): os
+- [TRANSVERSAL] ⬜ **ABERTO** — Escrever o documento e o deck no template da organização (20 a 22/08): os
   três pilares, a arquitetura em camadas, IA 100% local com os modelos que estão de fato no
   APK, a política de dados em duas camadas, e a tabela "o que o servidor vê / o que não vê"
   **com os itens ruins na coluna HOJE** — esforço: 2,5 sessões — depende: todos os itens
   acima, porque o documento descreve o que roda.
-- [TRANSVERSAL] Meia página de análise de risco voluntária (art. 38 da LGPD): risco
+- [TRANSVERSAL] ⬜ **ABERTO** — Meia página de análise de risco voluntária (art. 38 da LGPD): risco
   identificado, medida adotada, risco residual assumido — esforço: 0,3 sessão — depende:
   nada. Artefato curto que separa nota mediana de nota alta em Considerações éticas (20 pts).
 
@@ -254,7 +289,7 @@ caminho real — ainda que com recall desconhecido em pt-BR.
 
 **Itens**
 
-- [TRANSVERSAL] Revisão da spec com a aprovação D1 escrita e datada dentro dela, mais as
+- [TRANSVERSAL] 🟡 **PARCIAL** — Revisão da spec com a aprovação D1 escrita e datada dentro dela, mais as
   três correções: dois presets de KWS (não um), teto de **30 s** no item 13 — que hoje diz
   12 000 ms enquanto `SessaoPtt.kt:234` já declara `DURACAO_MAXIMA_MS = 30_000L` — e faixa
   de duração do enunciado subindo de 0,6–2,5 s (`spec:149`) para 1,2–4,0 s, porque a frase
@@ -268,37 +303,37 @@ caminho real — ainda que com recall desconhecido em pt-BR.
   próprio APK de teste, verde sobre um caminho que o produto não percorre. Medido no aparelho:
   1500 quadros em 30,0 s (50/s exatos); com PTT de 6 s, 300 calados = 6,0 s exatos. Falta o
   **ciclo de voz no serviço**: hoje a escuta e o earcon sobrevivem à tela, o comando não.
-- [P3] Silero VAD substituindo o detector por energia RMS. `SileroVadModelConfig` está no
+- [P3] 🟡 **PARCIAL** — Silero VAD substituindo o detector por energia RMS. `SileroVadModelConfig` está no
   AAR (verificado: a classe existe em `com/k2fsa/sherpa/onnx/`). **Duas instâncias, não
   uma**: a do gatilho quer segmentos curtos, a da transmissão precisa tolerar 30 s via
   `maxSpeechDuration`. Confirmar a assinatura por `javap` antes de escrever — esforço: 1
   sessão — depende: barramento.
-- [P3] Contexto do Whisper quente entre invocações: hoje `cicloDeVoz` faz `Modelos.whisper()`
+- [P3] ✅ **FEITO** — Contexto do Whisper quente entre invocações: hoje `cicloDeVoz` faz `Modelos.whisper()`
   e `release()` por ciclo, recarregando 77,7 MB (`ggml-tiny.bin` tem 77 691 713 B em
   `app/src/main/assets/models/`). Vira `object` de processo com liberação por política
   térmica — esforço: 1 sessão — depende: quebra do `DiagnosticsViewModel` — esforço: 1
   sessão.
-- [P3] Verificador do gatilho: VAD abre janela → whisper pt transcreve → casamento integral
+- [P3] 🟡 **PARCIAL** — Verificador do gatilho: VAD abre janela → whisper pt transcreve → casamento integral
   contra léxico fechado → grupo resolvido → earcon → piso → BIP → quadros — esforço: 2
   sessões — depende: VAD + contexto quente + telemetria.
-- [P3] KWS como adiantamento do earcon, atrás de flag, com o preset inglês e a grafia
+- [P3] 🚫 **OBSOLETO** — KWS como adiantamento do earcon, atrás de flag, com o preset inglês e a grafia
   fonética de "Claryon". Último item da fase porque é o único que sai sem quebrar nada —
   esforço: 1 sessão — depende: verificador funcionando.
-- [P1] Seleção de talk group por voz, em três diffs: migração `0011` com coluna
+- [P1] ✅ **FEITO** — Seleção de talk group por voz, em três diffs: migração `0011` com coluna
   `rotulo_falado text` única por `unit_id` em `talk_groups` (nunca derivar o número por
   substring de `nome` — `'GTA-3 Alfa'` casaria "3" por acidente); carga do mapa
   `{rotulo_falado → id}` no login, que a RLS já limita ao que o agente pode ver; e
   `RadioTatico.trocarDeGrupo(id)` reconectando o transporte **sem tocar em `AudioDoAgente`**
   — esforço: 2 sessões — depende: verificador.
-- [P1] Matar o canal fixo: `CANAL_DEMO` e `NOME_DO_CANAL` em `MainActivity` e o
+- [P1] 🟡 **PARCIAL** — Matar o canal fixo: `CANAL_DEMO` e `NOME_DO_CANAL` em `MainActivity` e o
   fallback `TALK_GROUP_PADRAO` em `RadioViewModel` — **mais** `TALK_GROUP_DEMO` em
   `MapaViewModel`, um terceiro literal gêmeo que a auditoria achou: hoje o mapa e o rádio
   apontam para o mesmo UUID por digitação, não por referência — esforço: 0,3
   sessão — depende: seleção por voz.
-- [P3] Recusa honesta e audível: falar um grupo a que o agente não pertence responde "você
+- [P3] 🚫 **OBSOLETO** — Recusa honesta e audível: falar um grupo a que o agente não pertence responde "você
   não é da guarnição 3", não silêncio. Descarte silencioso é para gatilho não reconhecido;
   autorização negada merece resposta — esforço: 0,3 sessão — depende: seleção por voz.
-- [P3] Fecho por silêncio, escrito com honestidade na spec: *o sistema detecta ausência de
+- [P3] ⬜ **ABERTO** — Fecho por silêncio, escrito com honestidade na spec: *o sistema detecta ausência de
   fala, não ausência da fala do agente* — o isolamento depende do beamforming dos óculos.
   Parada por toque continua existindo e é a única que não depende do microfone — esforço:
   0,5 sessão — depende: VAD.
@@ -307,9 +342,9 @@ caminho real — ainda que com recall desconhecido em pt-BR.
   de áudio ao vivo". O dano real era pior que o descrito: sem o evento `LimiteDeDuracao`,
   `GatilhoPtt.pressionadoEm` ficava setado e **todo toque seguinte era recusado** — o PTT do
   agente morria até a tela fechar. Travado por `fonteQueParaDeEmitir_naoSeguraOCanalParaSempre`.
-- [P3] `WakeWordDetector` implementado de fato e `PowerPolicy` religada, tornando o modo
+- [P3] 🟡 **PARCIAL** — `WakeWordDetector` implementado de fato e `PowerPolicy` religada, tornando o modo
   **Standby** alcançável (item 5 do `ESTADO.md`) — esforço: 1 sessão — depende: KWS ou VAD.
-- [P3] Gazetteer de logradouros em produção: `configurarGazetteer` só é chamado em teste —
+- [P3] ⬜ **ABERTO** — Gazetteer de logradouros em produção: `configurarGazetteer` só é chamado em teste —
   esforço: 0,5 sessão — depende: nada.
 
 **Aceite.** Aparelho no bolso, fone HFP no ouvido, nenhum toque na tela. Dizer "Hey
@@ -342,29 +377,29 @@ existência de uma tabela.
 
 **Itens**
 
-- [P1/SEG] Canal Realtime privado amarrado ao JWT do agente. Hoje o transporte autoriza só
+- [P1/SEG] ✅ **FEITO** — Canal Realtime privado amarrado ao JWT do agente. Hoje o transporte autoriza só
   pela chave anon do APK e o protocolo não envia `access_token`: qualquer portador do APK
   entra em `realtime:tg-<uuid>` e recebe todos os quadros e indicativos. **Confirmar a API
   de canal privado/`setAuth` na doc oficial do Supabase antes de qualquer diff** — esforço:
   1,5 sessão — depende: nada. Maior risco do sistema pelo menor esforço.
-- [P1] `ClienteDePisoRemoto` no lugar de `ClienteDePisoLocal`: o `floor_grants` atômico de
+- [P1] ✅ **FEITO** — `ClienteDePisoRemoto` no lugar de `ClienteDePisoLocal`: o `floor_grants` atômico de
   `0005_controle_de_piso.sql` existe, está concedido e nunca foi usado. Sem isso não há
   rede, há aparelhos falando por cima — esforço: 1 sessão — depende: JWT no canal.
-- [SEG] Indicativo derivado do JWT no protocolo, nunca do payload. Hoje ele é string livre
+- [SEG] ✅ **FEITO** — Indicativo derivado do JWT no protocolo, nunca do payload. Hoje ele é string livre
   não verificada, então personificação é possível — e um P1 forjado em nome de outra
   guarnição toma o canal por desenho — esforço: 1 sessão — depende: JWT no canal.
-- [SEG] Coluna `ativo` em `agents`, conferida dentro de `private.current_agent_id()`
+- [SEG] ✅ **FEITO** — Coluna `ativo` em `agents`, conferida dentro de `private.current_agent_id()`
   (`0002_rls.sql:37-45`). Toda política de linha, todo RPC e o controle de piso passam por
   essa função: um UPDATE derruba o agente de canal, piso, posição e consulta na mesma
   transação. Revogação institucional é item que a banca procura por nome — esforço: 0,5
   sessão — depende: nada.
-- [P1] Acumulador do PCM transmitido em `SessaoPtt`, derivado dos dois pontos únicos por
+- [P1] ✅ **FEITO** — Acumulador do PCM transmitido em `SessaoPtt`, derivado dos dois pontos únicos por
   onde o áudio passa (pré-roll e `collect` ao vivo). A invariante é transcrever **os bytes
   que foram ao ar**, não os que foram capturados — esforço: 1 sessão — depende: barramento.
-- [P1] Whisper disparado no `finally` de `SessaoPtt`, **fora** do `withTimeoutOrNull` e em
+- [P1] ✅ **FEITO** — Whisper disparado no `finally` de `SessaoPtt`, **fora** do `withTimeoutOrNull` e em
   escopo de aplicação, para não competir com a codificação ao vivo nem morrer ao sair da
   tela — esforço: 1 sessão — depende: acumulador + contexto quente.
-- [P1] Quarto evento `fala.transcricao` no protocolo (hoje há três) e roteamento no
+- [P1] ✅ **FEITO** — Quarto evento `fala.transcricao` no protocolo (hoje há três) e roteamento no
   receptor chaveado por `transmissaoId`, **fora** do laço de reprodução — o texto não pode
   viajar no anúncio, que sai antes da fala — esforço: 1,5 sessão — depende: acumulador.
 - [P2/REFAT] Dono único da escrita de posição: `ColetorDePosicao` como único escritor.
@@ -384,30 +419,30 @@ existência de uma tabela.
   incerteza combinada, mais a **válvula de 3 recusas** sem a qual um salto verdadeiro
   congela o marcador. (d) `EscolhaDeCorrecao`, idade antes de precisão. 24 testes JVM
   novos, cada um com contra-teste; verificador `0009` 17/17.
-- [P2] Arredondamento de distância dentro de `consultar_posicao` e `posicoes_do_grupo`. O
+- [P2] ⬜ **ABERTO** — Arredondamento de distância dentro de `consultar_posicao` e `posicoes_do_grupo`. O
   arredondamento para 50/100 m existe em `locate.ts` e está morto; a função viva devolve
   precisão métrica crua — esforço: 0,3 sessão — depende: nada.
-- [SEG] **Camada 1 — corregedoria.** `private.turnos` com índice único parcial de turno
+- [SEG] ✅ **FEITO** — **Camada 1 — corregedoria.** `private.turnos` com índice único parcial de turno
   aberto por agente, `public.iniciar_turno()`/`encerrar_turno()`, `publicar_posicao`
   **recusando escrita fora de turno aberto**, encerramento automático por inatividade, e
   `private.trilha_de_posicao` particionada por dia, sem GRANT para `authenticated` e sem
   índice geográfico — esforço: 2 sessões — depende: dono único. Sem o encerramento
   automático, "esqueci de encerrar" vira 24 h de rastreamento e a defesa jurídica inteira
   cai; ele é parte do controle, não refinamento.
-- [SEG] **Camada 2 — janela de 30 minutos para pares.** `public.rastro_do_par(indicativo)`
+- [SEG] 🟡 **PARCIAL** — **Camada 2 — janela de 30 minutos para pares.** `public.rastro_do_par(indicativo)`
   devolvendo série de distância e azimute dos últimos 30 min, com a idade de cada ponto
   declarada, sujeita à mesma reciprocidade que a consulta de posição já pratica — esforço:
   1 sessão — depende: camada 1.
-- [SEG] Job de retenção executando os dois prazos e o `expira_em` de `transmissions`, que
+- [SEG] ✅ **FEITO** — Job de retenção executando os dois prazos e o `expira_em` de `transmissions`, que
   hoje é campo lógico sem executor. Prazos como constante única numa migração, alteráveis
   em uma linha. **Confirmar a assinatura de `cron.schedule` na doc do Supabase antes do
   diff** — esforço: 1 sessão — depende: camada 1.
-- [SEG] Registro de acesso nas duas portas: linha por consulta em `consultar_posicao`,
+- [SEG] ✅ **FEITO** — Registro de acesso nas duas portas: linha por consulta em `consultar_posicao`,
   sessão em `abrir_mapa`/`fechar_mapa` para a porta de alto volume. **Nunca gravar a
   resposta**, e o autor sai de `private.current_agent_id()`, jamais do indicativo do
   protocolo — log com autor forjável produz prova falsa e é pior que log nenhum — esforço:
   1 sessão — depende: indicativo do JWT.
-- [SEG] `public.quem_me_consultou()`: o titular vê quem o consultou — esforço: 0,3 sessão —
+- [SEG] 🟡 **PARCIAL** — `public.quem_me_consultou()`: o titular vê quem o consultou — esforço: 0,3 sessão —
   depende: log de acesso. Converte conformidade em característica de produto.
 
 **Aceite.** Dois pares autenticados com JWTs distintos no mesmo talk group: A fala, B ouve
