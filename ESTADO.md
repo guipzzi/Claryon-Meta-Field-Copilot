@@ -24,8 +24,12 @@
   bancada · **p50 3,5 ms** por decisão · **zero dependência nova**.
 - **Falso positivo do detector: 428/h → 0** na metade retida de 3,65 min de leitura, com
   recall intacto (9/9) — treinando com negativo duro, não mexendo no limiar.
-- **Ferramentas:** `par_headless.mjs` (segundo ouvinte do aceite, com `--falar`) ·
-  `sonda_de_politica.py` (restaura em `finally` e recusa produção sem motivo escrito).
+- **TRANSCRIÇÃO NA ORIGEM (P1)**: `AcumuladorDePcm` junta o PCM **que foi ao ar** no funil
+  único de `SessaoPtt.enviar`; o whisper roda no `finally`, fora do `withTimeoutOrNull` e em
+  **escopo de aplicação**; o quarto evento `fala.transcricao` difunde o texto, roteado por
+  `transmissaoId` **fora do laço de reprodução**. Chamador verificado em `src/main`.
+- **Ferramentas:** `par_headless.mjs` · `sonda_de_politica.py` (restaura em `finally` e
+  recusa produção sem motivo escrito).
 
 ## O que está quebrado, e nós sabemos
 
@@ -50,15 +54,9 @@ dispositivo HFP (ver `docs/VERIFICACOES_COM_HARDWARE.md`).
 
 ## O que vem a seguir — Fase 3
 
-Quatro itens fechados (JWT no canal, piso remoto conferido, revogação, autoria). Faltam:
+Cinco fechados (JWT, piso, revogação, autoria, **transcrição na origem**). Faltam:
 
-1. **Transcrição na origem** (P1) — **acumulador feito**: `AcumuladorDePcm` junta o PCM no
-   funil único de `SessaoPtt.enviar`, depois da codificação dar certo, e `aoAudioTransmitido`
-   entrega no `finally` fora do `withTimeoutOrNull`. **Faltam os dois de cima**: chamador que
-   rode o whisper em escopo de aplicação, e o quarto evento `fala.transcricao` no protocolo.
-   Sem eles isto é **escrito, não construído** — `grep aoAudioTransmitido` em `app/src/main`
-   devolve zero.
-2. **Dono único da escrita de posição**, e depois batimento com idade real do servidor.
-3. **Log de acesso** nas duas portas — autor de `current_agent_id()`, nunca do protocolo.
-4. Retenção em duas camadas — **ou entra inteira** (turno + job + log na mesma sessão)
+1. **Dono único da escrita de posição**, e depois batimento com idade real do servidor.
+2. **Log de acesso** nas duas portas — autor de `current_agent_id()`, nunca do protocolo.
+3. Retenção em duas camadas — **ou entra inteira** (turno + job + log na mesma sessão)
    **ou não entra**, pela regra de sequenciamento do próprio roadmap.

@@ -44,6 +44,21 @@ object ProtocoloRealtime {
     const val EVENTO_QUADROS = "fala.quadros"
     const val EVENTO_FIM = "fala.fim"
 
+    /**
+     * **O texto, transcrito na ORIGEM.** O quarto evento do protocolo.
+     *
+     * Vem depois da fala, e não junto do anúncio, porque o anúncio sai **antes** do
+     * áudio — nesse instante ainda não há o que transcrever. Chega chaveado por
+     * `transmissaoId` para o receptor casar com a fala certa mesmo que outra tenha
+     * começado no meio: sem a chave, o texto de uma pousaria no balão da outra.
+     *
+     * O pilar P1 do produto é que **todos os receptores exibem exatamente o mesmo
+     * texto**. Isso só vale porque quem transcreve é a origem, uma vez: se cada
+     * aparelho transcrevesse o que recebeu, dois colegas leriam frases diferentes da
+     * mesma fala e não teriam como saber qual é a verdadeira.
+     */
+    const val EVENTO_TRANSCRICAO = "fala.transcricao"
+
     fun topico(talkGroupId: String): String = "realtime:tg-$talkGroupId"
 
     /**
@@ -113,6 +128,12 @@ object ProtocoloRealtime {
             .put("agenteId", a.autorAgenteId)
             .put("prioridade", a.prioridade.name),
     )
+
+    fun transcricao(talkGroupId: String, transmissaoId: String, texto: String, ref: Int): String =
+        broadcast(
+            talkGroupId, EVENTO_TRANSCRICAO, ref,
+            JSONObject().put("transmissaoId", transmissaoId).put("texto", texto),
+        )
 
     fun quadro(talkGroupId: String, q: QuadroAudio, ref: Int): String = broadcast(
         talkGroupId, EVENTO_QUADRO, ref,
@@ -256,6 +277,17 @@ object ProtocoloRealtime {
             }
 
             EVENTO_FIM -> listOf(EventoDeRede.FimDeTransmissao(dados.getString("transmissaoId")))
+
+            EVENTO_TRANSCRICAO -> {
+                val texto = dados.optString("texto")
+                // Texto vazio não vira evento: o balão sem transcrição já é o
+                // comportamento de quando não houve texto, e um evento com string
+                // vazia faria a tela apagar um texto que talvez já estivesse lá.
+                if (texto.isBlank()) emptyList()
+                else listOf(
+                    EventoDeRede.Transcricao(dados.getString("transmissaoId"), texto),
+                )
+            }
 
             else -> emptyList()
         }

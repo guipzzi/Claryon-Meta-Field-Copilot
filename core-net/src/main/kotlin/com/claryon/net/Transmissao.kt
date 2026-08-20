@@ -113,6 +113,14 @@ sealed interface EventoDeRede {
     data class FimDeTransmissao(val transmissaoId: String) : EventoDeRede
 
     /**
+     * O texto da fala, transcrito na origem e chaveado por `transmissaoId`.
+     *
+     * Chega **depois** do áudio, e por isso não pode viajar no anúncio: quando o
+     * anúncio sai, a fala ainda não aconteceu.
+     */
+    data class Transcricao(val transmissaoId: String, val texto: String) : EventoDeRede
+
+    /**
      * O servidor **aceitou** a entrada no canal (`phx_reply` com `status = ok`).
      *
      * Distinto de "o socket abriu": o socket TCP sobe antes de qualquer
@@ -173,6 +181,16 @@ interface TransporteAoVivo {
 
     /** Marca o fim da transmissão e libera o canal. */
     suspend fun encerrar(transmissaoId: String): Result<Unit>
+
+    /**
+     * Difunde o texto transcrito na origem, depois da fala.
+     *
+     * Padrão que não faz nada: transporte que não saiba difundir texto continua
+     * servindo ao rádio, que é a capacidade essencial. A transcrição é acessória e
+     * não pode ser condição de o áudio funcionar.
+     */
+    suspend fun transcrever(transmissaoId: String, texto: String): Result<Unit> =
+        Result.success(Unit)
 
     /** Fluxo de eventos recebidos do talk group. */
     fun eventos(): Flow<EventoDeRede>

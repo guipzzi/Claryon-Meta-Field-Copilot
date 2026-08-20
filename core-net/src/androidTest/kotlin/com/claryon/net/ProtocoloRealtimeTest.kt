@@ -182,6 +182,42 @@ class ProtocoloRealtimeTest {
         assertTrue((e as EventoDeRede.CanalRecusado).motivo.contains("expired"))
     }
 
+    // ── O quarto evento: transcrição na origem ──────────────────────────────
+
+    /**
+     * O texto atravessa com a chave. Sem `transmissaoId` o receptor não teria como
+     * saber a qual fala ele pertence — e entre a fala e o texto pode ter começado
+     * outra, o que poria a frase de um agente embaixo do nome de outro.
+     */
+    @Test
+    fun aTranscricaoAtravessaChaveadaPelaTransmissao() {
+        val evento = ProtocoloRealtime.interpretar(
+            envelopar(ProtocoloRealtime.transcricao(tg, "tx-9", "guarnição 3 na escuta", 1)),
+        ).single()
+
+        assertTrue(evento is EventoDeRede.Transcricao)
+        evento as EventoDeRede.Transcricao
+        assertEquals("tx-9", evento.transmissaoId)
+        assertEquals("guarnição 3 na escuta", evento.texto)
+    }
+
+    /**
+     * **Texto vazio não vira evento.**
+     *
+     * O balão sem transcrição já é o que se mostra quando não houve texto. Um evento
+     * com string vazia faria a tela **apagar** um texto que talvez já estivesse lá —
+     * uma transcrição que chegou e sumiu é pior que uma que nunca chegou, porque o
+     * agente viu e passou a duvidar do que leu.
+     */
+    @Test
+    fun transcricaoVaziaNaoViraEvento() {
+        assertTrue(
+            ProtocoloRealtime.interpretar(
+                envelopar(ProtocoloRealtime.transcricao(tg, "tx-9", "   ", 1)),
+            ).isEmpty(),
+        )
+    }
+
     private fun envelopar(enviado: String): String {
         val original = JSONObject(enviado)
         return JSONObject()

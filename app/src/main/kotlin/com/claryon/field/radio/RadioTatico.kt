@@ -11,6 +11,7 @@ import com.claryon.audio.GlassesAudioRoute
 import com.claryon.common.Earcon
 import com.claryon.common.Priority
 import com.claryon.common.Result
+import com.claryon.net.AcumuladorDePcm
 import com.claryon.net.ClienteDePiso
 import com.claryon.net.CodecDeVoz
 import com.claryon.net.DecisaoDeGatilho
@@ -88,6 +89,20 @@ class RadioTatico(
      * é justamente quando o rádio mais importa. Só a **divergência** derruba.
      */
     private val conferirAutor: suspend (String) -> String? = { null },
+    /**
+     * Transcreve o PCM que foi ao ar. `null` desliga a transcrição na origem sem
+     * afetar nada do rádio — o balão aparece sem texto, que é o comportamento de
+     * antes deste item existir.
+     *
+     * Quem passa decide o escopo. O roadmap pede **escopo de aplicação**: em escopo
+     * de tela, trocar de aba logo depois de falar mataria a transcrição no meio, e o
+     * colega ficaria sem o texto por causa de um gesto de interface.
+     */
+    private val transcrever: (suspend (ShortArray) -> String?)? = null,
+    /** O texto da própria fala, para a tela não esperar um eco que não vem. */
+    private val aoTextoProprio: (String, String) -> Unit = { _, _ -> },
+    /** O texto da fala de um colega, chaveado por `transmissaoId`. */
+    private val aoTextoRecebido: (String, String) -> Unit = { _, _ -> },
     private val transporte: TransporteAoVivo,
     private val codec: CodecDeVoz,
     private val piso: ClienteDePiso,
@@ -401,6 +416,12 @@ class RadioTatico(
             agoraMs = agoraMs,
             amostrasPorQuadro = sampleRateHz / 50,
             telemetria = telemetria,
+            acumulador = acumuladorDeFala,
+            aoAudioTransmitido = if (transcrever == null) {
+                null
+            } else {
+                { id, pcm -> transcreverEDifundir(id, pcm) }
+            },
         )
 
         transmissao = escopo.launch {
@@ -471,8 +492,44 @@ class RadioTatico(
         }
     }
 
+    /**
+     * Um acumulador por rádio, não por transmissão.
+     *
+     * `SessaoPtt` o zera no início de cada fala e o consome no fim, então reusar a
+     * instância não mistura falas — e evita alocar ~1 MB a cada toque no PTT, que
+     * numa ocorrência com muitas transmissões curtas viraria pressão de GC no
+     * caminho mais sensível do produto.
+     */
+    private val acumuladorDeFala = AcumuladorDePcm()
+
+    /**
+     * Transcreve o que foi ao ar e difunde o texto para o grupo.
+     *
+     * A ordem importa: difundir **depois** de transcrever, e não em paralelo, porque
+     * o evento `fala.transcricao` carrega o texto — sem ele não há o que difundir.
+     * Falha em qualquer das duas etapas é registrada e engolida: a fala já foi ao ar
+     * e o rádio cumpriu o papel dele. Derrubar o encerramento por causa do texto
+     * seria trocar a capacidade essencial pela acessória.
+     */
+    private suspend fun transcreverEDifundir(transmissaoId: String, pcm: ShortArray) {
+        val texto = runCatching { transcrever?.invoke(pcm) }
+            .onFailure { Log.w(TAG, "transcrição na origem falhou", it) }
+            .getOrNull()
+        if (texto.isNullOrBlank()) return
+
+        // O próprio agente vê o texto da própria fala sem esperar o eco do
+        // servidor: o broadcast não volta para quem enviou.
+        aoTextoProprio(transmissaoId, texto)
+        transporte.transcrever(transmissaoId, texto)
+            .let { if (it is Result.Failure) Log.w(TAG, "texto não difundido: ${it.error}") }
+    }
+
     private fun tratarRecepcao(evento: EventoRecepcao) {
         when (evento) {
+            // O texto da fala de um colega. Não toca no áudio nem no supressor: só
+            // preenche o balão que já existe, casando pelo `transmissaoId`.
+            is EventoRecepcao.TextoDaFala -> aoTextoRecebido(evento.transmissaoId, evento.texto)
+
             is EventoRecepcao.Chegando -> {
                 // Abre a janela de supressão ANTES do primeiro áudio: a voz que
                 // vai tocar não pode entrar na nossa resposta.

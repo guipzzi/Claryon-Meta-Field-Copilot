@@ -21,6 +21,15 @@ sealed interface EventoRecepcao {
         override fun hashCode() = 31 * pcm.contentHashCode() + taxaHz
     }
 
+    /**
+     * O texto da fala, transcrito pela origem.
+     *
+     * Carrega o `transmissaoId` porque **não** chega junto com o áudio: vem depois
+     * do fim da fala, e outra transmissão pode ter começado no meio. Quem exibe casa
+     * pela chave, não pela ordem de chegada.
+     */
+    data class TextoDaFala(val transmissaoId: String, val texto: String) : EventoRecepcao
+
     /** Fim da fala. Fecha a janela de supressão depois da cauda. */
     data class Terminou(val transmissaoId: String, val quadros: Int, val perdidos: Int) : EventoRecepcao
 
@@ -98,6 +107,14 @@ class Receptor(
                     }
 
                     is EventoDeRede.FimDeTransmissao -> Unit // o quadro `ultimo` encerra
+
+                    // **Fora do laço de reprodução, e é o ponto do item.** O texto
+                    // não entra no buffer de jitter nem espera o áudio drenar: ele
+                    // sai direto para quem exibe. Roteá-lo pelo laço o atrasaria pela
+                    // duração da fala inteira e, pior, o amarraria à transmissão que
+                    // estiver tocando — que pode já ser outra.
+                    is EventoDeRede.Transcricao ->
+                        aoEvento(EventoRecepcao.TextoDaFala(evento.transmissaoId, evento.texto))
 
                     // Estado de canal não é assunto do receptor: quem decide o
                     // que fazer com autorização negada é o transporte, e quem

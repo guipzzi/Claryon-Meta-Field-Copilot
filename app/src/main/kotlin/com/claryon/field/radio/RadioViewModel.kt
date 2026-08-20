@@ -25,7 +25,12 @@ import com.claryon.net.ConfigRealtime
 import com.claryon.net.MediaCodecOpus
 import com.claryon.net.TransporteAoVivo
 import com.claryon.net.TransporteRealtime
+import com.claryon.field.voice.EscutaDoAgente
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
@@ -201,6 +206,13 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
                 conferirAutor = { tx ->
                     historicoDoCanal?.autorDaTransmissao(tx)?.getOrNull()
                 },
+                // **Transcrição na origem** (pilar P1): o texto sai do PCM que foi
+                // ao ar, uma vez, e é difundido — para todos os receptores exibirem
+                // exatamente a mesma string. `EscutaDoAgente` mantém o whisper
+                // quente, então não há os ~78 MB de carga por fala.
+                transcrever = { pcm -> transcreverNaOrigem(pcm) },
+                aoTextoProprio = { id, texto -> aplicarTexto(id, texto, propria = true) },
+                aoTextoRecebido = { id, texto -> aplicarTexto(id, texto, propria = false) },
                 transporte = transporte,
                 codec = codec(),
                 // **Derivada do gerente, não constante.** `RadioTatico` tinha
@@ -314,6 +326,51 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
      * segundos sem prejuízo, e uma assinatura permanente para texto custaria
      * bateria pelo turno inteiro por um ganho que ninguém percebe.
      */
+    /**
+     * Roda o whisper **em escopo de aplicação**, não no da tela.
+     *
+     * `viewModelScope` morre quando o agente troca de aba, e trocar de aba logo
+     * depois de falar é comum — o colega ficaria sem o texto por causa de um gesto
+     * de interface. `escopoDeTranscricao` sobrevive à tela; o `await` aqui só
+     * espera o resultado.
+     *
+     * Devolve `null` sem drama quando o modelo não está embarcado: o balão aparece
+     * sem texto, que é exatamente o comportamento de antes deste item.
+     */
+    private suspend fun transcreverNaOrigem(pcm: ShortArray): String? =
+        escopoDeTranscricao.async {
+            val motor = EscutaDoAgente.de(getApplication()) ?: return@async null
+            (motor.transcribe(pcm, taxaDaTranscricaoHz) as? Result.Success)?.value?.text?.trim()
+        }.await()
+
+    /**
+     * Põe o texto no balão certo. **Os dois casos casam por critérios diferentes, e
+     * a diferença é deliberada.**
+     *
+     * *Recebida* casa por `transmissaoId`, sempre. Entre a fala do colega e o texto
+     * dela pode ter começado outra transmissão — escrever "no último balão" poria a
+     * frase de um agente embaixo do nome de outro, que num rádio é o erro que não se
+     * perdoa.
+     *
+     * *Própria* não tem essa chave para casar: o balão local nasce em `aoSoltar()`,
+     * que é o instante da soltura, e o `transmissaoId` só existe dentro da sessão.
+     * Então casa com o **balão local mais recente ainda sem texto**, que é o que
+     * acabou de ser criado. O risco de trocar é nulo na prática (a própria fala é
+     * uma por vez) e o critério está escrito aqui em vez de virar coincidência.
+     */
+    private fun aplicarTexto(transmissaoId: String, texto: String, propria: Boolean) {
+        val lista = _falas.value
+        val alvo = if (propria) {
+            lista.indexOfLast { it.propria && it.texto.isBlank() }
+        } else {
+            lista.indexOfFirst { it.id == transmissaoId }
+        }
+        // Texto sem balão é descartado: criar um do zero produziria uma fala sem
+        // hora nem indicativo, e a interface estaria inventando conteúdo.
+        if (alvo < 0) return
+        _falas.value = lista.toMutableList().also { it[alvo] = it[alvo].copy(texto = texto) }
+    }
+
     private suspend fun carregarCanal(canal: String, historico: HistoricoDoCanal) {
         historico.falas(canal).onSuccess { lista ->
             // As inserções otimistas que o servidor ainda não ecoou sobrevivem à
@@ -405,6 +462,17 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private var historicoDoCanal: HistoricoDoCanal? = null
+
+    /**
+     * Escopo da transcrição — **de aplicação, não da tela**, como o roadmap pede.
+     *
+     * `Dispatchers.Default` porque o whisper é CPU: em `IO` ele disputaria a piscina
+     * de rede com o próprio envio dos quadros.
+     */
+    private val escopoDeTranscricao = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    /** O whisper espera 16 kHz; é a taxa em que a captura já entrega. */
+    private val taxaDaTranscricaoHz = 16_000
     private var recarga: Job? = null
     private var indicativoProprio: String = ""
     private var nomeDoCanalAtual: String = ""

@@ -269,6 +269,9 @@ class TransporteRealtime(
         return enviarTexto { tg -> ProtocoloRealtime.quadros(tg, grupo, ref.getAndIncrement()) }
     }
 
+    override suspend fun transcrever(transmissaoId: String, texto: String): Result<Unit> =
+        enviarTexto { tg -> ProtocoloRealtime.transcricao(tg, transmissaoId, texto, ref.getAndIncrement()) }
+
     override suspend fun encerrar(transmissaoId: String): Result<Unit> =
         enviarTexto { tg -> ProtocoloRealtime.fim(tg, transmissaoId, ref.getAndIncrement()) }
 
