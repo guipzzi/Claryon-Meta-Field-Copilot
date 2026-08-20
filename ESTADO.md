@@ -40,11 +40,13 @@
 
 ## O que está quebrado, e nós sabemos
 
-1. **Falso positivo do earcon: 1,11/h contra a meta de 0,5/h** — 2,2× acima, e era **89,85/h**
-   antes do retreino com 27 min de podcast como negativo duro (protocolo do `duro.py`: corta ao
-   meio no tempo, treina numa metade, mede na outra). Escore máximo caiu de **0,997 para 0,647**.
-   O Python previu 0,00/h na metade retida e o aparelho deu 1,11 — o aparelho é a régua, e a
-   diferença é de pipeline (refratário e passo de janela). Falta 1 disparo para fechar.
+1. **Falso positivo do earcon: 0,52/h contra a meta de 0,5/h** — em 115,5 min. Era **89,85/h**;
+   dois retreinos com 177 min de podcast como negativo duro (protocolo do `duro.py`: cada podcast
+   cortado ao meio NO TEMPO, metade treina, metade mede). Escore máximo **0,997 → 0,647 → 0,508**,
+   e o único disparo cruza o limiar por 0,008. **O gargalo agora é POSITIVO, não negativo**: o
+   modelo treina com 18 elocuções de UM locutor, e no limiar que zera o falso positivo (0,9) o
+   recall cai para 85% — abaixo dos 90% do aceite. Mais podcast não resolve isso; mais vozes
+   dizendo "Claryon", sim.
 2. **Recall do gatilho: 3/4 locutores** (Bruna, Carla e Pedro sim; Guido virou "Blerium" — e é a
    voz que TREINOU o detector). Quatro pronúncias por microfone de celular, não as 30 por fone
    HFP que o aceite pede. E "na escuta" dito por 4 vozes humanas **não** abriu canal: 0/4.
