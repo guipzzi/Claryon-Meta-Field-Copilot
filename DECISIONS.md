@@ -1635,3 +1635,28 @@ em metros: um teto fixo recusaria o modo Standby inteiro, que usa a rede de
 propósito e erra 100–1000 m. E no teste de salto, que compara contra a **incerteza
 combinada** dos dois pontos: 5 km entre duas correções com 3 km de erro cada não é
 salto, é ruído.
+
+## 2026-08-20 — Duas pendências do roadmap eram decisões revertidas, não dívida
+
+A auditoria de 20/08 marcou dois itens como **OBSOLETO**. O rótulo importa mais que
+os outros três: `ABERTO` convida a fazer, e estes dois, se feitos, seriam regressão.
+
+**KWS por preset como adiantamento do earcon.** O item pedia o `KeywordSpotter` do
+sherpa-onnx atrás de flag, com a grafia fonética de "Claryon" no preset inglês.
+Refutado por medição, não por opinião: 3/3 em inglês, **0/4** em pt-BR — o preset é
+`kws-zipformer-wenetspeech`, treinado em mandarim/inglês, e não existe preset
+streaming em pt. `specs/fase-2-gatilho-por-voz.spec.md:420` registra o corte. O que
+entrou no lugar foi o detector acústico treinado (`DetectorDeAtivacao`), que mede
+26/26 em fluxo. Fazer o item hoje significaria voltar a uma via com marca zero.
+
+**Recusa nominal: "você não é da guarnição 3".** O item pedia que falar um grupo a
+que o agente não pertence produzisse essa frase. Rejeitado no desenho, e o motivo
+está em `Utterance.kt:120-129`: dois textos distintos — "não existe" e "existe, mas
+você não é membro" — transformam o produto num **oráculo sobre a estrutura da
+corporação**. Um agente enumeraria os grupos existentes falando nomes e lendo qual
+recusa recebe. A recusa audível existe e é uma só: *"Não conheço essa guarnição."*
+
+**Alternativa descartada nos dois casos:** deixar os itens escritos como estavam,
+sem marcador. É o que estava acontecendo. Um roadmap onde pendência e decisão
+revertida têm a mesma aparência faz a próxima sessão implementar a regressão
+achando que paga dívida — e com o cuidado de quem está fazendo a coisa certa.

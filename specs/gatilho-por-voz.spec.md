@@ -1,11 +1,12 @@
 ---
 feature: gatilho-por-voz
 capacidade: C1 (rádio tático) + C2/C3/C4 (comando por voz)
-estado: proposta
+estado: **SUPERADA em 2026-08-17** por `specs/fase-2-gatilho-por-voz.spec.md`
 autor: revisão humana pendente
 criada: 2026-08-15
 revista: 2026-08-16
 substitui: versão de 2026-08-15 (modelo de dois estágios "Hey Claryon" + "na escuta")
+superada_por: "specs/fase-2-gatilho-por-voz.spec.md — itens 5 a 26 (partes B e C)"
 sobrepoe:
   - "docs/PADROES_DE_ENGENHARIA.md § Rádio tático — 'nunca por palavra de ativação'"
 depende_de:
@@ -14,6 +15,28 @@ depende_de:
   - dono-unico-da-saida-de-audio
   - silero-vad-embarcado
 ---
+
+> ## ⚠️ ESTE DOCUMENTO FOI SUPERADO — leia `specs/fase-2-gatilho-por-voz.spec.md`
+>
+> Os **itens 5 a 26** (partes B e C) descrevem um desenho que foi substituído em
+> 17/08. Números concretos que continuam aqui e **não valem mais**:
+>
+> | aqui | vigente | onde |
+> |---|---|---|
+> | teto de transmissão **12 000 ms** | **30 000 ms** | `SessaoPtt.kt:395`, medido |
+> | segmento de fala **0,6 s a 2,5 s** | **1,2 s a 4,0 s** | enunciado ficou mais longo |
+> | gatilho `"claryon abrir canal"` | `"Hey Claryon"` + `"guarnição N na escuta"` | D1, aprovado |
+> | *"na escuta sai do vocabulário"* | volta, **com o número do grupo** | PROPOSTA-2 |
+>
+> **A supersessão já estava declarada — em uma direção só.** A spec nova diz o que
+> substitui; esta não dizia que tinha sido substituída. Quem abre pelo nome mais
+> óbvio (`gatilho-por-voz.spec.md`) caía no documento errado e lia 12 000 ms como
+> se fosse regra. Ponteiro de mão única não é ponteiro: é armadilha para quem
+> chega pelo outro lado.
+>
+> **As partes A e D continuam valendo** — o modelo de ruído, a rota de áudio e as
+> proibições. É por isso que este arquivo não foi apagado.
+
 
 # Gatilho por voz: comando e transmissão sem tocar na tela
 
