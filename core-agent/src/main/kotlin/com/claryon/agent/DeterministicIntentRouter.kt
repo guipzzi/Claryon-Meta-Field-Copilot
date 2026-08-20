@@ -56,6 +56,17 @@ class DeterministicIntentRouter : IntentRouter {
             // Rótulo vazio NÃO vira troca: "claryon mudar para" sem destino é
             // comando incompleto, e adivinhar o destino é exatamente o que a spec
             // proíbe. Cai em `NaoReconhecida`, que pede repetição.
+            // **ANTES da troca de grupo, e o casamento é INTEGRAL.**
+            //
+            // `matches` usa `contains`, que serve para verbo de comando solto no
+            // meio da fala. Aqui não serve: "na escuta" é vocabulário corrente de
+            // rádio, e abrir canal por conter a frase faria o produto transmitir
+            // ouvindo a própria guarnição. Âncoras `^…$`, e palavra extra recusa.
+            ABRIR_TRANSMISSAO.matchEntire(texto) != null ->
+                Intent.AbrirTransmissao(
+                    ABRIR_TRANSMISSAO.matchEntire(texto)!!.groupValues[1].trim(),
+                )
+
             matches(texto, TROCAR_DE_GRUPO) ->
                 extrairRotuloDeGrupo(texto)?.let { Intent.TrocarDeGrupo(it) }
                     ?: Intent.NaoReconhecida(transcricao)
@@ -194,6 +205,28 @@ class DeterministicIntentRouter : IntentRouter {
          * e "trocar" aparecem em fala corrente ("o suspeito mudou de rua"), e o
          * comando é a locução inteira. Ver `specs/troca-de-grupo-por-voz.spec.md`.
          */
+        /**
+         * *"guarnição 3 na escuta"* — a frase inteira, sem sobra.
+         *
+         * O rótulo capturado inclui a palavra "guarnição" porque é assim que ele
+         * está no `rotulo_falado` do cadastro (migração `0011`): comparar só o
+         * número contra a coluna falharia em toda linha.
+         *
+         * `{1,24}` no meio, e não `.*`: o rótulo é um nome curto de guarnição. Com
+         * `.*` a frase "diz pro pessoal que a guarnição 3 tá na escuta" não casaria
+         * por causa das âncoras, mas "guarnição 3 e a 4 e a 5 na escuta" casaria —
+         * e resolveria para um rótulo que não existe, gastando uma ida ao resolvedor
+         * para recusar depois.
+         *
+         * **A pontuação no fim não é detalhe: sem ela a feature nunca dispara.**
+         * O whisper devolve "Guarnição 3 na escuta." com o ponto, e `normalizar`
+         * tira acento e espaço, não pontuação — este mesmo arquivo já registra, no
+         * KDoc de `extrairRotuloDeGrupo`, que supor o contrário custou um defeito.
+         * Um `matchEntire` sem a classe final recusaria toda transcrição real, e o
+         * sintoma seria "a frase não funciona" sem nenhum erro no caminho.
+         */
+        val ABRIR_TRANSMISSAO = Regex("^(guarnicao .{1,24}?) na escuta[.!?…,;\\s]*$")
+
         val TROCAR_DE_GRUPO = listOf(
             "mudar para", "trocar para", "mudar pra", "trocar pra",
             "muda para", "troca para", "muda pra", "troca pra",

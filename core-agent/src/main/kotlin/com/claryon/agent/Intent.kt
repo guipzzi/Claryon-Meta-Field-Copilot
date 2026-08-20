@@ -58,6 +58,29 @@ sealed interface Intent {
     data class TrocarDeGrupo(val rotuloFalado: String) : Intent
 
     /**
+     * **Abrir transmissão por voz** — *"guarnição 3 na escuta"*.
+     *
+     * Duas propriedades do desenho são invariantes, não preferências (D1):
+     *
+     * 1. **"guarnição N na escuta" ≠ "na escuta".** O número torna a frase
+     *    específica e a tira do vocabulário corrente de rádio policial, onde "na
+     *    escuta" é dito o tempo todo. Sem ele, o produto abriria canal ouvindo o
+     *    próprio tráfego da guarnição.
+     *
+     * 2. **O casamento é INTEGRAL.** A frase inteira, e nada mais. Qualquer palavra
+     *    extra recusa, porque "…na escuta, câmbio" e "diz pro pessoal da guarnição
+     *    3 na escuta" não são comandos — são conversa que contém o comando.
+     *
+     * E a que mais importa: **o detector acústico NUNCA abre canal.** Ele antecipa
+     * o earcon; quem abre é esta intenção, vinda da transcrição íntegra contra
+     * léxico fechado, com o grupo resolvido e o piso concedido. Com o detector
+     * desligado o sistema continua correto e perde só a sensação de resposta
+     * imediata; com ele decidindo sozinho, o produto passa a difundir para a
+     * guarnição inteira com tráfego de rádio ambiente.
+     */
+    data class AbrirTransmissao(val rotuloFalado: String) : Intent
+
+    /**
      * Consultar a posição de um par pelo indicativo (C2).
      * A resposta sai como distância, rumo e estado — nunca coordenadas.
      */
