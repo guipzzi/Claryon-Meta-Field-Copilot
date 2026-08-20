@@ -16,6 +16,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import android.util.Log
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 /**
@@ -54,6 +58,23 @@ class MapaViewModel(app: Application) : AndroidViewModel(app) {
     private var bomba: Job? = null
 
     /** Chamado pelo `ON_START` da tela do mapa. */
+    /** Id da sessão de acesso aberta no servidor, para poder fechá-la. */
+    @Volatile
+    private var sessaoDeMapa: Long? = null
+
+    /** Guardado para o fechamento, que acontece fora do laço. */
+    @Volatile
+    private var historicoDoMapa: HistoricoDoCanal? = null
+
+    /**
+     * Escopo do fechamento da sessão — **de aplicação, não da tela**.
+     *
+     * `fecharMapa()` é chamado no `ON_STOP`, quando `viewModelScope` está indo
+     * embora. Fechar por lá deixaria a sessão aberta para sempre em metade das
+     * saídas, e o registro diria que o agente ficou olhando o mapa indefinidamente.
+     */
+    private val escopoDoFechamento = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     fun abrirMapa() {
         if (bomba != null) return
         bomba = viewModelScope.launch {
@@ -69,6 +90,18 @@ class MapaViewModel(app: Application) : AndroidViewModel(app) {
                 config = SessaoDoAgente.config,
                 tokenDeSessao = { SessaoDoAgente.tokenValido(getApplication()) },
             )
+            historicoDoMapa = historico
+
+            // **A porta de alto volume abre uma SESSÃO, não uma linha por quadro.**
+            // Ver a `0017`: o laço redesenha a cada 5 s, e registrar cada redesenho
+            // daria ~720 linhas/hora por agente — afogando a consulta pontual, que é
+            // a que interessa auditar. Falha aqui não fecha o mapa: o registro é
+            // acessório e o agente não pode perder a guarnição de vista por causa
+            // dele. Mas a falha é anotada, porque log que some em silêncio é o mesmo
+            // que log nenhum.
+            sessaoDeMapa = historico.abrirMapa(CanalDoPiloto.ID)
+                .onFailure { Log.w(TAG, "sessão de mapa não registrada", it) }
+                .getOrNull()
 
             while (true) {
                 val r = historico.posicoesDoGrupo(CanalDoPiloto.ID)
@@ -88,8 +121,21 @@ class MapaViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Chamado pelo `ON_STOP` da tela. Fecha a sondagem e descarta o espelho. */
     fun fecharMapa() {
-        // Sondagem, não assinatura: cancelar o laço já para o tráfego por
-        // completo. Não há nada aberto do outro lado para avisar.
+        // **Agora HÁ o que avisar do outro lado.** A sessão de acesso fica aberta
+        // até alguém fechá-la, e sessão que nunca fecha vira registro de vigilância
+        // sem fim — o oposto do que a `0017` existe para provar. O escopo é o da
+        // aplicação: `viewModelScope` morre junto com a tela, e é exatamente ao
+        // sair da tela que este fechamento precisa acontecer.
+        sessaoDeMapa?.let { id ->
+            val h = historicoDoMapa
+            sessaoDeMapa = null
+            historicoDoMapa = null
+            if (h != null) {
+                escopoDoFechamento.launch {
+                    h.fecharMapa(id).onFailure { Log.w(TAG, "sessão de mapa não fechada", it) }
+                }
+            }
+        }
         bomba?.cancel()
         bomba = null
         _estado.value = EstadoDoMapa.indisponivel("Abra o mapa para ver a guarnição.")
@@ -156,6 +202,8 @@ class MapaViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private companion object {
+        const val TAG = "ClaryonField"
+
 
         /** 5 s: o esmaecimento por idade precisa de relógio, não só de dado novo. */
         const val INTERVALO_DE_REDESENHO_MS = 5_000L

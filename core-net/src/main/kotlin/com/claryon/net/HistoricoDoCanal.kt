@@ -134,6 +134,21 @@ class HistoricoDoCanal(
             org.json.JSONObject().put("p_transmissao_id", transmissaoId),
         ) { arr -> if (arr.length() > 0) arr.optString(0).takeIf { it.isNotEmpty() } else null }
 
+    /**
+     * Abre a **sessão** de consulta ao mapa e devolve o id dela.
+     *
+     * Sessão, e não uma linha por redesenho: o laço do mapa roda a cada 5 s, o que
+     * daria ~720 registros por hora por agente — a mesma amplificação que a `0016`
+     * eliminou na escrita, ressuscitada no log, e que afogaria a consulta pontual,
+     * que é justamente a que interessa auditar.
+     */
+    suspend fun abrirMapa(talkGroupId: String): Result<Long> =
+        chamarRpcEscalar("abrir_mapa", org.json.JSONObject().put("talk_group", talkGroupId))
+
+    /** Fecha a sessão. Só o autor fecha a própria — o servidor confere. */
+    suspend fun fecharMapa(sessao: Long): Result<Unit> =
+        chamarRpcEscalar("fechar_mapa", org.json.JSONObject().put("sessao", sessao)).map { }
+
     suspend fun membros(talkGroupId: String): Result<List<MembroDoCanal>> =
         posicoesDoGrupo(talkGroupId).map { lista ->
             lista.map { p ->
@@ -170,6 +185,34 @@ class HistoricoDoCanal(
                     idadeDoSolicitanteS = o.optInt("idade_solicitante_s", Int.MAX_VALUE),
                 )
             }
+        }
+
+    /**
+     * RPC que devolve escalar (ou nada), e não conjunto de linhas.
+     *
+     * `chamarRpc` espera um `JSONArray`; `abrir_mapa` devolve `2` e `fechar_mapa`
+     * devolve corpo vazio. Passar isso pelo caminho de array daria erro de parse
+     * num ponto sem relação com a causa.
+     */
+    private suspend fun chamarRpcEscalar(nome: String, corpo: org.json.JSONObject): Result<Long> =
+        withContext(Dispatchers.IO) {
+            val token = tokenDeSessao()
+                ?: return@withContext Result.failure(IllegalStateException("sem sessão"))
+            val req = Request.Builder()
+                .url("${config.projetoUrl}/rest/v1/rpc/$nome")
+                .addHeader("apikey", config.apiKey)
+                .addHeader("Authorization", "Bearer $token")
+                .post(corpo.toString().toRequestBody("application/json".toMediaType()))
+                .build()
+            runCatching {
+                client.newCall(req).execute().use { r ->
+                    val corpoTexto = r.body?.string()?.trim().orEmpty()
+                    if (!r.isSuccessful) {
+                        error("$nome falhou (${r.code}): ${corpoTexto.take(160)}")
+                    }
+                    corpoTexto.toLongOrNull() ?: 0L
+                }
+            }.fold({ Result.success(it) }, { Result.failure(it) })
         }
 
     private suspend fun <T> chamarRpc(
