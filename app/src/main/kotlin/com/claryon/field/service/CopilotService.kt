@@ -21,6 +21,7 @@ import com.claryon.agent.TipoServico
 import com.claryon.field.audio.AudioDoAgente
 import com.claryon.field.audio.SaidaUnica
 import com.claryon.field.local.ColetorDePosicao
+import com.claryon.field.voice.CopilotoDoAgente
 import com.claryon.field.voice.EscutaDeAtivacao
 import com.claryon.field.voice.EstadoDaEscuta
 import com.claryon.field.voice.comoOuvido
@@ -86,6 +87,18 @@ class CopilotService : Service() {
         )
         escuta = construirEscuta().also { viva ->
             escopo.launch { viva.estado.collect { _estadoDaEscuta.value = it } }
+        }
+        // **O ciclo roda AQUI, e num coletor separado.** Chamá-lo de dentro do
+        // `aoDetectar` pareceria mais simples e travaria o `collect` do microfone
+        // pelos 8 s do ciclo — o fluxo é o mesmo que alimenta o detector, e a
+        // escuta ficaria surda por baixo, com quadros descartados por contrapressão.
+        //
+        // E roda no serviço, não num ViewModel: era essa a metade que faltava. A
+        // escuta e o earcon já sobreviviam à tela; o comando, não.
+        escopo.launch {
+            ativacoes.collect {
+                CopilotoDoAgente.de(applicationContext).cicloDeVoz()
+            }
         }
         // Antes de o coletor começar: sem turno, toda publicação é recusada.
         abrirTurno()
