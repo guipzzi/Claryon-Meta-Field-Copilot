@@ -16,7 +16,15 @@ import java.text.Normalizer
 class DeterministicIntentRouter : IntentRouter {
 
     override fun route(transcricao: String): Intent {
-        val texto = normalizar(transcricao)
+        // **O gatilho sai daqui, e a saída dele é o segundo estágio da ativação.**
+        //
+        // O whisper transcreve tudo que ouviu, inclusive a palavra de ativação — é
+        // assim na Alexa também, onde o áudio enviado CONTÉM o gatilho justamente
+        // para a segunda etapa poder conferi-lo. Sem tirar o prefixo, todo padrão
+        // ancorado recusa fala real; medido em 20/08: "Clareon, Guarney são 1 na
+        // escuta." não casava com nada.
+        val semGatilho = PalavraDeAtivacaoNaFala.conferir(transcricao)
+        val texto = normalizar(if (semGatilho.confirmada) semGatilho.resto else transcricao)
 
         // Classificado uma vez só: a varredura de gatilhos é a parte mais cara do
         // roteador e ele está no caminho crítico de 2 s entre fala e resposta.
@@ -63,8 +71,10 @@ class DeterministicIntentRouter : IntentRouter {
             // rádio, e abrir canal por conter a frase faria o produto transmitir
             // ouvindo a própria guarnição. Âncoras `^…$`, e palavra extra recusa.
             ABRIR_TRANSMISSAO.matchEntire(texto) != null ->
+                // Grafia CANÔNICA no rótulo, sempre. O resolvedor compara contra o
+                // `rotulo_falado` do cadastro, e "guarney sao 1" não casa com nada.
                 Intent.AbrirTransmissao(
-                    ABRIR_TRANSMISSAO.matchEntire(texto)!!.groupValues[1].trim(),
+                    "guarnicao " + ABRIR_TRANSMISSAO.matchEntire(texto)!!.groupValues[1].trim(),
                 )
 
             matches(texto, TROCAR_DE_GRUPO) ->
@@ -225,7 +235,41 @@ class DeterministicIntentRouter : IntentRouter {
          * Um `matchEntire` sem a classe final recusaria toda transcrição real, e o
          * sintoma seria "a frase não funciona" sem nenhum erro no caminho.
          */
-        val ABRIR_TRANSMISSAO = Regex("^(guarnicao .{1,24}?) na escuta[.!?…,;\\s]*$")
+        /**
+         * Grafias que o whisper pt-BR produz para "guarnição".
+         *
+         * **"guarney sao" não é chute.** Foi o que voltou da captura de 20/08 com
+         * fala humana: *"Clareon, Guarney são 1 na escuta."* O modelo parte a
+         * palavra em duas porque "guarnição" é rara no corpus dele, e o erro é
+         * sistemático, não aleatório.
+         *
+         * Cada entrada aqui precisa de uma transcrição REAL que a justifique.
+         * Acrescentar variante plausível alarga o portão sem prova — e este portão
+         * abre canal para a guarnição inteira.
+         */
+        val GRAFIAS_DE_GUARNICAO = listOf("guarnicao", "guarney sao", "guarnicoes", "guarnicão")
+
+        /**
+         * *"guarnição 3 na escuta"* — a frase inteira, sem sobra.
+         *
+         * A alternação no início mantém o casamento INTEGRAL: a frase tem de
+         * começar por uma grafia conhecida de "guarnição" e terminar em "na
+         * escuta". Trocar isso por `.*` aceitaria "diz pro pessoal que a guarnição
+         * 3 na escuta" — conversa que CONTÉM o comando e não é o comando.
+         *
+         * O rótulo capturado é reescrito para a grafia canônica antes de ir ao
+         * resolvedor, que compara contra o `rotulo_falado` do cadastro (migração
+         * `0011`). Sem a reescrita, "guarney sao 1" nunca casaria com "guarnicao 1".
+         *
+         * **A pontuação no fim não é detalhe: sem ela a feature nunca dispara.**
+         * O whisper devolve "Guarnição 3 na escuta." com o ponto, e `normalizar`
+         * tira acento e espaço, não pontuação — este mesmo arquivo já registra, no
+         * KDoc de `extrairRotuloDeGrupo`, que supor o contrário custou um defeito.
+         */
+        val ABRIR_TRANSMISSAO = Regex(
+            "^(?:" + GRAFIAS_DE_GUARNICAO.joinToString("|") { Regex.escape(it) } +
+                ") (.{1,16}?) na escuta[.!?…,;\\s]*$",
+        )
 
         val TROCAR_DE_GRUPO = listOf(
             "mudar para", "trocar para", "mudar pra", "trocar pra",

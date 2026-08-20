@@ -36,16 +36,51 @@ class TranscricaoRealDaAberturaTest {
         "Clareon, Guarney são 2 na escuta.",
     )
 
+    /**
+     * **O aceite.** Este teste já foi um registro de defeito — ele afirmava que a
+     * transcrição real NÃO abria transmissão, e passava por isso. A instrução que
+     * ficou escrita nele era "não apague, troque a asserção quando mudar". Mudou.
+     */
     @Test
-    fun oQueOMicrofoneProduzHoje_NAO_abreTransmissao() {
-        val abrem = transcricoesReais.filter { router.route(it) is Intent.AbrirTransmissao }
-        // Este teste documenta o ESTADO, não o desejo. Ele passa hoje porque a
-        // feature não dispara — e é essa a informação que faltava.
+    fun oQueOMicrofoneProduzDEVERDADE_abreTransmissao() {
+        val recusadas = transcricoesReais.filterNot { router.route(it) is Intent.AbrirTransmissao }
         assertTrue(
-            "a transcrição real passou a abrir transmissão: ótimo, e então este " +
-                "teste tem de ser reescrito como aceite, não como registro. Não " +
-                "apague — troque a asserção. Casos: $abrem",
-            abrem.isEmpty(),
+            "a transcrição REAL do whisper não abre transmissão: $recusadas. " +
+                "Os testes sintéticos passam e o produto não funciona — é a " +
+                "diferença entre o que seria bom que o microfone produzisse e o " +
+                "que ele produz",
+            recusadas.isEmpty(),
+        )
+    }
+
+    /**
+     * **O buffer da bancada traz DUAS elocuções, e ele não pode abrir canal.**
+     *
+     * O WAV de teste tem cinco segundos com duas tomadas, e o whisper devolve as
+     * duas numa string só. Em produção isso não acontece: o Silero fecha a janela a
+     * 0,3 s de silêncio e cada frase vira um segmento.
+     *
+     * Recusar é o certo aqui. São dois comandos, e escolher um em silêncio poria o
+     * agente no ar numa guarnição que ele mencionou de passagem — a 1 ou a 2, sem
+     * ele saber qual. O casamento integral protege exatamente isso.
+     */
+    @Test
+    fun oBufferComDUASElocucoes_naoAbreCanal() {
+        val duas = "Clareon, Guarney são 1 na escuta. Clareon, Guarney são 2 na escuta."
+        assertTrue(
+            "duas frases numa string só abriram canal — qual das duas guarnições?",
+            router.route(duas) !is Intent.AbrirTransmissao,
+        )
+    }
+
+    /** E o rótulo sai na grafia do CADASTRO, não na do whisper. */
+    @Test
+    fun oRotuloSaiCANONICO_paraOResolvedorPoderCasar() {
+        val i = router.route("Clareon, Guarney são 1 na escuta.") as Intent.AbrirTransmissao
+        assertTrue(
+            "o rótulo saiu como o whisper escreveu (${i.rotuloFalado}) — o " +
+                "resolvedor compara contra `rotulo_falado` e não casaria nunca",
+            i.rotuloFalado == "guarnicao 1",
         )
     }
 
@@ -53,21 +88,40 @@ class TranscricaoRealDaAberturaTest {
      * O motivo é duplo, e separá-los importa porque os consertos são diferentes:
      * um é de padrão, o outro é de vocabulário do modelo.
      */
+    /** Os dois defeitos eram independentes; os dois consertos também. */
     @Test
-    fun aPalavraDeAtivacaoNoPREFIXO_sozinha_jaImpedeOCasamento() {
-        assertTrue(
-            "com a grafia certa e só o prefixo do gatilho, ainda recusa — então " +
-                "o problema do prefixo existe independente do WER",
-            router.route("Claryon, guarnição 1 na escuta.") !is Intent.AbrirTransmissao,
-        )
+    fun oPREFIXO_sozinho_naoImpedeMais() {
+        assertTrue(router.route("Claryon, guarnição 1 na escuta.") is Intent.AbrirTransmissao)
+        assertTrue(router.route("Hey Claryon, guarnição 1 na escuta") is Intent.AbrirTransmissao)
     }
 
     @Test
-    fun aGrafiaERRADA_sozinha_jaImpedeOCasamento() {
+    fun aGRAFIA_sozinha_naoImpedeMais() {
+        assertTrue(router.route("Guarney são 1 na escuta") is Intent.AbrirTransmissao)
+    }
+
+    /**
+     * **O que o prefixo passou a valer.** Ele era o defeito e virou a prova: sem a
+     * palavra de ativação no começo, a frase é conversa de rádio entre pessoas.
+     *
+     * É o segundo estágio da arquitetura de dois: o detector acústico dispara o
+     * earcon rápido, e a transcrição confere se o agente falou mesmo com o
+     * copiloto. Este teste fixa que a conferência NÃO derruba o caminho sem
+     * gatilho — a frase limpa continua abrindo, porque o ciclo por botão e o
+     * verificador de bancada dependem dela.
+     */
+    @Test
+    fun semGatilho_aFraseLimpaContinuaValendo() {
+        assertTrue(router.route("guarnição 1 na escuta") is Intent.AbrirTransmissao)
+    }
+
+    /** E "Claryon" no MEIO é o agente falando SOBRE o copiloto, não COM ele. */
+    @Test
+    fun oGatilhoNoMEIO_naoEComando() {
+        val i = router.route("pergunta pro Claryon guarnição 1 na escuta")
         assertTrue(
-            "sem prefixo nenhum, só com 'Guarney são' no lugar de 'guarnição', " +
-                "ainda recusa — então o problema de WER existe independente do prefixo",
-            router.route("Guarney são 1 na escuta") !is Intent.AbrirTransmissao,
+            "gatilho no meio da frase virou comando: isso é conversa entre pessoas",
+            i !is Intent.AbrirTransmissao,
         )
     }
 
