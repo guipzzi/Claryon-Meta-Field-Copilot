@@ -11,17 +11,15 @@
   `Unauthorized`** · canal público deixava qualquer um entrar. O token vai no `phx_join` e
   **é renovado pelo `exp`** — o JWT vive **60 min** (medido), e sem renovação o rádio cairia
   no meio do turno.
-- **O indicador de canal parou de mentir.** Ligar o privado revelou defeito pior: o app
-  mostrava **verde** e mandou **168 quadros em 4 s para um canal em que não entrou**, porque
-  `conectado()` era só "o socket abriu". Agora `CanalRecusado` é evento, o PTT recusa e a
-  tela diz *"Canal negado"* — verificado no emulador, antes e depois.
+- **O indicador de canal parou de mentir.** O app mostrava verde e mandou **168 quadros para
+  um canal em que não entrou**, porque `conectado()` era só "o socket abriu". Agora
+  `CanalRecusado` é evento e o PTT recusa — verificado no emulador, antes e depois.
 - **REVOGAÇÃO INSTITUCIONAL** (`0014`): `agents.ativo` dentro de `current_agent_id()`.
   Provado com o **mesmo JWT** — `ativo=false` derruba cadastro, consulta e canal juntos.
 - **AUTORIA CONFERÍVEL** (`0013` + `0015`): o indicativo saiu do fio — vem do cadastro do
   grupo e é conferido contra `floor_grants`, onde `pedir_canal` carimba o autor pelo JWT.
   Divergência vira *"Origem não confirmada"*; **"não sei" não derruba**.
-- **DETECTOR DE ATIVAÇÃO no aparelho**: **26 de 26** elocuções em fluxo, o número exato da
-  bancada · **p50 3,5 ms** por decisão · **zero dependência nova**.
+- **DETECTOR DE ATIVAÇÃO no aparelho**: **26/26** em fluxo · **p50 3,5 ms** · zero dependência.
 - **Falso positivo do detector: 428/h → 0** na metade retida de 3,65 min de leitura, com
   recall intacto (9/9) — treinando com negativo duro, não mexendo no limiar.
 - **TRANSCRIÇÃO NA ORIGEM (P1) — verificada ponta a ponta com fala humana e servidor real.**
@@ -29,8 +27,7 @@
   5,0 s exatos** → whisper → `fala.transcricao`. O par headless recebeu anúncio, **251
   quadros**, fim e o texto **idêntico**: *"Clareon, Guarney são 1 na escuta…"*. Só o
   microfone é simulado; do `SessaoPtt` em diante nada é.
-- **Ferramentas:** `par_headless.mjs` · `sonda_de_politica.py` (restaura em `finally` e
-  recusa produção sem motivo escrito).
+- **Ferramentas:** `par_headless.mjs` · `sonda_de_politica.py` (restaura e recusa produção).
 
 ## O que está quebrado, e nós sabemos
 

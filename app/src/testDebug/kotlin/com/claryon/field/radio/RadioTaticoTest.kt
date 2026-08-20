@@ -80,9 +80,17 @@ class RadioTaticoTest {
             return Result.success(Unit)
         }
         override suspend fun encerrar(transmissaoId: String) = Result.success(Unit)
+
+        /** Textos difundidos. Vazio depois de `desconectar` significa canal perdido. */
+        val textos = mutableListOf<Pair<String, String>>()
+        private var vivo = true
+
+        override suspend fun transcrever(transmissaoId: String, texto: String): Result<Unit> =
+            if (!vivo) Result.failure(ClaryonError.Sync("net.desconectado", "canal fechado"))
+            else Result.success(Unit).also { textos += transmissaoId to texto }
         override fun eventos(): Flow<EventoDeRede> = entrada
-        override fun conectado() = true
-        override suspend fun desconectar() = Unit
+        override fun conectado() = vivo
+        override suspend fun desconectar() { vivo = false }
     }
 
     /** Registra o que foi escrito e quantos tracks foram abertos/fechados. */
@@ -159,6 +167,8 @@ class RadioTaticoTest {
         supressor: SupressorDeSaidaPropria = SupressorDeSaidaPropria(),
         /** Cadastro do grupo. Vazio no padrão: nada resolve, tudo é não confirmado. */
         cadastro: Map<String, String> = emptyMap(),
+        /** Quanto o whisper demora. É a janela em que o canal não pode cair. */
+        transcreverDemorando: Long = 0,
         /** O que o servidor responde sobre a autoria. `null` = "não sei". */
         autorNoServidor: (String) -> String? = { null },
         corpo: suspend (Bancada) -> Unit,
@@ -176,6 +186,10 @@ class RadioTaticoTest {
             indicativo = "Alfa Um",
             resolverAutor = { id -> cadastro[id] },
             conferirAutor = { tx -> autorNoServidor(tx) },
+            transcrever = if (transcreverDemorando <= 0) null else { _ ->
+                delay(transcreverDemorando)
+                "texto da fala"
+            },
             aoMudarQuemFala = { quemFalou += it },
             transporte = transporte,
             codec = CodecFake(),
@@ -547,6 +561,41 @@ class RadioTaticoTest {
             )
             advanceTimeBy(300)
             assertEquals("Alfa Dois", b.quemFalou.last())
+        }
+    }
+
+
+    /**
+     * **O defeito que a afirmação sobre "escopo de aplicação" escondia.**
+     *
+     * Eu escrevi que rodar o whisper fora do `viewModelScope` garantia o texto ao
+     * colega quando o agente troca de tela. Metade certo: a transcrição sobrevive,
+     * porque o `finally` da `SessaoPtt` é `NonCancellable`. **A outra metade não** —
+     * `sairDeModoAtivo()` agenda `transporte.desconectar()`, e `onCleared()` o
+     * chama. Enquanto o whisper roda (centenas de ms), o canal cai; quando o texto
+     * fica pronto, não há mais por onde difundir.
+     *
+     * O agente veria a própria transcrição na tela e o colega ficaria sem ela — a
+     * pior forma do defeito, porque quem falou acha que comunicou.
+     */
+    @Test
+    fun aTranscricaoLentaAindaEncontraCanalParaDifundir() = runTest {
+        comRadio(
+            transcreverDemorando = 400,
+        ) { b ->
+            b.radio.entrarEmModoAtivo(rota)
+            advanceTimeBy(50)
+            b.radio.aoPressionar(rota)
+            advanceTimeBy(200)
+            b.radio.aoSoltar()
+            // A tela fecha logo depois de soltar — o gesto que o KDoc citava.
+            b.radio.sairDeModoAtivo()
+            advanceTimeBy(3_000)
+
+            assertTrue(
+                "o texto não foi difundido: o canal caiu antes de a transcrição ficar pronta",
+                b.transporte.textos.isNotEmpty(),
+            )
         }
     }
 

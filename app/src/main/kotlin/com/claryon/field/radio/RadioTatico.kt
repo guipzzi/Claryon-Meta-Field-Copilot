@@ -32,6 +32,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
 
 /**
@@ -370,11 +371,30 @@ class RadioTatico(
         fecharFluxoDeSaida()
         alimentacao?.cancel()
         alimentacao = null
+        // A referência é guardada ANTES do cancelamento: é ela que permite esperar
+        // o `finally` terminar. Sem isso o `join` abaixo não teria em quem esperar.
+        val emVoo = transmissao
         transmissao?.cancel()
         receptor.parar()
         preRoll.limpar()
         supressor.limpar()
-        escopo.launch { transporte.desconectar() }
+        escopo.launch {
+            // **Não derruba o canal com texto pronto para sair.**
+            //
+            // Soltar o PTT cancela a transmissão, mas o `finally` da `SessaoPtt` é
+            // `NonCancellable` e é lá que a transcrição na origem roda — whisper leva
+            // centenas de ms. Desconectar antes fazia o texto ficar pronto sem canal
+            // por onde difundir: o agente via a própria transcrição e **o colega não
+            // recebia nada**, que é a pior forma do defeito, porque quem falou acha
+            // que comunicou.
+            //
+            // Confirmado por medição em `aTranscricaoLentaAindaEncontraCanalParaDifundir`
+            // antes deste conserto existir — o teste falhava.
+            //
+            // Com teto: transcrição travada não pode segurar o socket para sempre.
+            withTimeoutOrNull(ESPERA_PELA_TRANSCRICAO_MS) { emVoo?.join() }
+            transporte.desconectar()
+        }
     }
 
     // ── Emissão ───────────────────────────────────────────────────────────────
@@ -641,6 +661,14 @@ class RadioTatico(
          * duvidosa — não a tela.
          */
         const val AUTOR_NAO_CONFIRMADO = "Origem não confirmada"
+
+        /**
+         * Quanto o encerramento espera pela transcrição antes de largar o canal.
+         *
+         * 5 s cobrem o whisper com folga (as medições dão centenas de ms) sem deixar
+         * um travamento segurar o socket indefinidamente.
+         */
+        const val ESPERA_PELA_TRANSCRICAO_MS = 5_000L
         const val TAG = "ClaryonField"
 
         /**
