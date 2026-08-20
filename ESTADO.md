@@ -32,17 +32,19 @@
   idade — quem reconectava após 4 min entrava como `idade_s = 0` e `agentes_no_raio` o contava
   como "está perto". O cliente manda **duração**, nunca instante: `now() - greatest(0, idade)`
   não dá futuro **por construção**. `0009` 17/17: a mesma linha dá 0 no novo filtro, 1 no antigo.
+- **FALSO ACEITE QUE ABRE CANAL: 0 em 54 min** (meta ≤1 por 8 h). O único disparo do estágio 1
+  **não** passou pelo estágio 2 — a conjunção detector+transcrição fez o que promete. É a
+  primeira medida deste aceite.
 - **PORTA DE CORREÇÃO**: degradação relativa, salto por **incerteza combinada**, **válvula de 3
   recusas** — sem ela um salto verdadeiro congela o marcador. E `ultimaPosicao()` pega a melhor.
 
 ## O que está quebrado, e nós sabemos
 
-1. **FALSO POSITIVO MEDIDO: 89,85/h contra a meta de 0,5/h.** 81 disparos em 54,1 min de fala
-   espontânea de podcast (múltiplos locutores, sobreposição, música). Maior escore 0,997 contra
-   limiar 0,500 — não é margem, é o detector convicto. O teto estimado era ~99/h e a realidade
-   caiu no topo dele. **É o estágio 1**: a transcrição barra a maioria antes de virar comando,
-   mas o agente ouviria um bipe a cada ~40 s. O modelo é de **um locutor só**, 27 elocuções, e
-   agora existe material de negativo duro para retreinar.
+1. **Falso positivo do earcon: 1,11/h contra a meta de 0,5/h** — 2,2× acima, e era **89,85/h**
+   antes do retreino com 27 min de podcast como negativo duro (protocolo do `duro.py`: corta ao
+   meio no tempo, treina numa metade, mede na outra). Escore máximo caiu de **0,997 para 0,647**.
+   O Python previu 0,00/h na metade retida e o aparelho deu 1,11 — o aparelho é a régua, e a
+   diferença é de pipeline (refratário e passo de janela). Falta 1 disparo para fechar.
 2. **Recall do gatilho: 3/4 locutores** (Bruna, Carla e Pedro sim; Guido virou "Blerium" — e é a
    voz que TREINOU o detector). Quatro pronúncias por microfone de celular, não as 30 por fone
    HFP que o aceite pede. E "na escuta" dito por 4 vozes humanas **não** abriu canal: 0/4.

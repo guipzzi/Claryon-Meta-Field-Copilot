@@ -3,7 +3,13 @@ package com.claryon.field.bench
 import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.claryon.agent.DeterministicIntentRouter
+import com.claryon.agent.Intent
+import com.claryon.agent.PalavraDeAtivacaoNaFala
+import com.claryon.common.Result
+import com.claryon.field.voice.EscutaDoAgente
 import com.claryon.voice.DetectorDeAtivacao
+import kotlinx.coroutines.runBlocking
 import java.io.File
 import org.junit.Assume
 import org.junit.Test
@@ -153,6 +159,88 @@ class FalsoPositivoEmFalaEspontaneaTest {
                 "espontânea = ${"%.2f".format(porHora)}/h, contra a meta de 0,5/h. " +
                 "Onde: ${quandoDisparou.take(10)}",
             porHora <= 0.5,
+        )
+    }
+
+    /**
+     * **O falso aceite que ABRE CANAL — a conjunção dos dois estágios.**
+     *
+     * O aceite da Fase 2 tem dois limites e eles medem coisas diferentes: earcon
+     * falso ≤ 0,5/h (o teste acima) e **canal aberto por engano ≤ 1 por 8 h**. O
+     * segundo é o grave: earcon falso irrita, canal aberto por engano difunde
+     * ruído de ambiente para a guarnição inteira.
+     *
+     * Medir isto é barato e o motivo é a arquitetura: só as janelas em que o
+     * estágio 1 disparou chegam ao estágio 2. Transcrever 54 min levaria horas;
+     * transcrever os poucos segundos ao redor de cada disparo leva minutos.
+     *
+     * A janela é de 4 s a partir de 1 s ANTES do disparo — é o que a
+     * `EscutaDeAtivacao` entregaria ao ciclo: o gatilho mais o comando que viria
+     * depois. Transcrever só o instante do disparo mediria outra coisa.
+     */
+    @Test
+    fun nenhumDisparoFalso_chegaAAbrirCanal(): Unit = runBlocking {
+        Assume.assumeTrue("sem o negativo em ${pasta.path}", pasta.isDirectory)
+        val fatias = pasta.listFiles { f -> f.name.endsWith(".wav") }?.sortedBy { it.name }
+        Assume.assumeTrue("sem fatias", !fatias.isNullOrEmpty())
+        val d = detector()
+        Assume.assumeTrue("detector não subiu", d != null)
+        val whisper = EscutaDoAgente.de(
+            InstrumentationRegistry.getInstrumentation().targetContext,
+        )
+        Assume.assumeTrue("whisper indisponível", whisper != null)
+
+        val router = DeterministicIntentRouter()
+        var disparos = 0
+        var confirmaramGatilho = 0
+        var abriramCanal = 0
+        var amostras = 0L
+        val exemplos = mutableListOf<String>()
+
+        try {
+            for (fatia in fatias!!) {
+                val pcm = amostrasDoWav(fatia)
+                var i = 0
+                while (i + 320 <= pcm.size) {
+                    if (d!!.aceitar(pcm.copyOfRange(i, i + 320))) {
+                        disparos++
+                        val ini = maxOf(0, i - 16_000)
+                        val fim = minOf(pcm.size, ini + 4 * 16_000)
+                        val texto = (whisper!!.transcribe(pcm.copyOfRange(ini, fim), 16_000)
+                            as? Result.Success)?.value?.text.orEmpty()
+                        if (PalavraDeAtivacaoNaFala.conferir(texto).confirmada) confirmaramGatilho++
+                        if (router.route(texto) is Intent.AbrirTransmissao) {
+                            abriramCanal++
+                            exemplos += "${fatia.name}@${"%.1f".format((amostras + i) / 16000.0)}s \"${texto.take(50)}\""
+                        }
+                    }
+                    i += 320
+                }
+                amostras += pcm.size
+                d!!.reiniciar()
+            }
+        } finally {
+            d?.close()
+        }
+
+        val horas = amostras / 16000.0 / 3600.0
+        val porOitoHoras = if (horas > 0) abriramCanal * 8.0 / horas else 0.0
+        Log.i("ClaryonField", "FALSO ACEITE QUE ABRE CANAL — conjunção dos dois estágios")
+        Log.i(
+            "ClaryonField",
+            "  material ................. ${"%.2f".format(horas)} h\n" +
+                "  estágio 1 disparou ....... $disparos\n" +
+                "  estágio 2 confirmou ...... $confirmaramGatilho\n" +
+                "  ABRIU CANAL .............. $abriramCanal  (${"%.2f".format(porOitoHoras)} por 8 h)\n" +
+                "  meta do aceite ........... ≤ 1 por 8 h\n" +
+                (if (exemplos.isNotEmpty()) "  onde: ${exemplos.take(5)}\n" else ""),
+        )
+
+        org.junit.Assert.assertTrue(
+            "ruído de ambiente abriu canal $abriramCanal vez(es) em " +
+                "${"%.2f".format(horas)} h = ${"%.2f".format(porOitoHoras)} por 8 h. " +
+                "Cada uma difunde som ambiente para a guarnição inteira. ${exemplos.take(3)}",
+            porOitoHoras <= 1.0,
         )
     }
 }

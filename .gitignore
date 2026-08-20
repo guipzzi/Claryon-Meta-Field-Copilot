@@ -62,3 +62,6 @@ core-voice/libs/*.aar
 !app/src/androidTest/assets/**/*.wav
 corpus/
 audios/
+ferramentas/ativacao/humano/
+ferramentas/ativacao/*.f32
+ferramentas/ativacao/*.onnx
