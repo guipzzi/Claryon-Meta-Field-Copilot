@@ -520,8 +520,23 @@ dois candidatos e o que precisa ser confirmado antes de qualquer linha em `build
   fonte.
 - [P3] Embedder + índice vetorial local + recuperação por similaridade com **limiar**.
   Abaixo do limiar, o copiloto diz que não sabe — esforço: 2 sessões — depende: corpus.
-- [P3] Etapa A alcançável por voz: "Hey Claryon, Glock 19 emperrou" → recupera → Piper lê o
-  trecho citando o documento — esforço: 0,5 sessão — depende: índice + Fase 2.
+- [P3] Etapa A alcançável por voz: pergunta → recupera → Piper cita o documento — esforço:
+  0,5 sessão — depende: índice + Fase 2.
+
+  > ⚠️ **O exemplo deste item foi medido em 21/08 e NÃO tem resposta no corpus.** *"minha
+  > Glock 19 emperrou"* recebe confiança **0,070** e é **recusada** — abaixo do limiar de
+  > 0,30. E a recusa está **certa**: manejo de arma é manual de fabricante, e o que está
+  > embarcado é **lei federal e de trânsito** (CTB, CPP, CP, Drogas, Desarmamento). O
+  > corpus responde *"posso apreender a moto sem placa"*, não *"minha arma emperrou"*.
+  >
+  > Isto não é defeito do índice: é o aceite pedindo prova com uma pergunta fora do
+  > domínio embarcado. **Decisão pendente:** ou o corpus ganha manual de fabricante (e aí
+  > entra a questão de licença de distribuição), ou este exemplo sai do aceite e é
+  > substituído por um que o corpus cobre. Deixar como está faz a fase ser reprovável por
+  > uma demonstração que nunca poderia funcionar.
+  >
+  > A palavra "lê" também saiu: a fala é a **citação** (≤7 palavras, o invariante do §4 do
+  > `CLAUDE.md`). Leitura verbatim está proposta em `specs/leitura-de-norma.spec.md`.
 - [P3] Teste que prova que a saída do modelo **nunca** alcança `ClaryonIntentExecutor`.
   Fronteira de módulo é necessária e não suficiente: `app` importa os dois e é lá que a
   `String` do LLM e o executor se encontram. A garantia tem de ser um teste em `app`, do
