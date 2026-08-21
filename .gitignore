@@ -69,3 +69,10 @@ audios/
 ferramentas/ativacao/humano/
 ferramentas/ativacao/*.f32
 ferramentas/ativacao/*.onnx
+
+# Bytecode do Python. Entrou no repositório por `git add -A` num commit de
+# ferramentas, e é ruído puro: muda a cada execução, carrega a versão do
+# interpretador no nome (`cpython-314`) e aparece em todo `git status` disputando
+# atenção com mudança de verdade.
+__pycache__/
+*.pyc
