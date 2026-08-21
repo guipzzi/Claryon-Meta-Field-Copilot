@@ -4,7 +4,7 @@
 
 ## O que funciona hoje
 
-- `./gradlew build` verde. **1147 testes JVM, 0 falhas, 0 pulados** — conferido com `git stash -u`,
+- `./gradlew build` verde. **1163 testes JVM, 0 falhas, 0 pulados** — conferido com `git stash -u`,
   ou seja, `HEAD` de pé **sozinho**, sem árvore suja.
 - **PTT:** toque→1º quadro **31–48 ms p50** (o p95 é 82 e **126**, e 126 estoura a meta de 120) ·
   P1 corta em **11 ms** · **WER 3,4%** · REVOGAÇÃO/AUTORIA/CANAL PRIVADO POR JWT. **CICLO DE VOZ:
@@ -44,9 +44,8 @@
    POSITIVO: 18 elocuções de UM locutor. Mais vozes resolvem; mais podcast, não.
 4. **O deck submetido descreve reconhecimento facial, display e nuvem** — hoje proibições duras, e
    o §14.1 veda alteração de escopo. Pergunta à organização; as três vão na direção mais restritiva.
-5. **O separador de conversa (15 min) é hipótese declarada**, e a medição que resolve está
-   escrita. **`posicoes_do_grupo` faz `join` com `agent_positions`**: quem nunca publicou posição
-   SOME da lista, então a contagem é "com posição" e não sabe dizer quanto menor.
+5. **`posicoes_do_grupo` faz `join` com `agent_positions`**: quem nunca publicou posição SOME da
+   lista, e a contagem não sabe dizer quanto menor. O separador de 15 min é hipótese declarada.
 6. **Bateria da `DeviceSession` aberta não medida** (preço direto do dono de processo) ·
    `RadioViewModel` faz uma requisição a cada **10 s**, 4320 por turno com a tela apagada ·
    `ModoOperacao` é a constante `ATIVO` em produção.
