@@ -60,9 +60,12 @@ core-voice/libs/*.aar
 *.m4a
 *.wav
 !app/src/androidTest/assets/**/*.wav
-corpus/
+# `corpus/` inteiro estava ignorado, e isso escondeu o PROCEDENCIA.md:
+# afirmei num commit que a procedência estava versionada e ela não estava.
+# O que não pode ser versionado é o HTML bruto (2,7 MB, reproduzível pelo
+# comando registrado). A procedência é o oposto: é o que precisa sobreviver.
+corpus/bruto/
 audios/
 ferramentas/ativacao/humano/
 ferramentas/ativacao/*.f32
 ferramentas/ativacao/*.onnx
-corpus/bruto/*.html
