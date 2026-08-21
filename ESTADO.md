@@ -40,7 +40,11 @@
 
 ## O que está quebrado, e nós sabemos
 
-1. **Falso positivo do earcon: 0,52/h contra a meta de 0,5/h** — em 115,5 min. Era **89,85/h**;
+1. **Falso positivo do earcon: ~3,3/h contra a meta de 0,5/h.** O 0,52/h que eu reportei era
+   **otimista por defeito do meu arranjo**: o teste fatia o áudio em 5 min e chama `reiniciar()`
+   entre as fatias, e produção nunca reinicia — é fluxo contínuo o turno inteiro. O avaliador
+   alinhado ao anel do aparelho, sobre o fluxo contínuo, acha 3 disparos onde o fatiado achava 1;
+   o PRIMEIRO bate ao segundo (1906,6 s), o que valida o alinhamento. Em 115,5 min. Era **89,85/h**;
    dois retreinos com 177 min de podcast como negativo duro (protocolo do `duro.py`: cada podcast
    cortado ao meio NO TEMPO, metade treina, metade mede). Escore máximo **0,997 → 0,647 → 0,508**,
    e o único disparo cruza o limiar por 0,008. **O gargalo agora é POSITIVO, não negativo**: o
