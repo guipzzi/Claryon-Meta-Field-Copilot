@@ -8,8 +8,12 @@ import kotlin.math.sin
  * significado fixo. Puro Kotlin (síntese de senóide), testável em JVM.
  *
  * Num sistema sem display, o earcon é mais rápido, mais discreto e
- * cognitivamente mais barato que uma frase. Resultado de consulta sensível sai
- * SÓ como earcon codificado (nunca falado — o alto-falante open-ear vaza som).
+ * cognitivamente mais barato que uma frase.
+ *
+ * **Resultado de consulta sensível sai como earcon + fala curta** — decisão humana
+ * de 21/08; o KDoc anterior dizia "nunca falado". O earcon continua obrigatório e
+ * distinto por restrição: ele chega em 139 ms, e a fala de uma placa custa segundos
+ * porque o Piper expande número por extenso. Preempção de P1 apaga a fala, não o som.
  */
 object EarconSynthesizer {
 

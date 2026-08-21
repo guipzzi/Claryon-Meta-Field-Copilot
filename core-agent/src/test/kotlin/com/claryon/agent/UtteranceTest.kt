@@ -178,14 +178,59 @@ class UtteranceTest {
         assertTrue(utteranceFor(ActionOutcome.NaoEntendi) is Utterance.SinalizarEFalar)
     }
 
+    /**
+     * **O earcon carrega a restrição SOZINHO, mesmo agora que a fala existe.**
+     *
+     * Este teste antes exigia `Utterance.Sinalizar` puro — resultado de consulta
+     * jamais falado, porque o alto-falante open-ear entrega ao abordado o que o
+     * agente acabou de descobrir. **A decisão humana de 21/08 mudou a regra:** a fala
+     * entra, com a ponderação de que o vazamento exige silêncio e volume alto. O §7
+     * reserva isso a gente, e a premissa virou item medível da Fase 5.
+     *
+     * O que este teste passa a guardar é a parte que **não** mudou, e que é o motivo
+     * de ser `SinalizarEFalar` e não `Falar`:
+     *
+     *  1. **O earcon continua obrigatório**, e distinto por restrição. Ele chega em
+     *     139 ms; a fala de uma placa custa segundos, porque o Piper expande número
+     *     por extenso (medido: "Art. 306, Lei 9.503" dá 3518 ms de áudio). Se um P1
+     *     do rádio preemptar a fala, o agente **já recebeu a resposta pelo som**.
+     *  2. **Restrições diferentes têm earcons diferentes** — senão o earcon vira
+     *     "consulta respondida" e a informação passa a existir só na fala, que é
+     *     justamente o que a preempção apaga.
+     *  3. **A fala respeita o teto de 7 palavras**, como todo o resto.
+     *
+     * O contra-teste está no item 2: se alguém colapsar os três earcons num só, este
+     * teste falha — e falha por uma razão que o KDoc explica, em vez de por gosto.
+     */
     @Test
-    fun resultadoSensivelSaiComoEarconNuncaFalado() {
-        // O alto-falante é open-ear: falar "sem restrição" entrega o resultado da
-        // consulta a quem está sendo abordado.
-        for (r in Restricao.entries) {
-            val u = utteranceFor(ActionOutcome.PlacaConsultada("ABC1D23", r))
-            assertTrue("Restrição $r foi falada", u is Utterance.Sinalizar)
+    fun aRestricaoViajaNoEARCON_mesmoComAFalaLigada() {
+        val porRestricao = Restricao.entries.associateWith { r ->
+            utteranceFor(ActionOutcome.PlacaConsultada("ABC1D23", r))
         }
+
+        porRestricao.forEach { (r, u) ->
+            assertTrue(
+                "Restrição $r saiu SEM earcon. A fala de uma placa custa segundos e " +
+                    "pode ser preemptada por P1; sem earcon o agente fica sem resposta.",
+                u is Utterance.SinalizarEFalar,
+            )
+            val texto = (u as Utterance.SinalizarEFalar).texto
+            assertTrue(
+                "A fala de $r não cita a placa: \"$texto\" — sem ela o agente não sabe " +
+                    "de qual veículo o aparelho está falando.",
+                texto.contains("ABC1D23"),
+            )
+            assertTrue("Teto de 7 palavras estourado em $r: \"$texto\"", LaconicityPolicy.isWithinLimit(texto))
+        }
+
+        val earcons = porRestricao.values.map { (it as Utterance.SinalizarEFalar).earcon }
+        assertEquals(
+            "Restrições diferentes precisam de earcons DIFERENTES. Colapsá-los faz o " +
+                "som dizer apenas 'consulta respondida', e a informação passa a existir " +
+                "só na fala — que é exatamente o que um P1 apaga.",
+            Restricao.entries.size,
+            earcons.toSet().size,
+        )
     }
 
     @Test

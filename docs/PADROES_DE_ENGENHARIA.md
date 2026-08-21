@@ -239,7 +239,8 @@ Capturar exige `GlassesAudioRoute`, e o único jeito de obter uma é rotear de f
 - Máximo **7 palavras** por resposta de TTS em contexto operacional (há teste automatizado)
 - Sem cortesia: nada de "por favor", "desculpe", "tudo bem"
 - Números falados dígito a dígito: "A-B-C-1-D-2-3"
-- Resultado de consulta sensível sai como **earcon codificado**, nunca falado — alto-falante open-ear vaza som para quem está ao lado
+- Resultado de consulta sensível sai como **earcon codificado + fala curta** (≤7
+  palavras). Até 21/08 a regra era "nunca falado" — alto-falante open-ear vaza som para quem está ao lado
 - Falha nunca é silêncio. Todo erro tem earcon próprio
 - Fila de prioridade: nível 1 (emergência) interrompe tudo; nível 3 é suprimido em Modo Tático
 

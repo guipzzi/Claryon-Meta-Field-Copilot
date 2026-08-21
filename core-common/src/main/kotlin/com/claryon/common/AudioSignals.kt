@@ -25,7 +25,9 @@ enum class Earcon(val significado: String) {
     GRAVANDO("tom contínuo 2 s — 'gravando' (avisa agente e ambiente)"),
     PRIORITARIA("três bipes rápidos — 'mensagem prioritária chegando'"),
 
-    // Resultado de consulta sensível: codificado, NUNCA falado.
+    // Resultado de consulta sensível: codificado no som, E falado em ≤7 palavras
+    // desde 21/08 (decisão humana). Os três earcons continuam DISTINTOS de
+    // propósito: eles chegam em 139 ms e a fala pode ser preemptada por P1.
     CONSULTA_SEM_RESTRICAO("1 bipe curto e neutro"),
     CONSULTA_RESTRICAO_ADMIN("2 bipes médios"),
     CONSULTA_FURTO_ROUBO("padrão de alerta distinto, 3 tons"),

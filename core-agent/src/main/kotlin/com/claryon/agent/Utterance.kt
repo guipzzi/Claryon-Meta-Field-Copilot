@@ -13,7 +13,14 @@ sealed interface Utterance {
     /** Fala sintetizada. Sujeita ao protocolo de laconicidade (≤ 7 palavras). */
     data class Falar(val texto: String, override val priority: Priority) : Utterance
 
-    /** Só sinal. Resultado sensível **nunca** é falado. */
+    /**
+     * Só sinal, sem fala. Usado onde a fala atrapalharia — `GRAVANDO` é tom de 2 s
+     * que avisa o AMBIENTE, e locução ali seria ruído.
+     *
+     * Este KDoc dizia "resultado sensível **nunca** é falado". Deixou de valer em
+     * 21/08 por decisão humana: consulta de placa passou a `SinalizarEFalar`. Ver o
+     * ramo de `PlacaConsultada` em [utteranceFor].
+     */
     data class Sinalizar(val earcon: Earcon, override val priority: Priority) : Utterance
 
     /** Sinal seguido de fala curta — usado em falha (earcon + causa em três palavras). */
@@ -35,7 +42,8 @@ sealed interface Utterance {
  * não há como obter um [ActionOutcome] sem passar pelo [IntentExecutor].
  *
  * Regras de saída aplicadas aqui:
- *  - resultado de consulta sensível sai como earcon codificado, nunca falado;
+ *  - resultado de consulta sensível sai como earcon codificado **e** fala curta —
+ *    ver o ramo de `PlacaConsultada`, onde a mudança de 21/08 está justificada;
  *  - "gravando" é tom contínuo de 2 s **sem fala** (avisa o agente e o ambiente);
  *  - toda falha tem earcon próprio — falha nunca é silêncio;
  *  - toda fala respeita ≤ 7 palavras, sem cortesia (há teste que varre todos os
@@ -66,13 +74,39 @@ fun utteranceFor(outcome: ActionOutcome): Utterance = when (outcome) {
     is ActionOutcome.GravacaoEncerrada ->
         Utterance.SinalizarEFalar(Earcon.ACAO_EXECUTADA, "Gravação encerrada.", Priority.RESPOSTA)
 
+    // ── Earcon PRIMEIRO, fala depois — e os dois números que justificam ─────────
+    //
+    // **A decisão de falar é humana, de 21/08.** O KDoc anterior dizia "NUNCA
+    // falado: o alto-falante open-ear vaza para o abordado", e o risco é real: quem
+    // está a um metro ouve. A ponderação do usuário foi que o vazamento exige
+    // silêncio e volume alto, e ele é quem decide (§7). A premissa entrou como item
+    // MEDÍVEL na Fase 5 — volume operacional, 1 m e 2 m —, para parar de depender de
+    // opinião dos dois lados.
+    //
+    // **Mas o earcon não sai, e isso não é conservadorismo — é medição.** Em 21/08:
+    //
+    //   earcon .................... 139 ms  (fim da fala → som)
+    //   síntese do Piper .......... 124 ms  para uma frase curta
+    //   "Art. 306, Lei 9.503" .... 1574 ms de síntese, 3518 ms de ÁUDIO
+    //
+    // O Piper expande número por extenso, e uma placa é sete caracteres: falá-la
+    // custa segundos. `SinalizarEFalar` dá ao agente a **categoria** em 139 ms e o
+    // **detalhe** depois — e degrada bem, porque um P1 do rádio que preempte a fala
+    // não apaga a resposta que ele já recebeu pelo som. Fala sozinha perderia tudo.
+    //
+    // A frase fica em ≤7 palavras porque o teto vale aqui como em todo o resto: a
+    // placa e a condição, sem cortesia. Quem quiser o detalhe pede `Detalhar`.
     is ActionOutcome.PlacaConsultada ->
-        // NUNCA falado: o alto-falante open-ear vaza para o abordado.
-        Utterance.Sinalizar(
+        Utterance.SinalizarEFalar(
             when (outcome.restricao) {
                 Restricao.SEM_RESTRICAO -> Earcon.CONSULTA_SEM_RESTRICAO
                 Restricao.ADMINISTRATIVA -> Earcon.CONSULTA_RESTRICAO_ADMIN
                 Restricao.FURTO_ROUBO -> Earcon.CONSULTA_FURTO_ROUBO
+            },
+            when (outcome.restricao) {
+                Restricao.SEM_RESTRICAO -> "${outcome.placa}, sem restrição."
+                Restricao.ADMINISTRATIVA -> "${outcome.placa}, restrição administrativa."
+                Restricao.FURTO_ROUBO -> "${outcome.placa}, furto ou roubo."
             },
             Priority.RESPOSTA,
         )

@@ -36,8 +36,18 @@ sealed interface ActionOutcome {
     data class GravacaoEncerrada(val segmentos: Int) : ActionOutcome
 
     /**
-     * Placa consultada. O resultado é **sensível** e sai como earcon codificado,
-     * nunca falado — o alto-falante *open-ear* vaza som para quem está ao lado.
+     * Placa consultada. O resultado é **sensível**, e desde 21/08 sai como earcon
+     * codificado **mais** fala curta.
+     *
+     * O KDoc anterior dizia "nunca falado", pelo alto-falante *open-ear* vazar para
+     * quem está ao lado. **A decisão de falar é humana** (§7), com a ponderação de
+     * que o vazamento exige silêncio e volume alto — premissa que virou item medível
+     * da Fase 5, para deixar de ser opinião dos dois lados.
+     *
+     * O earcon **não** saiu, e por medição: ele chega em 139 ms, enquanto a fala de
+     * uma placa custa segundos (o Piper expande número por extenso — "Art. 306, Lei
+     * 9.503" dá 3518 ms de áudio). Se um P1 do rádio preemptar a fala, o agente já
+     * recebeu a resposta pelo som.
      */
     data class PlacaConsultada(val placa: String, val restricao: Restricao) : ActionOutcome
 
