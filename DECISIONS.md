@@ -1783,3 +1783,124 @@ da mudança, e ele foi medido, não presumido.
 `ggml-small-q5_1.bin`. Os dois testes da classe estão **permanentemente pulados** e
 reportam verde — a mesma família de defeito que o §6 do CLAUDE.md persegue. Fica
 registrado; não foi consertado aqui para não misturar com a mudança de build.
+
+---
+
+## 2026-08-21 — Etapa B: o llama.cpp fecha, e o que ele produz não serve ainda
+
+O motor era decisão humana de 20/08 (llama.cpp). Isto registra **como** ele
+entrou, **quanto** custou e **o que a medição desmentiu**.
+
+### O build fecha, e a colisão do ggml não voltou
+
+`core-llm` novo, com o llama.cpp vendorizado em `src/main/cpp/llama` e a mesma
+forma que o `core-voice` usa para o whisper. Divergimos do exemplo oficial em um
+ponto e por um motivo: **`-DBUILD_SHARED_LIBS=OFF`** em vez de `ON`. O exemplo da
+ARM publica `libggml*.so` e usa `GGML_BACKEND_DL` + `CPU_ALL_VARIANTS`; aqui isso
+reintroduziria exatamente a colisão que 21/08 resolveu do nosso lado, num
+`lib/arm64-v8a/` que é diretório plano. E `CPU_ALL_VARIANTS` compraria despacho
+por ISA que este projeto não usa — o piso já está declarado.
+
+Conferido no artefato, não no papel: `libclaryonllm.so` exporta **4 símbolos**,
+todos `Java_com_claryon_llm_NativoDoRedator_*`; **zero** símbolo `ggml_*`/`llama_*`
+exportado; `DT_NEEDED` = liblog, libandroid, libm, libdl, libomp, libc. `unzip -l`
+no APK debug e no release: **zero libggml, zero libllama**.
+
+A visibilidade escondida é aplicada em **todo** build type, inclusive Debug — e
+isso é correção, não tamanho. `libwhisper.so` de debug exporta ~456 símbolos
+`ggml_*` com visibilidade default, e as duas cópias estáticas do ggml (whisper e
+llama) são de revisões diferentes. Sem esconder, uma chamada do llama poderia
+ligar na implementação do whisper pela ordem de carga — quebra em runtime, às
+vezes.
+
+### O custo, medido
+
+| | antes | depois | Δ |
+|---|---|---|---|
+| APK release | 378 670 357 B | 387 321 258 B | **+8 650 901 B (+2,3%)** |
+| `libclaryonllm.so` arm64 | — | 4 049 392 B | |
+| `libclaryonllm.so` x86_64 | — | 4 526 640 B | |
+
+O GGUF **não** entra nisso: ele vive em `filesDir`, nunca em `assets/`.
+
+### O defeito de medição que já mordeu este repositório mordeu de novo
+
+A primeira medição deu **5 a 6 tokens/s** de prefill — 249 tokens de prompt em
+37 a 54 s. Causa lida em `core-llm/.cxx/tools/debug/arm64-v8a/compile_commands.json`:
+`ggml-cpu.c`, `quants.c` e `llama-model.cpp` saíam com `-g -fno-limit-debug-info`
+e **nenhum `-O`, nenhum `-DNDEBUG`**. O AGP passa `CMAKE_BUILD_TYPE=Debug` na
+variante debug e o llama.cpp inteiro herda. É a MESMA família do achado de 17/08
+no `core-voice` ("o STT leva 14,9 s" descrevendo código que o produto não
+executa), e o exemplo oficial do llama.cpp já passa `-DCMAKE_BUILD_TYPE=Release`
+como primeira opção da lista. Eu li o arquivo e não apliquei a linha.
+
+Com a linha, no mesmo emulador: prefill **194 tok em 558–760 ms** (~280 tok/s),
+geração **33–46 tok em 405–1 236 ms**. **~35× mais rápido.** E o `.so` caiu de
+8,08 MB para 4,05 MB.
+
+### O que o modelo produz, e por que isso não fecha a Fase 4
+
+Llama 3.2 1B Q4_K_M, `n_ctx=1024`, 4 threads, emulador arm64:
+
+- carga: **860–2 047 ms** · PSS do processo +**1,49 GiB** para 762,8 MiB de pesos
+  → folga real de **1,94×**, contra 1,35 que eu tinha declarado. A constante foi
+  corrigida para 1,90 **com a medição junto**.
+- `redigir` ponta a ponta: **969–1 952 ms**.
+- qualidade: de 6 gerações, 2 utilizáveis, 1 recusada pelo guarda, e **duas
+  erradas que passaram**:
+  - *"…passa a ser considerado um crime grave"* — o Art. 165 do CTB é infração
+    administrativa, não crime.
+  - *"Não há, não há nada que aconteça com quem dirige embriagado."*
+
+A segunda é o achado que importa: **o guarda de lastro é cego a negação.** Ele
+mede se as palavras vêm da fonte; a inversão de sentido usa o léxico da própria
+fonte e passa com lastro alto. Está fixado em teste (`GuardaDaRedacaoTest`) como
+limitação conhecida, e não como bug a consertar por calibração.
+
+### A asserção que a medição derrubou
+
+O teste instrumentado nasceu afirmando que a saída do modelo nunca vira ação —
+o gêmeo do que `core-knowledge` afirma sobre texto recuperado. **Falhou**, 2 de 3:
+
+```
+"preciso chamar apoio para essa ocorrência de trânsito" → PedirApoio
+"devo gravar a abordagem do condutor embriagado"        → IniciarGravacao
+```
+
+Modelo pequeno repete a pergunta ao responder, e o roteador é regex sobre
+português. Não tem conserto por prompt. A garantia passou a ser **estrutural**:
+`core-llm` sem `core-agent` no classpath (`FronteiraDoRedatorTest`) e nenhum
+arquivo de produção de `app` juntando `com.claryon.llm` ao caminho de ação
+(`FronteiraDoRedatorEmAppTest`). O teste no aparelho virou a **evidência** de por
+que essas duas existem.
+
+### Degradação: as três recusas, vistas em produção
+
+`PoliticaDeRedacao` é pura para poder ter contra-teste (RAM alta e baixa TÊM de
+decidir diferente). E as três recusas foram observadas no logcat do app real,
+não só em JUnit:
+
+```
+SEM_MODELO         · sem GGUF em filesDir (estado de fábrica)
+DESLIGADO_POR_FLAG · adb shell settings put global knowledge.llm 0
+APARELHO_FRACO     · RAM total 2 592 759 808 B, abaixo do piso de 3 GB
+```
+
+A flag deu a `FeatureFlags` de `core-common` sua **primeira implementação** —
+`grep` por `FeatureFlag` fora daquele módulo devolvia zero desde que o enum foi
+escrito. `Settings.Global` e não `SharedPreferences` porque o app não pode mudar
+a própria chave: escrever exige `WRITE_SECURE_SETTINGS`, que só o shell tem.
+
+O emulador desta sessão cai em `APARELHO_FRACO`, e a medição justifica: durante o
+teste, o `lowmemorykiller` matou `gms`, `permissioncontroller` e
+`googlequicksearchbox` para liberar página enquanto o modelo estava carregado.
+
+### O que fica em aberto
+
+O `redigir` ainda **não tem chamador no ciclo de voz** — a Etapa A não tem
+implementação de `BaseDeConhecimento`, e ligar o ciclo é item daquela etapa. O que
+tem chamador em `src/main` e roda a cada boot é a decisão de degradação
+(`ClaryonApp.onCreate`) e a liberação sob pressão (`onTrimMemory`).
+
+E o llama.cpp **não é submódulo**: está ignorado no `.gitignore` como trava, com o
+custo medido (203 MB contra 43 MB do whisper) para decisão humana.

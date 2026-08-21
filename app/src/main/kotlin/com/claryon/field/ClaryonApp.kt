@@ -6,6 +6,7 @@ import android.util.Log
 import com.claryon.agent.LexicoDeOcorrencias
 import com.claryon.common.Result
 import com.claryon.field.auth.SessaoDoAgente
+import com.claryon.field.norma.RedacaoDoCopiloto
 import com.claryon.field.voice.EscutaDoAgente
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -45,6 +46,13 @@ class ClaryonApp : Application() {
         MapLibre.getInstance(this)
 
         carregarGazetteer()
+
+        // **A degradação da Etapa B acontece AQUI, e "no boot" é literal.**
+        // Lê o GGUF em `filesDir`, a chave humana e a RAM do aparelho, decide, e
+        // registra os números. Aparelho fraco fica na Etapa A sem nenhum caminho
+        // novo: quem decide é a troca da implementação de `Redator`, não um `if`
+        // espalhado por quem fala. Ver `RedacaoDoCopiloto`.
+        RedacaoDoCopiloto.decidirNoBoot(this)
 
         val result = GlassesRuntime.initialize(this)
         if (result is Result.Failure) {
@@ -144,8 +152,15 @@ class ClaryonApp : Application() {
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
         if (!EscutaDoAgente.deveLiberar(level)) return
-        Log.i(TAG, "onTrimMemory($level): devolvendo o contexto do whisper")
+        Log.i(TAG, "onTrimMemory($level): devolvendo o contexto do whisper e o redator")
         escopoDeManutencao.launch { EscutaDoAgente.liberar() }
+        // **O redator sai primeiro, e não por último.** É a maior alocação do
+        // processo (o GGUF passa de meio giga) e a única cuja ausência não tira
+        // capacidade do produto: sem ele, a Etapa A lê o trecho verbatim, que é
+        // o comportamento padrão. Segurá-lo sob pressão é convidar o Low Memory
+        // Killer a escolher no nosso lugar — e o que ele mata é o serviço de
+        // rádio.
+        RedacaoDoCopiloto.liberar()
     }
 
     /**

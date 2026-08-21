@@ -151,6 +151,44 @@ ignora se ausentes).
 Sem o submódulo, a build nativa de `core-voice` falha. Sem o modelo, o teste
 `WhisperCppSttTest` é apenas **ignorado** (não quebra o build).
 
+### 2b. llama.cpp e o GGUF (Etapa B da Fase 4 — opcional)
+
+`core-llm` não compila sem o llama.cpp vendorizado. Ele **não é submódulo ainda**
+(decisão de custo em aberto: clone raso são 203 MB contra 43 MB do whisper), está
+no `.gitignore` como trava, e é clonado à mão:
+
+```bash
+git clone --depth 1 https://github.com/ggml-org/llama.cpp \
+  core-llm/src/main/cpp/llama
+```
+
+Ausente, o CMake de `core-llm` falha com a instrução acima em vez de compilar pela
+metade.
+
+O **modelo do redator não vai no APK** — nunca em `assets/`, porque
+`llama_model_load_from_file` faz `fopen` e asset não tem caminho no sistema de
+arquivos. Ele vive em `filesDir`, com nome fixo `redator.gguf`:
+
+```bash
+curl -L -o /tmp/redator.gguf \
+  https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf
+adb push /tmp/redator.gguf /data/local/tmp/redator.gguf
+adb shell run-as com.claryon.field cp /data/local/tmp/redator.gguf files/redator.gguf
+```
+
+Sem o arquivo, o app decide `LerVerbatim(SEM_MODELO)` no boot e os testes de
+`RedatorNoAparelhoTest` são **pulados** (`Assume`), não verdes.
+
+A Etapa B é **desligável no aparelho, sem recompilar**:
+
+```bash
+adb shell settings put global knowledge.llm 0   # desliga (LerVerbatim)
+adb shell settings delete global knowledge.llm  # volta ao padrão (ligada)
+```
+
+Ela também se desliga sozinha em aparelho com menos de 3 GB de RAM total ou sem
+folga de 1,9× o tamanho do GGUF — ver `PoliticaDeRedacao`.
+
 ### 3. Build
 
 ```bash

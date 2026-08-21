@@ -37,6 +37,21 @@ app/src/androidTest/assets/models/
 # AAR pré-compilado do sherpa-onnx (baixado no setup, ver README)
 core-voice/libs/*.aar
 
+# llama.cpp vendorizado (Etapa B da Fase 4), clonado no setup.
+#
+# **Isto é uma trava de segurança, não a decisão final.** O whisper.cpp é
+# submódulo de verdade; o llama.cpp ainda não é, porque o custo precisa de
+# decisão humana: clone raso de `master` são **203 MB** (166 MB de árvore +
+# 37 MB de `.git`), contra 43 MB do whisper — e 109 MB disso são `models/` e
+# `docs/`, que um `sparse-checkout` cortaria.
+#
+# Enquanto não for submódulo, o diretório TEM de ser ignorado: ele carrega um
+# `.git` próprio, e um `git add -A` distraído gravaria um gitlink sem entrada
+# em `.gitmodules` — um ponteiro para um commit que ninguém consegue resolver
+# depois. Ausente, o `core-llm/src/main/cpp/CMakeLists.txt` falha com a
+# instrução de clone em vez de compilar pela metade.
+core-llm/src/main/cpp/llama/
+
 # CLAUDE.md É VERSIONADO. Já não foi, e custou caro.
 #
 # Entre 14/08 e 15/08 ele ficou aqui, ignorado, enquanto 96 linhas de regra dura

@@ -507,8 +507,13 @@ antes de qualquer linha de código de LLM existir.
    que veda armas, num produto cujo caso de uso-bandeira é manejo de pistola: isso é
    parecer jurídico, e ele vem antes do código, não depois.
 
-Por isso o motor **não está decidido aqui** — está na lista de decisões em aberto, com os
-dois candidatos e o que precisa ser confirmado antes de qualquer linha em `build.gradle.kts`.
+~~Por isso o motor **não está decidido aqui**~~ — **DECIDIDO em 20/08 (humano): llama.cpp**,
+com a licença adiada por decisão explícita. Integrado em 21/08 em `core-llm`, build de
+fonte, estático, **zero libggml no APK** e **+8,25 MiB de release**. O que a integração
+mediu, e que este texto acima não previa, está em `DECISIONS.md` (21/08): a Llama 3.2 1B
+Q4_K_M **erra em pt-BR sobre norma** (chamou infração administrativa de "crime grave" e
+produziu *"não há nada que aconteça com quem dirige embriagado"*), e o filtro de lastro
+**não vê negação**. O motor está resolvido; o **modelo** não.
 
 **Itens**
 
@@ -804,7 +809,10 @@ falham lá.
   `llama`) declara `externalNativeBuild { cmake { path(...) } }`. É a mesma forma que o
   whisper.cpp já tem aqui, então não há coordenada, versão nem `javap` a conferir: há um
   submódulo a acrescentar. O custo de "renomear alvos" que este item cobrava **não existe
-  mais** — ver o fato 1 acima. O que resta em aberto é só a licença, adiada.
+  mais** — ver o fato 1 acima. **Integrado em 21/08** (`core-llm`, `-DBUILD_SHARED_LIBS=OFF`,
+  zero libggml no APK). O que resta em aberto deixou de ser a licença e passou a ser **qual
+  modelo**: a Llama 3.2 1B medida no emulador erra sobre norma em pt-BR, e o `.gguf` ainda
+  não é submódulo (203 MB contra 43 MB do whisper — decisão de custo, humana).
 - **2. Origem do corpus do RAG.** (material aberto e de fabricante / POP de corporação
   parceira / outro). É o item que trava a Fase 4 inteira e não é resolvível por engenharia.
 - **3. Verificação de locutor por embedding — permitido ou proibido?**
