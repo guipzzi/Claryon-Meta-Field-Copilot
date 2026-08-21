@@ -21,6 +21,11 @@ import com.claryon.field.ui.tema.TemaClaryon
  * Os casos são os que a tela promete e que o caminho feliz não exercita: alerta
  * classificado, autoria não conferida, fala sem transcrição, e transmissão
  * própria que não saiu.
+ *
+ * **O roteiro base é fixo de propósito.** Ele é a régua das capturas antes/depois:
+ * mexer nele invalida a comparação, que é a única forma de um acabamento visual ser
+ * julgado por evidência em vez de por memória. Caso novo entra por trás de uma
+ * chave — ver [DUROS] —, nunca acrescentado ao meio.
  */
 class VitrineDaGuarnicao : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -30,8 +35,25 @@ class VitrineDaGuarnicao : ComponentActivity() {
         // registros o caminho de volta ao fim NUNCA aparece, e é correto — a
         // folga de três posições ainda cobre a lista inteira.
         val voltas = intent.getStringExtra("volume")?.toIntOrNull() ?: 1
+        // `-e duros 1` acrescenta os cruzamentos, no fim, onde a lista já para.
+        val roteiro = if (intent.getStringExtra("duros") != null) FALAS + DUROS else FALAS
+        // `-e ptt negado|ocupado|noar` — o estado do rádio.
+        //
+        // Existe por causa do painel de detalhes: a parte dele que mais importa é
+        // a **recusa** do canal privado, e o caminho feliz nunca a desenha. Sem
+        // isto, "Você NÃO está no canal" seria código que ninguém nunca viu — que
+        // é como um estado de erro chega quebrado ao campo.
+        val estadoDoPtt = when (intent.getStringExtra("ptt")) {
+            "negado" -> EstadoDoPtt.Indisponivel(
+                "Canal negado. Unauthorized: You do not have permissions to read " +
+                    "from this Channel topic",
+            )
+            "ocupado" -> EstadoDoPtt.Ocupado("BRAVO UM")
+            "noar" -> EstadoDoPtt.NoAr(decorridoMs = 4_200, amplitude = 0.62f)
+            else -> EstadoDoPtt.Pronto("GTA-3 Alfa")
+        }
         val falas = (0 until voltas).flatMap { v ->
-            FALAS.map { it.copy(id = "${it.id}-$v") }
+            roteiro.map { it.copy(id = "${it.id}-$v") }
         }
         setContent {
             TemaClaryon {
@@ -47,7 +69,7 @@ class VitrineDaGuarnicao : ComponentActivity() {
                         ParPresente("CHARLIE 4", online = false, falando = false),
                     ),
                     falas = falas,
-                    estadoDoPtt = EstadoDoPtt.Pronto("GTA-3 Alfa"),
+                    estadoDoPtt = estadoDoPtt,
                     aoPressionarPtt = {},
                     aoSoltarPtt = {},
                     aoAbrirCopiloto = {},
@@ -94,5 +116,33 @@ private val FALAS = listOf(
         "7", "CHARLIE 4", "15:04:10",
         "Estou a dois quarteirões, chegando pelo lado oposto.",
         propria = false, prioridade = 3, entrega = FalaNoGrupo.Entrega.RECEBIDA,
+    ),
+)
+
+/**
+ * **Os cruzamentos.** `-e duros 1`.
+ *
+ * Prioridade e procedência são campos ortogonais, e o roteiro base exercita um de
+ * cada vez — o que deixa sem captura exatamente o caso que este produto existe para
+ * cobrir: **o P1 forjado.** Quem anuncia emergência é quem mais tem motivo para
+ * escrever o indicativo que quiser, e é o único registro em que os dois sinais
+ * visuais precisam conviver sem um apagar o outro: a calha vermelha de 4 px porque
+ * pode ser um pedido de apoio real, e o perímetro tracejado porque o vínculo com o
+ * cadastro não fechou.
+ *
+ * O P2 vem junto por um motivo mais prosaico: ele é o único grau de prioridade que
+ * o roteiro base nunca desenha, e uma cor que ninguém olha é uma cor que ninguém
+ * confere.
+ */
+private val DUROS = listOf(
+    FalaNoGrupo(
+        "8", "BRAVO UM", "15:05:04",
+        "Solicito apoio de mais uma viatura no perímetro.",
+        propria = false, prioridade = 2, entrega = FalaNoGrupo.Entrega.RECEBIDA,
+    ),
+    FalaNoGrupo(
+        "9", "", "15:05:47",
+        "Todas as unidades, converjam para a praça agora.",
+        propria = false, prioridade = 1, entrega = FalaNoGrupo.Entrega.RECEBIDA,
     ),
 )

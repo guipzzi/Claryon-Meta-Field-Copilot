@@ -27,11 +27,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.claryon.field.ui.tema.Cores
 import com.claryon.field.ui.tema.Espaco
+import com.claryon.field.ui.tema.Regua
 import com.claryon.field.ui.tema.Tipo
 
 /**
@@ -117,19 +120,28 @@ fun PontoDeEstado(
 }
 
 /**
- * Faixa de prioridade — 3 px na borda esquerda.
+ * Faixa de prioridade — fio vertical na borda esquerda.
  *
- * Cor **e** posição carregam o mesmo dado, de propósito: cerca de 8% dos homens
+ * Cor **e** largura carregam o mesmo dado, de propósito: cerca de 8% dos homens
  * têm alguma deficiência de visão de cor, e a proporção não é menor entre agentes
- * de segurança. A faixa também é mais larga em P1: quem não distingue vermelho de
- * âmbar ainda distingue grosso de fino.
+ * de segurança. A faixa é mais larga em P1: quem não distingue vermelho de âmbar
+ * ainda distingue grosso de fino.
+ *
+ * **Atenção — isto não tem chamador em `src/main`.** `grep -rn "FaixaDePrioridade"
+ * app/src` devolve só esta definição; a tela da guarnição desenha a sua faixa por
+ * `Modifier.calha`, que acompanha a altura real do bloco sem custar uma medida
+ * extra por item de lista. Pelo critério deste projeto, isto é **escrito, não
+ * construído**, e ou ganha chamador ou sai. Fica por ora porque os números que ele
+ * repetia — os mesmos `4/3/2` de `larguraDaCalha` — eram exatamente a duplicata que
+ * [Regua] nasceu para matar, e deixá-lo com literais próprios manteria viva a
+ * chance de os dois lados divergirem no primeiro ajuste.
  */
 @Composable
 fun FaixaDePrioridade(prioridade: Int, modifier: Modifier = Modifier) {
     val (cor, largura) = when (prioridade) {
-        1 -> Cores.P1 to 4.dp
-        2 -> Cores.P2 to 3.dp
-        else -> Cores.P3 to 2.dp
+        1 -> Cores.P1 to Regua.MarcaP1
+        2 -> Cores.P2 to Regua.MarcaP2
+        else -> Cores.P3 to Regua.MarcaP3
     }
     Box(modifier.width(largura).background(cor))
 }
@@ -170,6 +182,13 @@ fun CabecalhoTatico(
  *
  * Cantos retos porque o resto do painel é feito de fios retos, e um botão
  * arredondado no meio disso denuncia componente de biblioteca em vez de decisão.
+ *
+ * **Esta frase deixou de valer para a tela inteira em 21/08**, e fica registrado
+ * aqui para não virar mentira silenciosa: os balões da guarnição passaram a ter
+ * raio, por decisão humana. O que a regra ainda sustenta é o **controle**: fio,
+ * botão e barra continuam retos, e o canto é vocabulário de **conteúdo** — o que
+ * tem começo e fim é o balão, não a ação. Se um dia o botão arredondar, arredonda
+ * por diff de spec, não por contágio.
  */
 @Composable
 fun BotaoTatico(
@@ -235,16 +254,26 @@ fun Vazio(etiqueta: String, explicacao: String, modifier: Modifier = Modifier) {
  * `PlatformRipple` que o Compose Foundation atual **recusa** — o app morria com
  * `IllegalArgumentException` na primeira composição com botão. Passar
  * `indication = null` resolve o crash e o desenho de uma vez.
+ *
+ * [forma] arredonda **o realce**, e nunca o conteúdo. É a diferença que custou uma
+ * captura: `Modifier.clip(RoundedCornerShape(12.dp))` no bloco tocável do cabeçalho
+ * comeu o "T" de `TALK GROUP`, porque o rótulo nasce exatamente no canto superior
+ * esquerdo do nó e o arco passa por cima dele. Passar a forma ao fundo resolve os
+ * dois lados: o realce ganha o mesmo raio dos balões e a tipografia fica intacta.
  */
 @Composable
 fun Modifier.tocavel(
     habilitado: Boolean = true,
+    forma: Shape = RectangleShape,
     aoTocar: () -> Unit,
 ): Modifier {
     val interacao = remember { MutableInteractionSource() }
     val pressionado by interacao.collectIsPressedAsState()
     return this
-        .background(if (pressionado && habilitado) Cores.Pressionado else Color.Transparent)
+        .background(
+            color = if (pressionado && habilitado) Cores.Pressionado else Color.Transparent,
+            shape = forma,
+        )
         .clickable(
             interactionSource = interacao,
             indication = null,

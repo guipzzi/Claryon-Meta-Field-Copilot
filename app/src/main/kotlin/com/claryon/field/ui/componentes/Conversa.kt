@@ -14,19 +14,23 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.defaultMinSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
@@ -70,7 +74,7 @@ fun Modifier.calha(cor: Color, largura: Dp, tracejada: Boolean = false): Modifie
     this.drawBehind {
         val w = largura.toPx()
         if (!tracejada) {
-            drawRect(color = cor, topLeft = Offset.Zero, size = androidx.compose.ui.geometry.Size(w, size.height))
+            drawRect(color = cor, topLeft = Offset.Zero, size = Size(w, size.height))
             return@drawBehind
         }
         // Traço de 6 px, vão de 5 px: curto o suficiente para a interrupção ser
@@ -87,7 +91,37 @@ fun Modifier.calha(cor: Color, largura: Dp, tracejada: Boolean = false): Modifie
     }
 
 /**
- * **Faixa de procedência — a linha acima da fala.**
+ * **Contorno tracejado — a fala cuja autoria não fechou, desenhada como não fecha.**
+ *
+ * Substitui a faixa de largura total que este aviso ocupava até 21/08. A faixa era
+ * uma **caixa**, e o sistema deste projeto diz fio de 1 px; pior, ela empilhava um
+ * retângulo cheio em cima de outro retângulo cheio, que é a origem do "bruto" que
+ * a tela tinha. O sinal não perdeu nada ao mudar de meio: continua **geometria**,
+ * continua sem cor própria, e continua sobrevivendo a daltonismo, sol forte e
+ * captura em preto e branco.
+ *
+ * O traço fecha o balão inteiro em vez de ocupar uma faixa dele, e a leitura fica
+ * literal — **é a única fala da tela cujo perímetro não fecha.** Nenhuma outra
+ * pode tomar esta forma, que é a mesma regra que protege o âmbar do "no ar".
+ *
+ * Desenhado para **dentro** por meia espessura: sob um `clip` arredondado, um
+ * traço centrado na borda perderia a metade externa e viraria fio fino irregular.
+ */
+fun Modifier.contornoTracejado(cor: Color, canto: Dp, largura: Dp = 1.dp): Modifier =
+    this.drawBehind {
+        val w = largura.toPx()
+        val r = canto.toPx()
+        drawRoundRect(
+            color = cor,
+            topLeft = Offset(w / 2f, w / 2f),
+            size = Size(size.width - w, size.height - w),
+            cornerRadius = CornerRadius(r, r),
+            style = Stroke(width = w, pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 5f), 0f)),
+        )
+    }
+
+/**
+ * **Procedência — a linha acima da fala.**
  *
  * Estruturalmente é o lugar que um aplicativo de mensagens usa para a citação da
  * resposta. Aqui não há resposta a citar — tráfego de rádio não tem relação de
@@ -95,21 +129,22 @@ fun Modifier.calha(cor: Color, largura: Dp, tracejada: Boolean = false): Modifie
  * produto tem e um mensageiro não tem: **de onde a fala veio, e se dá para
  * confiar nisso.**
  *
- * Fundo `Pressionado` e tinta média, sem cor de sinal: o aviso é sobre a
- * atribuição, não sobre urgência. Quem lê precisa saber que o **nome** é duvidoso;
- * o conteúdo pode ser um pedido de apoio real e continua legível em tinta cheia.
+ * Era `FaixaDeProcedencia` e desenhava uma faixa cheia de ponta a ponta do balão.
+ * Agora é **linha**, e o nome mudou junto: mora dentro do preenchimento do balão,
+ * sem fundo próprio, e o cerco fica por conta de [contornoTracejado]. Tinta média e
+ * nenhuma cor de sinal — o aviso é sobre a atribuição, não sobre urgência. Quem lê
+ * precisa saber que o **nome** é duvidoso; o conteúdo pode ser um pedido de apoio
+ * real e continua legível em tinta cheia.
+ *
+ * Caixa-alta fica: é um dos poucos casos genuinamente excepcionais da tela, e o
+ * critério para gritar é esse.
  */
 @Composable
-fun FaixaDeProcedencia(rotulo: String, modifier: Modifier = Modifier) {
-    Row(
-        modifier
-            .fillMaxWidth()
-            .background(Cores.Pressionado)
-            .padding(horizontal = Espaco.Curto, vertical = Espaco.Micro),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        // Barra curta tracejada, o mesmo vocabulário da calha: dois lugares
-        // dizendo a mesma coisa pelo mesmo meio, que é como um sinal vira hábito.
+fun LinhaDeProcedencia(rotulo: String, modifier: Modifier = Modifier) {
+    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+        // Barra curta tracejada, o mesmo vocabulário da calha e do contorno: três
+        // lugares dizendo a mesma coisa pelo mesmo meio, que é como um sinal vira
+        // hábito.
         Box(
             Modifier
                 .width(10.dp)
@@ -137,11 +172,16 @@ fun FaixaDeProcedencia(rotulo: String, modifier: Modifier = Modifier) {
  * sustenta.
  *
  * Alvo de 48 dp porque quem toca isto está dirigindo ou em pé numa abordagem.
+ *
+ * [canto] vem de fora e não de um valor próprio: é o mesmo raio dos balões, e o
+ * controle flutua **por cima** deles. Dois raios diferentes na mesma tela é o tipo
+ * de discordância que ninguém nomeia e todo mundo vê.
  */
 @Composable
 fun BotaoDeIrParaOFim(
     registrosAbaixo: Int,
     aoTocar: () -> Unit,
+    canto: Dp,
     modifier: Modifier = Modifier,
 ) {
     AnimatedVisibility(
@@ -161,6 +201,7 @@ fun BotaoDeIrParaOFim(
         Row(
             Modifier
                 .defaultMinSize(minHeight = 48.dp)
+                .clip(RoundedCornerShape(canto))
                 .background(Cores.Pressionado)
                 .tocavel(aoTocar = aoTocar)
                 .padding(horizontal = Espaco.Padrao)
@@ -172,8 +213,39 @@ fun BotaoDeIrParaOFim(
         ) {
             SetaParaBaixo()
             Box(Modifier.width(Espaco.Curto))
-            Etiqueta("$registrosAbaixo abaixo", cor = Cores.Tinta)
+            // Sem caixa-alta: é um controle transitório, não um estado
+            // excepcional. A seta já é o que o olho pega.
+            TextoDado("$registrosAbaixo abaixo", cor = Cores.Tinta)
         }
+    }
+}
+
+/**
+ * **Chevron de "abre".** Dois fios, o mesmo vocabulário de [SetaParaBaixo].
+ *
+ * Existe porque uma porta sem maçaneta não é porta: o nome da guarnição virou
+ * tocável, e sem esta marca o agente teria de descobrir isso por acidente — no
+ * meio de uma ocorrência, que é quando ninguém explora interface.
+ *
+ * [Cores.TintaFraca] e não [Cores.Tinta]: é affordance, não dado. Ela precisa
+ * estar presente e nunca disputar com o indicativo ao lado.
+ */
+@Composable
+fun SetaParaDireita(modifier: Modifier = Modifier, cor: Color = Cores.TintaFraca) {
+    Canvas(modifier.size(8.dp)) {
+        val meio = size.height / 2f
+        drawLine(
+            color = cor,
+            start = Offset(0f, 0f),
+            end = Offset(size.width, meio),
+            strokeWidth = 1.5.dp.toPx(),
+        )
+        drawLine(
+            color = cor,
+            start = Offset(0f, size.height),
+            end = Offset(size.width, meio),
+            strokeWidth = 1.5.dp.toPx(),
+        )
     }
 }
 

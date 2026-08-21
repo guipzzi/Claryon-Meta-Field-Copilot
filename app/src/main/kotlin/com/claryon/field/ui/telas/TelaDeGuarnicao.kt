@@ -1,5 +1,6 @@
 package com.claryon.field.ui.telas
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -19,15 +20,20 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -37,18 +43,22 @@ import com.claryon.field.ui.componentes.BarraDePtt
 import com.claryon.field.ui.componentes.BotaoDeIrParaOFim
 import com.claryon.field.ui.componentes.EstadoDoPtt
 import com.claryon.field.ui.componentes.Etiqueta
-import com.claryon.field.ui.componentes.FaixaDeProcedencia
 import com.claryon.field.ui.componentes.Fio
+import com.claryon.field.ui.componentes.LinhaDeProcedencia
 import com.claryon.field.ui.componentes.PontoDeEstado
+import com.claryon.field.ui.componentes.SetaParaDireita
 import com.claryon.field.ui.componentes.TextoCorpo
+import com.claryon.field.ui.componentes.TextoCorpoMenor
 import com.claryon.field.ui.componentes.TextoDado
 import com.claryon.field.ui.componentes.TextoIndicativo
 import com.claryon.field.ui.componentes.Vazio
 import com.claryon.field.ui.componentes.calha
+import com.claryon.field.ui.componentes.contornoTracejado
 import com.claryon.field.ui.componentes.tocavel
 import com.claryon.field.ui.tema.Cores
 import com.claryon.field.ui.tema.Movimento
 import com.claryon.field.ui.tema.Espaco
+import com.claryon.field.ui.tema.Regua
 import com.claryon.field.ui.tema.Tipo
 import kotlinx.coroutines.launch
 
@@ -164,39 +174,61 @@ fun TelaDeGuarnicao(
     quemEstaNoAr: String? = null,
     modifier: Modifier = Modifier,
 ) {
-    // `background` própria e não herdada do casco: uma tela que depende do
-    // hospedeiro para ter fundo mostra o cinza do tema do sistema no primeiro
-    // lugar em que for composta fora dele — foi o que a vitrine de captura
-    // revelou, e num painel escuro isso é a tela inteira queimando visão noturna.
-    Column(modifier.fillMaxSize().background(Cores.Vazio)) {
-        CabecalhoDaConversa(
-            canal = canal,
-            pares = pares,
-            // Cai para a régua quando o rádio não informa: sem o parâmetro ligado,
-            // a tela continua sabendo o que sabia antes, e não inventa nada.
-            noAr = quemEstaNoAr ?: pares.firstOrNull { it.falando }?.indicativo,
-        )
-        Fio()
+    // O painel de detalhes é estado LOCAL desta tela, de propósito: ele não muda
+    // nada no rádio, não sobrevive à troca de destino e não precisa de nada que o
+    // `MainActivity` já não passe. Estado que sobe sem motivo vira parâmetro que
+    // alguém esquece de ligar — e capacidade sem chamador já aconteceu seis vezes
+    // aqui.
+    var detalhes by remember { mutableStateOf(false) }
+    BackHandler(enabled = detalhes) { detalhes = false }
 
-        Box(Modifier.weight(1f).fillMaxWidth()) {
-            if (falas.isEmpty()) {
-                Vazio(
-                    etiqueta = "Canal silencioso",
-                    explicacao = "Nada foi transmitido neste turno. Segure o botão para falar.",
-                    modifier = Modifier.align(Alignment.Center),
-                )
-            } else {
-                HistoricoDeFalas(falas)
+    Box(modifier.fillMaxSize()) {
+        // `background` própria e não herdada do casco: uma tela que depende do
+        // hospedeiro para ter fundo mostra o cinza do tema do sistema no primeiro
+        // lugar em que for composta fora dele — foi o que a vitrine de captura
+        // revelou, e num painel escuro isso é a tela inteira queimando visão
+        // noturna.
+        Column(Modifier.fillMaxSize().background(Cores.Vazio)) {
+            CabecalhoDaConversa(
+                canal = canal,
+                pares = pares,
+                // Cai para a régua quando o rádio não informa: sem o parâmetro
+                // ligado, a tela continua sabendo o que sabia antes, e não inventa
+                // nada.
+                noAr = quemEstaNoAr ?: pares.firstOrNull { it.falando }?.indicativo,
+                aoAbrirDetalhes = { detalhes = true },
+            )
+            Fio()
+
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                if (falas.isEmpty()) {
+                    Vazio(
+                        etiqueta = "Canal silencioso",
+                        explicacao = "Nada foi transmitido neste turno. Segure o botão para falar.",
+                        modifier = Modifier.align(Alignment.Center),
+                    )
+                } else {
+                    HistoricoDeFalas(falas)
+                }
             }
+
+            BarraDeComposicao(
+                estadoDoPtt = estadoDoPtt,
+                aoPressionarPtt = aoPressionarPtt,
+                aoSoltarPtt = aoSoltarPtt,
+                aoAbrirCopiloto = aoAbrirCopiloto,
+                copilotoOcupado = copilotoOcupado,
+            )
         }
 
-        BarraDeComposicao(
-            estadoDoPtt = estadoDoPtt,
-            aoPressionarPtt = aoPressionarPtt,
-            aoSoltarPtt = aoSoltarPtt,
-            aoAbrirCopiloto = aoAbrirCopiloto,
-            copilotoOcupado = copilotoOcupado,
-        )
+        if (detalhes) {
+            DetalhesDaGuarnicao(
+                canal = canal,
+                pares = pares,
+                estadoDoPtt = estadoDoPtt,
+                aoFechar = { detalhes = false },
+            )
+        }
     }
 }
 
@@ -217,7 +249,12 @@ fun TelaDeGuarnicao(
  * frequência lê como falha de renderização.
  */
 @Composable
-private fun CabecalhoDaConversa(canal: String, pares: List<ParPresente>, noAr: String?) {
+private fun CabecalhoDaConversa(
+    canal: String,
+    pares: List<ParPresente>,
+    noAr: String?,
+    aoAbrirDetalhes: () -> Unit,
+) {
     Column(
         Modifier
             .fillMaxWidth()
@@ -234,15 +271,46 @@ private fun CabecalhoDaConversa(canal: String, pares: List<ParPresente>, noAr: S
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.Bottom,
         ) {
-            Column {
-                Etiqueta("Talk group")
-                Box(Modifier.height(Espaco.Micro))
-                // O canal em corpo grande é a âncora da tela: é a única coisa que
-                // o agente confere de relance para saber com quem está falando.
-                Text(canal.uppercase(), style = Tipo.IndicativoGrande, color = Cores.Tinta)
+            Row(
+                Modifier
+                    // `forma` e não `clip`: o realce de pressão herda o raio dos
+                    // balões sem que o arco passe por cima do "T" de TALK GROUP,
+                    // que nasce no canto do nó. Ver o KDoc de `tocavel`.
+                    .tocavel(forma = RoundedCornerShape(CANTO_DO_BLOCO), aoTocar = aoAbrirDetalhes)
+                    .padding(end = Espaco.Curto)
+                    .semantics(mergeDescendants = true) {
+                        contentDescription = "Talk group $canal. Abrir detalhes da guarnição"
+                    },
+                verticalAlignment = Alignment.Bottom,
+            ) {
+                Column {
+                    Etiqueta("Talk group")
+                    Box(Modifier.height(Espaco.Micro))
+                    // O canal em corpo grande é a âncora da tela: é a única coisa
+                    // que o agente confere de relance para saber com quem está
+                    // falando. Agora é também a porta dos detalhes — o mesmo lugar
+                    // em que qualquer mensageiro põe essa porta, o que é o
+                    // argumento inteiro: custo de aprendizado zero.
+                    Text(canal.uppercase(), style = Tipo.IndicativoGrande, color = Cores.Tinta)
+                }
+                Box(Modifier.width(Espaco.Curto))
+                // Desenhada, não glifo — o mesmo motivo de `SetaParaBaixo`. E é o
+                // que impede a porta de ser invisível: um bloco tocável sem
+                // affordance é um segredo, e o agente não descobre segredo no meio
+                // de uma ocorrência.
+                SetaParaDireita(modifier = Modifier.padding(bottom = Espaco.Curto))
             }
             Column(horizontalAlignment = Alignment.End) {
-                Etiqueta("No canal")
+                // **"Com posição", e não "no canal".** O dado por trás é
+                // `ParPresente.online`, que o `RadioViewModel` deriva da IDADE DA
+                // POSIÇÃO — publicou coordenada há pouco, e nada além disso. Ler
+                // "2/3 no canal" e entender "um saiu do ar" leva a decisão errada
+                // quando a verdade é "um está numa garagem sem GPS". É a mesma
+                // razão pela qual não existe "visto" no rodapé do balão: rótulo
+                // que afirma mais do que o dado sustenta é mentira com desenho
+                // melhor. O detalhe explica de onde vem — ver
+                // [DetalhesDaGuarnicao].
+                Etiqueta("Com posição")
                 Box(Modifier.height(Espaco.Micro))
                 Text(
                     "${pares.count { it.online }}/${pares.size}",
@@ -334,6 +402,221 @@ private fun ReguaDePresenca(pares: List<ParPresente>) {
     }
 }
 
+// ── Detalhes da guarnição ────────────────────────────────────────────────────
+
+/**
+ * **Detalhes do talk group.** Abre pelo nome da guarnição, no cabeçalho.
+ *
+ * ---
+ * ### O que esta tela NÃO mostra, e por quê
+ *
+ * O pedido incluía **descrição do grupo**. Ela não existe: `talk_groups` tem
+ * `id`, `unit_id`, `nome`, `tipo` e `rotulo_falado`, e mais nada — conferido
+ * migração por migração em `servidor/migracoes` (`0001` cria a tabela, `0011`
+ * acrescenta `rotulo_falado`; um `grep` de "descricao" nos 23 arquivos devolve
+ * zero). Um campo de descrição aqui seria um retângulo vazio pedindo para ser
+ * preenchido com invenção, e a invenção só apareceria em produção.
+ *
+ * **Foto de integrante** também não, por dois motivos independentes: não há coluna
+ * em `agents`, e base biométrica é proibida neste produto sem versão e sem flag. O
+ * indicativo é a identidade — é assim que o agente existe no rádio.
+ *
+ * **"Visto por último"** foi recusado antes, no rodapé do balão, e a recusa vale
+ * aqui pelo mesmo motivo: não há quem produza o dado.
+ *
+ * ---
+ * ### O que "com posição" é — e a razão de a palavra ter mudado
+ *
+ * `ParPresente.online` é **derivado da idade da última posição publicada**:
+ * `RadioViewModel` marca `true` quando `idadeDaPosicaoS <= LIMIAR_DE_PRESENCA_S`,
+ * que são **120 s**, recarregando a cada 10 s. Não é presença no canal, não é "o
+ * app está aberto", não é Realtime Presence — a política de presença do servidor
+ * está **deliberadamente negada** em `0012`, onde só `broadcast` tem política.
+ *
+ * Ler "ALFA DOIS offline" e entender "saiu do ar" leva a decisão errada quando a
+ * verdade é "está numa garagem sem GPS". Por isso a tela escreve **posição**, e por
+ * isso esta nota existe dentro do painel e não só no código.
+ *
+ * **E a lista é menor que a guarnição.** `posicoes_do_grupo` faz `join` com
+ * `agent_positions` (`0021`), então quem **nunca** publicou posição não entra como
+ * ausente: some. A contagem honesta é "de quem publica posição", nunca "de quantos
+ * são" — o cadastro completo existe em `cadastro_do_grupo` (`0013`), mas o cliente
+ * o colapsa num `Map` de autoria e a tela não o recebe.
+ */
+@Composable
+private fun DetalhesDaGuarnicao(
+    canal: String,
+    pares: List<ParPresente>,
+    estadoDoPtt: EstadoDoPtt,
+    aoFechar: () -> Unit,
+) {
+    val comPosicao = pares.count { it.online }
+    Column(Modifier.fillMaxSize().background(Cores.Vazio)) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(
+                    start = Espaco.Padrao,
+                    end = Espaco.Padrao,
+                    top = Espaco.Padrao,
+                    bottom = Espaco.Medio,
+                ),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            Column {
+                Etiqueta("Talk group")
+                Box(Modifier.height(Espaco.Micro))
+                Text(canal.uppercase(), style = Tipo.IndicativoGrande, color = Cores.Tinta)
+            }
+            Row(
+                Modifier
+                    .defaultMinSize(minHeight = Regua.Toque)
+                    .tocavel(aoTocar = aoFechar)
+                    .padding(horizontal = Espaco.Medio),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Fechar", style = Tipo.Acao, color = Cores.TintaMedia)
+            }
+        }
+        Fio()
+
+        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
+            EntradaNoCanal(estadoDoPtt)
+            Fio()
+
+            Column(Modifier.padding(Espaco.Padrao)) {
+                Etiqueta("Quem publica posição")
+                Box(Modifier.height(Espaco.Curto))
+                // Nunca "N integrantes": esta lista não é o cadastro. Ver o KDoc.
+                TextoCorpoMenor(
+                    "$comPosicao de ${pares.size} com posição dos últimos 2 minutos.",
+                    cor = Cores.TintaMedia,
+                )
+            }
+
+            if (pares.isEmpty()) {
+                Vazio(
+                    etiqueta = "Ninguém publicando",
+                    explicacao = "Nenhum par do grupo publicou posição. Pode ser o " +
+                        "grupo calado, ou este aparelho sem rede.",
+                )
+            } else {
+                // Com posição primeiro. É a ordem em que a informação é útil, não a
+                // do cadastro — e é a mesma da régua do cabeçalho.
+                for (p in pares.sortedByDescending { it.online }) {
+                    LinhaDeIntegrante(p)
+                }
+            }
+
+            Fio()
+            Column(Modifier.padding(Espaco.Padrao)) {
+                Etiqueta("O que esta lista é")
+                Box(Modifier.height(Espaco.Curto))
+                TextoCorpoMenor(
+                    "«Com posição» quer dizer que o aparelho do par publicou " +
+                        "coordenada há menos de 2 minutos. Não é presença no canal, " +
+                        "e não é «visto por último» — este produto não guarda isso.",
+                    cor = Cores.TintaFraca,
+                )
+                Box(Modifier.height(Espaco.Curto))
+                TextoCorpoMenor(
+                    "Quem nunca publicou posição não aparece nesta lista. Ela é " +
+                        "menor que a guarnição, e não sabe dizer quanto menor.",
+                    cor = Cores.TintaFraca,
+                )
+            }
+            Box(Modifier.height(Espaco.Bloco))
+        }
+    }
+}
+
+/**
+ * **Você está no canal, ou não está — e a causa vem junto.**
+ *
+ * É a parte de "ficar online" que **tem fonte**. O estado sai inteiro de
+ * [EstadoDoPtt], que o `RadioViewModel` já publica: `Pronto` só existe com rota de
+ * áudio e transporte conectado, e `Indisponivel` carrega o motivo — inclusive o
+ * `Unauthorized` do canal privado, que `ProtocoloRealtime` traduz em
+ * `CanalRecusado` e o `RadioViewModel` reescreve como *"Canal negado. …"*.
+ *
+ * Duas regras do produto, as duas obedecidas por construção:
+ *
+ *  1. **Nada de "entrou" antes do servidor confirmar.** Este bloco não tem estado
+ *     próprio e não anima nada: ele **lê** o estado do rádio. Não existe
+ *     "conectando" porque não existe dado de "conectando" — este projeto já mandou
+ *     168 quadros para um canal em que não tinha entrado, com o indicador aceso, e
+ *     a lição virou a ausência de `PisoPendente` em `Movimento`.
+ *  2. **A recusa é visível.** `Indisponivel` sai em [Cores.FalhaTexto] — 6,76:1, o
+ *     token que existe exatamente para quando o estado precisa ser **lido** e não
+ *     só marcado — com o motivo do servidor abaixo, palavra por palavra.
+ *
+ * **O botão "entrar no canal" NÃO está aqui, e a recusa é deliberada.** Não há o
+ * que chamar: `RadioViewModel` expõe quatro funções públicas — `abrir`, `fechar`,
+ * `aoPressionar`, `aoSoltar` — e a entrada acontece uma vez, no `DisposableEffect`
+ * do `MainActivity`. Um botão precisaria de uma função nova no ViewModel e de um
+ * parâmetro novo ligado no `MainActivity`; sem os dois, seria mais uma capacidade
+ * construída, testada e sem chamador — o defeito que este projeto já cometeu seis
+ * vezes. E acrescentar reentrada ao rádio é mudança de comportamento, que começa
+ * por diff de spec e não por diff de código.
+ */
+@Composable
+private fun EntradaNoCanal(estado: EstadoDoPtt) {
+    val (titulo, detalhe, cor) = when (estado) {
+        is EstadoDoPtt.Pronto ->
+            Triple("Você está no canal", "Rota de áudio aberta. Segure o botão para falar.", Cores.Tinta)
+        is EstadoDoPtt.NoAr ->
+            Triple("Você está transmitindo", "Solte o botão para devolver o canal.", Cores.Tinta)
+        is EstadoDoPtt.Ocupado ->
+            Triple("Você está no canal", "${estado.porQuem} detém o piso agora. Meio-duplex: não dá para falar por cima.", Cores.Tinta)
+        is EstadoDoPtt.Indisponivel ->
+            Triple("Você NÃO está no canal", estado.motivo, Cores.FalhaTexto)
+    }
+    Column(Modifier.fillMaxWidth().padding(Espaco.Padrao)) {
+        Etiqueta("Sua entrada")
+        Box(Modifier.height(Espaco.Curto))
+        Text(titulo, style = Tipo.Indicativo, color = cor)
+        Box(Modifier.height(Espaco.Micro))
+        TextoCorpoMenor(detalhe, cor = Cores.TintaMedia)
+    }
+}
+
+/**
+ * Uma linha do livro-razão: indicativo à esquerda, estado à direita.
+ *
+ * **Sem cor, e é a decisão.** A régua do cabeçalho pinta o ponto de verde porque lá
+ * ela é um relance; aqui o agente veio ler, e cor em estado nominal é cor gasta — o
+ * censo de hoje levou a tela do mapa de oito pontos de cor a zero no nominal
+ * justamente por isso. O que separa os dois estados é a tinta e a palavra escrita,
+ * que sobrevivem a daltonismo e a sol.
+ *
+ * [Regua.LinhaDensa] e não um número: é a altura de linha que este sistema tem para
+ * lista longa, e ela ainda cumpre alvo tocável com folga.
+ */
+@Composable
+private fun LinhaDeIntegrante(par: ParPresente) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .defaultMinSize(minHeight = Regua.LinhaDensa)
+            .padding(horizontal = Espaco.Padrao),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        TextoIndicativo(par.indicativo, cor = if (par.online) Cores.Tinta else Cores.TintaFraca)
+        TextoDado(
+            when {
+                par.falando -> "no ar"
+                par.online -> "posição recente"
+                // "sem posição recente", e não "offline": o vocabulário do painel
+                // é um só, e "recente" está definido em minutos logo abaixo.
+                else -> "sem posição recente"
+            },
+            cor = if (par.online) Cores.TintaMedia else Cores.TintaFraca,
+        )
+    }
+}
+
 // ── Histórico ────────────────────────────────────────────────────────────────
 
 @Composable
@@ -382,6 +665,7 @@ private fun HistoricoDeFalas(falas: List<FalaNoGrupo>) {
         BotaoDeIrParaOFim(
             registrosAbaixo = abaixoDaLeitura,
             aoTocar = { escopo.launch { estadoLista.animateScrollToItem(itens.lastIndex.coerceAtLeast(0)) } },
+            canto = CANTO_DO_BLOCO,
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = Espaco.Medio),
         )
     }
@@ -413,9 +697,16 @@ private fun SeparadorDeHora(rotulo: String) {
  *
  * **Lateralidade sem virar aplicativo social.** O que faz um balão parecer social
  * são três coisas separáveis: canto arredondado, rabinho e o "eu" pintado de cor
- * viva. Nenhuma é necessária para o lado, e nenhuma está aqui — o bloco é
- * retângulo, raio zero, elevação zero. O lado vem da geometria: alinhamento mais
- * uma margem vazia de 16% do lado oposto.
+ * viva. Duas continuam fora — não há rabinho, e a fala própria é a **rebaixada**,
+ * nunca a colorida. O canto entrou em 21/08, e é a única das três que não carrega
+ * informação nenhuma: ele não diz de quem é a fala, diz que o bloco tem um fim.
+ * Retângulo cortado a raio zero encostado na margem lê como painel de terminal
+ * inacabado, e a tela toda pagava por isso.
+ *
+ * O lado continua vindo da geometria: alinhamento mais uma margem vazia de
+ * [MARGEM_DO_LADO_OPOSTO] do lado oposto — que subiu de 16% para 22%, porque a
+ * assimetria precisa ser legível **na mensagem curta**, e a mensagem curta é a
+ * regra no rádio.
  *
  * Alerta classificado não recebe lado nenhum: ocupa a linha inteira, como num
  * terminal de despacho. É essa segunda forma que impede a tela de virar bate-papo.
@@ -424,12 +715,17 @@ private fun SeparadorDeHora(rotulo: String) {
  * mensageiro põe a citação da resposta, aqui vai a procedência: a classificação do
  * alerta, e o aviso de autoria não conferida. Depois vêm autor, texto e um rodapé
  * com hora e entrega — a mesma ordem, com conteúdo que existe.
+ *
+ * As duas fatias do topo eram **faixas de largura total**, com fundo próprio, e
+ * viraram linha + fio: fundo cheio dentro de fundo cheio é caixa dentro de caixa,
+ * e a doutrina desta paleta é fio de 1 px. O que elas dizem não mudou uma palavra.
  */
 @Composable
 private fun RegistroDeTrafego(item: ItemDeTrafego) {
     val ehRegistro = item.forma == FormaDoRegistro.REGISTRO_DE_CANAL
     val aDireita = item.forma == FormaDoRegistro.PROPRIO
     val naoConfirmada = item.procedencia == Procedencia.NAO_CONFIRMADA
+    val forma = RoundedCornerShape(CANTO_DO_BLOCO)
 
     Row(
         Modifier
@@ -450,50 +746,67 @@ private fun RegistroDeTrafego(item: ItemDeTrafego) {
         Column(
             Modifier
                 .weight(if (ehRegistro) 1f else 1f - MARGEM_DO_LADO_OPOSTO)
+                // `clip` ANTES do fundo e da calha, e a ordem é o desenho: a calha
+                // é uma barra reta desenhada da borda, e é o recorte que a faz
+                // afinar nos cantos em vez de furar o balão. Trocar a ordem não
+                // quebra build nenhum — só devolve os quatro bicos.
+                .clip(forma)
                 .background(if (aDireita) Cores.Painel else Cores.Elevado)
                 .calha(
                     cor = corDaCalha(item.calha, naoConfirmada),
                     largura = larguraDaCalha(item.calha, naoConfirmada),
                     tracejada = naoConfirmada,
+                )
+                .then(
+                    // O perímetro que não fecha. Ver `contornoTracejado`.
+                    if (naoConfirmada) {
+                        Modifier.contornoTracejado(Cores.TintaFraca, CANTO_DO_BLOCO)
+                    } else {
+                        Modifier
+                    },
+                )
+                .padding(
+                    start = Espaco.Medio,
+                    end = Espaco.Medio,
+                    top = Espaco.Medio,
+                    bottom = Espaco.Curto,
                 ),
         ) {
             if (ehRegistro) {
-                BandaDeClassificacao(item.fala.prioridade ?: 3)
+                LinhaDeClassificacao(item.fala.prioridade ?: 3)
             }
-            // A faixa vem DEPOIS da classificação e ANTES do nome, porque é nesta
-            // ordem que a dúvida precisa chegar: "isto é um P1" → "e não sei de
-            // quem" → o nome. Invertido, o agente lê o nome primeiro e o crédito
-            // já foi dado.
+            // A procedência vem DEPOIS da classificação e ANTES do nome, porque é
+            // nesta ordem que a dúvida precisa chegar: "isto é um P1" → "e não sei
+            // de quem" → o nome. Invertido, o agente lê o nome primeiro e o
+            // crédito já foi dado.
             if (naoConfirmada) {
-                FaixaDeProcedencia(AUTOR_NAO_CONFIRMADO)
+                LinhaDeProcedencia(AUTOR_NAO_CONFIRMADO)
+                Box(Modifier.height(Espaco.Curto))
             }
 
-            Column(
-                Modifier.padding(
-                    start = Espaco.Medio,
-                    end = Espaco.Medio,
-                    top = Espaco.Curto,
-                    bottom = Espaco.Curto,
-                ),
-            ) {
-                if (item.mostraIndicativo) {
-                    TextoIndicativo(
-                        item.autorExibido,
-                        cor = if (naoConfirmada) Cores.TintaMedia else Cores.Tinta,
-                    )
-                    Box(Modifier.height(Espaco.Micro))
-                }
-                // Fala sem transcrição não é fala vazia — é áudio que ninguém
-                // transcreveu ainda. Um balão em branco faria o agente procurar o
-                // texto que sumiu; dizer o que houve custa uma linha e não mente.
-                if (item.fala.texto.isBlank()) {
-                    Etiqueta("áudio sem transcrição", cor = Cores.TintaFraca)
-                } else {
-                    TextoCorpo(item.fala.texto, cor = tinta(item.tintaDoTexto))
-                }
-                Box(Modifier.height(Espaco.Curto))
-                RodapeDoRegistro(item)
+            if (item.mostraIndicativo) {
+                // Tinta média e não cheia: o nome de quem falou é o rótulo do
+                // bloco, não o conteúdo dele. Em tinta cheia ele competia de igual
+                // para igual com a transcrição — e a transcrição é o que o agente
+                // subiu no histórico para ler.
+                TextoIndicativo(item.autorExibido, cor = Cores.TintaMedia)
+                Box(Modifier.height(Espaco.Micro))
             }
+            // Fala sem transcrição não é fala vazia — é áudio que ninguém
+            // transcreveu ainda. Um balão em branco faria o agente procurar o
+            // texto que sumiu; dizer o que houve custa uma linha e não mente.
+            //
+            // Em monoespaçada, e é aí que a divisão das duas famílias começa a
+            // pagar: sans é fala humana, mono é o aparelho falando de si. Antes
+            // era `Etiqueta`, e a caixa-alta espaçada gritava mais que a própria
+            // transcrição ao lado.
+            if (item.fala.texto.isBlank()) {
+                TextoDado("áudio sem transcrição", cor = Cores.TintaMedia)
+            } else {
+                TextoCorpo(item.fala.texto, cor = tinta(item.tintaDoTexto))
+            }
+            Box(Modifier.height(Espaco.Micro))
+            RodapeDoRegistro(item)
         }
 
         if (!aDireita && !ehRegistro) Box(Modifier.weight(MARGEM_DO_LADO_OPOSTO))
@@ -508,58 +821,104 @@ private fun RegistroDeTrafego(item: ItemDeTrafego) {
  * tabela de confirmação no servidor e não existe quem a preencha — duas marcas de
  * leitura seriam a mesma mentira que "na fila" era, com desenho melhor.
  *
+ * **Uma linha só, uma família só, um tamanho só.** Eram dois `Text` com gramáticas
+ * diferentes coladas — `ENVIADA` em caixa-alta a 0,16 em de entreletra ao lado de
+ * `15:01:02` — e o par gritava mais que a transcrição que ele carimba. Metadado que
+ * grita rouba a leitura de quem está em deslocamento.
+ *
+ * **O que grita agora é só o que é excepcional.** "enviada" é o caso nominal e sai
+ * em [Cores.TintaFraca]; "não saiu" sobe para [Cores.TintaMedia] — 7,01:1 contra
+ * 4,70:1 — porque é o rótulo pelo qual este projeto brigou. Antes os dois tinham
+ * exatamente o mesmo peso, o que é a versão tipográfica de dizer que dá no mesmo.
+ * Continua sem cor: cor já significa prioridade e transmissão neste painel.
+ *
  * A hora fica em TODAS as linhas, inclusive em continuação de sequência: é ela que
- * faz o histórico servir de log, e log sem hora é conversa. À direita, os carimbos
- * caem numa coluna — monoespaçada, largura fixa, o olho compara sem reler.
+ * faz o histórico servir de log, e log sem hora é conversa. **Com o segundo** — ver
+ * a nota abaixo.
+ *
+ * ---
+ * ### O segundo saiu, e voltou pela captura
+ *
+ * O carimbo foi cortado para `HH:mm` num primeiro passe, pela razão certa: metadado
+ * tem de ser quieto. A vitrine mostrou o custo na primeira tela — as duas falas
+ * seguidas de `BRAVO UM`, a 14:58:12 e 14:58:41, viraram **dois `14:58` idênticos**
+ * um debaixo do outro. Num histórico de conversa isso não incomoda; num log de
+ * rádio, o segundo é o que casa a fala com o registro de despacho e com o carimbo
+ * da evidência.
+ *
+ * O que deixava o carimbo pesado não era o segundo, era a companhia: `ENVIADA` em
+ * caixa-alta a 0,16 em de entreletra, noutra família, coladinho nele. Removida a
+ * companhia, `15:03:38` em 12 sp monoespaçado e [Cores.TintaFraca] já é quieto.
+ * **Cortar dado para resolver um problema de tipografia era consertar a coisa
+ * errada.**
  */
 @Composable
 private fun RodapeDoRegistro(item: ItemDeTrafego) {
+    val marca = when (item.rotuloDeEntrega) {
+        // "não saiu" e não "na fila": não há fila. Ver o KDoc de
+        // `FalaNoGrupo.Entrega`.
+        RotuloDeEntrega.ENVIADA -> "enviada"
+        RotuloDeEntrega.NAO_SAIU -> "não saiu"
+        null -> null
+    }
+    val hora = item.fala.hora
     Row(
         Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.End,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        item.rotuloDeEntrega?.let {
-            // `Cores.TintaFraca` e não `P2`: cor já significa prioridade neste
-            // painel, e estado de entrega não é prioridade. Uma terceira gramática
-            // cromática faria as três perderem sentido.
-            Etiqueta(
-                // "não saiu" e não "na fila": não há fila. Ver o KDoc de
-                // `FalaNoGrupo.Entrega`.
-                if (it == RotuloDeEntrega.ENVIADA) "enviada" else "não saiu",
-                cor = Cores.TintaFraca,
-            )
-            Box(Modifier.width(Espaco.Curto))
-        }
-        TextoDado(item.fala.hora, cor = Cores.TintaFraca)
+        TextoDado(
+            if (marca == null) hora else "$marca · $hora",
+            cor = if (item.rotuloDeEntrega == RotuloDeEntrega.NAO_SAIU) {
+                Cores.TintaMedia
+            } else {
+                Cores.TintaFraca
+            },
+        )
     }
 }
 
 /**
- * Banda de classificação do alerta.
+ * Classificação do alerta — linha, não banda.
  *
- * Três canais em paralelo — cor, largura e **rótulo escrito**. Hoje P2 e P3 diferem
- * por 1 px de calha, ou seja diferem só por cor: um agente daltônico, ou qualquer
- * um sob sol forte, não distingue. O rótulo é o canal que não depende de visão de
- * cor nem de contraste.
+ * Três canais em paralelo — cor, largura e **rótulo escrito**. P2 e P3 diferem por
+ * 1 px de calha, ou seja diferem só por cor: um agente daltônico, ou qualquer um
+ * sob sol forte, não distingue. O rótulo é o canal que não depende de visão de cor
+ * nem de contraste.
+ *
+ * Era uma banda de largura total com o fundo tingido na cor da prioridade. Saiu por
+ * duas razões, e a segunda é medida:
+ *
+ *  1. Fundo cheio dentro de fundo cheio é caixa dentro de caixa. O sistema desta
+ *     paleta é fio de 1 px, e o fio abaixo do rótulo faz o mesmo trabalho de
+ *     separar cabeçalho de conteúdo por 1/12 da tinta.
+ *  2. **Tingir o balão não era opção.** Sobrepor `P1` a 10% sobre `Elevado` dá
+ *     `#322221`, e sobre ele [Cores.TintaFraca] cai de **4,70:1 para 4,27:1** —
+ *     abaixo de AA. A 5% dá exatamente 4,50, ou seja, no fio da navalha. O rodapé
+ *     inteiro do balão é `TintaFraca`; tingir o fundo do P1 rebaixaria em silêncio
+ *     a correção de contraste feita hoje, e justamente no bloco de emergência.
+ *
+ * O que sustenta o P1 é o que sempre sustentou: calha de 4 px em vermelho, largura
+ * inteira sem lado, o fio na cor da prioridade, e o rótulo em caixa-alta.
  *
  * O texto sai em `Cores.Tinta` e não na cor da prioridade: P3 sobre `Elevado` rende
- * 4,28:1, abaixo do mínimo de 4,5:1 para texto pequeno. A cor fica na banda e na
+ * 4,28:1, abaixo do mínimo de 4,5:1 para texto pequeno. A cor fica no fio e na
  * calha, que são elemento não-textual e respondem a 3:1.
+ *
+ * **P3 não é excepcional, e por isso não grita.** Caixa-alta espaçada fica com P1 e
+ * P2; prioridade normal é o caso comum, e a paleta já tinha tirado a cor dele pela
+ * mesma razão — o que é comum não pode gastar o recurso do que é raro.
  */
 @Composable
-private fun BandaDeClassificacao(prioridade: Int) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .background(corDaPrioridade(prioridade).copy(alpha = 0.14f))
-            .padding(horizontal = Espaco.Medio, vertical = Espaco.Micro),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(Modifier.width(3.dp).height(10.dp).background(corDaPrioridade(prioridade)))
-        Box(Modifier.width(Espaco.Curto))
+private fun LinhaDeClassificacao(prioridade: Int) {
+    if (prioridade <= 2) {
         Etiqueta(rotuloDePrioridade(prioridade), cor = Cores.Tinta)
+    } else {
+        TextoDado(rotuloDePrioridade(prioridade), cor = Cores.TintaFraca)
     }
+    Box(Modifier.height(Espaco.Curto))
+    Fio(cor = if (prioridade <= 2) corDaPrioridade(prioridade) else Cores.Traco)
+    Box(Modifier.height(Espaco.Curto))
 }
 
 // ── Barra de composição ──────────────────────────────────────────────────────
@@ -614,13 +973,19 @@ private fun AcaoDoCopiloto(aoTocar: () -> Unit, ocupado: Boolean) {
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Etiqueta(
-            if (ocupado) "OUVINDO…" else "PERGUNTAR AO COPILOTO",
-            cor = if (ocupado) Cores.Vivo else Cores.TintaMedia,
+        // Caixa e não caixa-alta. `PERGUNTAR AO COPILOTO` a 0,16 em de entreletra
+        // era o rótulo mais largo da tela — mais largo que qualquer transcrição —
+        // para uma ação que é consulta, não urgência. Quando tudo grita, nada
+        // grita: a caixa-alta desta tela fica com o cabeçalho, com "P1/P2" e com
+        // "ORIGEM NÃO CONFIRMADA".
+        Text(
+            if (ocupado) "Ouvindo…" else "Perguntar ao copiloto",
+            style = Tipo.Acao,
+            color = if (ocupado) Cores.Vivo else Cores.TintaMedia,
         )
         // O estado vem do ciclo, não do toque: um rótulo que muda no toque diria
         // "ouvindo" mesmo quando a captura falhou ao abrir.
-        Etiqueta(if (ocupado) "" else "voz", cor = Cores.TintaFraca)
+        TextoDado(if (ocupado) "" else "voz", cor = Cores.TintaFraca)
     }
 }
 
@@ -644,14 +1009,24 @@ private fun corDaCalha(token: TokenDeCalha, naoConfirmada: Boolean): Color = whe
     else -> Cores.TracoForte
 }
 
+/**
+ * **Os três valores vêm de [Regua], e o motivo está escrito lá.**
+ *
+ * `Regua.MarcaP1/P2/P3` nasceram hoje justamente para matar os `4.dp/3.dp/2.dp`
+ * digitados duas vezes — aqui e em `Comuns.FaixaDePrioridade` — e nasceram **sem
+ * um único chamador**: um `grep` de `Regua.` em `app` e nos `core` devolvia zero.
+ * Um canal de acessibilidade que depende de dois literais concordarem não é um
+ * canal, é uma coincidência, e a coincidência continuava de pé porque ninguém tinha
+ * ligado o token na tomada.
+ */
 private fun larguraDaCalha(token: TokenDeCalha, naoConfirmada: Boolean): Dp {
     val base = when (token) {
-        TokenDeCalha.P1 -> 4.dp
-        TokenDeCalha.P2 -> 3.dp
-        else -> 2.dp
+        TokenDeCalha.P1 -> Regua.MarcaP1
+        TokenDeCalha.P2 -> Regua.MarcaP2
+        else -> Regua.MarcaP3
     }
     // Tracejado a 2 dp lê como linha contínua. Abaixo de 3 dp o vão some.
-    return if (naoConfirmada && base < 3.dp) 3.dp else base
+    return if (naoConfirmada && base < Regua.MarcaP2) Regua.MarcaP2 else base
 }
 
 @Composable
@@ -661,8 +1036,30 @@ private fun tinta(token: TokenDeTinta) = when (token) {
     TokenDeTinta.TINTA_FRACA -> Cores.TintaFraca
 }
 
-/** 16% de margem vazia do lado oposto. É o que carrega o lado. */
-private const val MARGEM_DO_LADO_OPOSTO = 0.16f
+/**
+ * 22% de margem vazia do lado oposto — o balão vai a **78%** da largura útil.
+ *
+ * Eram 16%, e 16% não se lê. A assimetria só existe quando o bloco chega perto do
+ * limite: numa fala longa a linha quebra e a borda direita encosta na margem, mas
+ * a fala curta — que é a regra no rádio — para muito antes dela, e aí os 16% de
+ * reserva não aparecem em lugar nenhum. Com 78% o teto fica visível o suficiente
+ * para o olho reconstruir o lado mesmo em três palavras.
+ */
+private const val MARGEM_DO_LADO_OPOSTO = 0.22f
+
+/**
+ * **O raio do balão. É o item que mais muda a tela por menos código.**
+ *
+ * Raio zero num bloco que vai até a margem lê como retângulo cortado, e retângulo
+ * cortado lê como painel inacabado — era o diagnóstico inteiro do "bruto".
+ *
+ * **Isto quer ser `Regua.Canto`**, e não é porque `ui/tema/` estava fora do
+ * território desta sessão. Enquanto não for, é o token de espaçamento mais próximo
+ * do alvo (10 dp) — [Espaco.Curto], a 2 dp dele — e vive aqui pelo mesmo padrão que
+ * [MARGEM_DO_LADO_OPOSTO] e [ALTURA_DA_LINHA_VIVA] já usavam neste arquivo: um
+ * símbolo, com o porquê ao lado. Quem mover isto para `Regua` troca uma linha.
+ */
+private val CANTO_DO_BLOCO = Espaco.Medio
 
 /**
  * Altura da linha viva do cabeçalho.

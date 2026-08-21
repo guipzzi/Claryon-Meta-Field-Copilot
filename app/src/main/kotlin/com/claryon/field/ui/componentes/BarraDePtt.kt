@@ -210,13 +210,21 @@ private fun ConteudoPronto(canal: String, pressao: Float) {
     LinhaDeCanal(canal, "meio-duplex", Cores.Vivo)
     Box(Modifier.height(Espaco.Medio))
     BlocoDeFala(
-        rotulo = "SEGURE PARA FALAR",
+        rotulo = "Segure para falar",
         habilitado = true,
         pressao = pressao,
     )
 }
 
-/** Cabeçalho da barra: canal à esquerda, modo à direita. */
+/**
+ * Cabeçalho da barra: canal à esquerda, modo à direita.
+ *
+ * O canal fica em caixa-alta porque **é** caixa-alta — indicativo de rádio se
+ * escreve assim, e a `Etiqueta` só repete o que o dado já diz. O modo à direita
+ * saiu dela: `MEIO-DUPLEX` a 0,16 em de entreletra era um dado de configuração
+ * gritando ao lado do nome do canal, e o critério para gritar nesta tela é ser
+ * excepcional. Meio-duplex é permanente — é a definição do oposto.
+ */
 @Composable
 private fun LinhaDeCanal(canal: String, direita: String, corDoPonto: Color) {
     Row(
@@ -229,7 +237,7 @@ private fun LinhaDeCanal(canal: String, direita: String, corDoPonto: Color) {
             Box(Modifier.size(Espaco.Curto))
             Etiqueta(canal, cor = Cores.TintaMedia)
         }
-        Etiqueta(direita, cor = Cores.TintaFraca)
+        TextoDado(direita, cor = Cores.TintaFraca)
     }
 }
 
@@ -298,7 +306,7 @@ private fun ConteudoOcupado(porQuem: String) {
     // Mesmo bloco, apagado. Meio-duplex: falar por cima não é uma opção que o
     // botão deva oferecer e depois recusar.
     BlocoDeFala(
-        rotulo = "CANAL OCUPADO",
+        rotulo = "Canal ocupado",
         habilitado = false,
         pressao = 0f,
         detalhe = "$porQuem está transmitindo.",
@@ -312,7 +320,7 @@ private fun ConteudoIndisponivel(motivo: String) {
     // A causa vive DENTRO do bloco desabilitado, não num aviso separado: quem
     // olha o botão para falar é quem precisa saber por que não dá.
     BlocoDeFala(
-        rotulo = "NÃO É POSSÍVEL FALAR",
+        rotulo = "Não é possível falar",
         habilitado = false,
         pressao = 0f,
         detalhe = motivo,
