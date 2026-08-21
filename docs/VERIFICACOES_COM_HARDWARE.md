@@ -181,6 +181,9 @@ erro de stream ou derrubar o stream mantendo a sessão viva.
 | O `addCamera` seguinte a um stream morto **entrega frames**? | O MDK não reabre o decodificador no mesmo processo, então ausência de frames lá é indistinguível da limitação conhecida |
 | Com óculos pareados, `checkPermissionStatus(CAMERA)` responde em quanto tempo? | Está no caminho do onboarding, com teto de 5 s. Se a resposta real passar disso, o agente vê "Os óculos não responderam" numa permissão que existe |
 | O diálogo do Meta AI concede por aparelho, e a concessão sobrevive a reiniciar o app? | A doc diz "Allow once" / "Allow always". Se o agente escolher *once*, a leitura de placa quebra no meio do turno e não no onboarding |
+| **Quanto custa em bateria uma `DeviceSession` ABERTA e ociosa, por hora?** | Desde 21/08 a sessão vive do início ao fim do turno, e não do início ao fim da tela — é o que permite um fluxo de câmera de 5 s com o celular no bolso (`specs/dono-de-processo-para-a-facade-do-dat.spec.md`). O custo de manter a conexão sem stream **não foi medido e não é mensurável sem óculos**: o MockDeviceKit não modela rádio. Se for alto, a decisão muda para "abrir sob demanda", e aí o teto de 12 s de `startSession()` entra no orçamento da consulta de placa |
+| Com os óculos pareados, `createSession` → `STARTED` leva quanto tempo, a frio? | `PRAZO_DE_SESSAO_MS` é 12 s, escolhido por folga e não por medida. É esse número que decide se a sessão pode ser aberta sob demanda ou tem de ficar de pé o turno inteiro |
+| A sessão sobrevive a 30 min ociosa, ou o SDK a derruba sozinho? | O vigia de `SessaoDosOculos` só reage a `state`; se o SDK derrubar **sem** mudar o `StateFlow`, a sessão fica morta-viva e a primeira consulta de placa do turno falha sem causa |
 
 **O que já foi medido, e não precisa de hardware:** com o Meta AI ausente, o
 deeplink `fb-viewapp://device/permissions/request` estoura

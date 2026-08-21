@@ -7,7 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.claryon.audio.GlassesAudioRoute
 import com.claryon.common.Result
 import com.claryon.field.audio.AudioDoAgente
-import com.claryon.glasses.DatGlassesFacade
+import com.claryon.field.oculos.SessaoDosOculos
 import com.claryon.glasses.MockDeviceController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -36,7 +36,19 @@ import kotlinx.coroutines.withTimeoutOrNull
  */
 class DiagnosticoViewModel(app: Application) : AndroidViewModel(app) {
 
-    private val facade = DatGlassesFacade(viewModelScope)
+    /**
+     * **A MESMA fachada do produto — não uma segunda.**
+     *
+     * Era `DatGlassesFacade(viewModelScope)`, e `OculosViewModel` tinha outra
+     * igual: **duas donas** de um recurso que é global do aparelho. É o defeito de
+     * classe que `AudioDoAgente` conserta para o `AudioManager`, e aqui ele era
+     * pior — abrir o painel de diagnóstico com o produto rodando faria um
+     * `createSession` encontrar a sessão da outra fachada ativa, sem que nenhuma
+     * das duas soubesse da outra.
+     *
+     * Ver `specs/dono-de-processo-para-a-facade-do-dat.spec.md`.
+     */
+    private val facade = SessaoDosOculos.facade()
     private val mock = MockDeviceController(app)
     private var mockEnabled = false
 
@@ -137,9 +149,20 @@ class DiagnosticoViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * **Só a câmera e o mock caem aqui. A sessão, não.**
+     *
+     * `facade.stopSession()` estava nesta linha e agora seria pior do que era:
+     * a fachada é a do processo, então sair do painel derrubaria a sessão do
+     * PRODUTO. Quem encerra a sessão é o fim de turno
+     * (`MainActivity.aoEncerrarTurno` → `SessaoDosOculos.encerrar()`).
+     *
+     * A câmera continua caindo porque ela é do painel: quem a ligou foi
+     * [startCamera], daqui, e um stream sem tela que o observe é bateria queimada
+     * por engano. O `mock` idem — deixá-lo habilitado contamina o produto.
+     */
     override fun onCleared() {
         facade.stopCameraStream()
-        facade.stopSession()
         mock.disable()
         super.onCleared()
     }

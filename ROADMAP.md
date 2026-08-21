@@ -621,9 +621,14 @@ abaixo.
 - [SEG] ~~Coletar `Stream.errorStream` e tratar `STOPPED` como terminal~~ **FEITO em
   21/08, com uma ressalva.** O coletor entra ANTES do `start()` (obrigatório:
   `replay=0`, erro anterior à assinatura some), e `STOPPED` só é terminal depois de
-  `STARTED`/`STREAMING` — porque o stream NASCE em `STOPPED` e o SDK retenta. **A
+  `STARTED`/`STREAMING` — porque o stream NASCE em `STOPPED` e o SDK retenta. ~~**A
   ressalva:** `DatGlassesFacade` é construída com `viewModelScope` e morre com a
-  Activity. Dono de processo é bloco da Fase 6.
+  Activity.~~ **FEITO em 21/08:** `SessaoDosOculos` é dona de processo, provada no
+  aparelho (a Activity morreu, `dumpsys` confirmou 0 instâncias, e o vigia instalado
+  antes continuou vivo). E o bloco achou algo maior que a tarefa: `startSession()`
+  tinha **ZERO chamadores em `src/main`** — a sessão do DAT nunca era aberta em
+  produção, só pelo painel `debug` e por quatro testes. Mover só o dono trocaria uma
+  capacidade morta por outra, então o abridor entrou junto.
 - [SEG] Assinatura do manifesto de custódia com chave no Keystore, assinatura incremental
   sobre o hash corrente — esforço: 1 sessão — depende: cofre instanciado.
 - [REFAT] **Trava contra teste que fica verde sem rodar** — esforço: 0,5 sessão —

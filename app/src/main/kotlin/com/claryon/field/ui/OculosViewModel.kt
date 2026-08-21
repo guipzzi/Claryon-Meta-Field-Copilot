@@ -2,13 +2,12 @@ package com.claryon.field.ui
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
-import androidx.lifecycle.viewModelScope
 import com.claryon.agent.Utterance
 import com.claryon.common.Earcon
 import com.claryon.common.Priority
 import com.claryon.field.audio.SaidaUnica
 import com.claryon.field.auth.SessaoDoAgente
-import com.claryon.glasses.DatGlassesFacade
+import com.claryon.field.oculos.SessaoDosOculos
 import com.claryon.glasses.RegistrationStatus
 import com.claryon.net.AutenticacaoSupabase
 
@@ -35,9 +34,28 @@ import com.claryon.net.AutenticacaoSupabase
  */
 class OculosViewModel(app: Application) : AndroidViewModel(app) {
 
-    private val facade = DatGlassesFacade(viewModelScope)
+    /**
+     * **A fachada não é mais deste ViewModel.**
+     *
+     * Ela era `DatGlassesFacade(viewModelScope)`, e como a fachada roda *tudo*
+     * dentro do escopo recebido — `stateIn(Eagerly)` do registro, coletores de
+     * estado e de erro da sessão, do stream e do `errorStream`, e o vigia de
+     * primeiro frame de `withCamera` — a fachada inteira morria no [onCleared].
+     *
+     * Agora quem é dona é [SessaoDosOculos], dona de processo. Aqui só se **lê** o
+     * fluxo. Ver `specs/dono-de-processo-para-a-facade-do-dat.spec.md`.
+     */
+    val registration = SessaoDosOculos.registro
 
-    val registration = facade.registration
+    /**
+     * A causa tipada da última falha de sessão ou de stream, ou `null`.
+     *
+     * Existe porque o painel de prontidão dizia "Os óculos não responderam" para
+     * qualquer coisa, e o `errorStream` — coletado desde 21/08 — não tinha
+     * consumidor nenhum em produção. Causa capturada e não exibida é causa
+     * descartada com passos extras.
+     */
+    val motivoDosOculos = SessaoDosOculos.motivo
 
     /** `false` quando `local.properties` não trouxe o projeto: sem servidor, sem C2. */
     val redeConfigurada: Boolean = SessaoDoAgente.redeConfigurada
@@ -67,7 +85,7 @@ class OculosViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun anunciarRegistroPerdido() {
         if (jaAnunciouRegistro) return
-        if (facade.registration.value == RegistrationStatus.REGISTERED) return
+        if (registration.value == RegistrationStatus.REGISTERED) return
         jaAnunciouRegistro = true
         // A fila de som é dono de processo (`SaidaUnica`), não campo deste
         // ViewModel.
@@ -78,17 +96,32 @@ class OculosViewModel(app: Application) : AndroidViewModel(app) {
 
     private var jaAnunciouRegistro = false
 
-    override fun onCleared() {
-        // Sem parar a sessão, o stream dos óculos segue transmitindo por
-        // Bluetooth depois que a tela morre, sem nenhum indicador — e um novo
-        // DatGlassesFacade tentaria createSession com a anterior ainda viva.
-        //
-        // **`audio` e `saida` NÃO são liberados aqui**: os dois são donos únicos
-        // de processo (`AudioDoAgente`, `SaidaUnica`). `audio.liberarTudo()`
-        // chegou a estar aqui e derrubava a rota SCO por baixo do `AudioRecord`
-        // do rádio em todo encerramento de turno.
-        facade.stopCameraStream()
-        facade.stopSession()
-        super.onCleared()
-    }
+    /*
+     * **Não há `onCleared()` — e a ausência é a mudança de comportamento.**
+     *
+     * Aqui havia `facade.stopCameraStream()` + `facade.stopSession()`, com o
+     * argumento de que "sem parar a sessão, o stream dos óculos segue transmitindo
+     * por Bluetooth depois que a tela morre, sem nenhum indicador — e um novo
+     * `DatGlassesFacade` tentaria `createSession` com a anterior ainda viva".
+     *
+     * As duas metades caíram por motivos diferentes:
+     *
+     *  - "um novo `DatGlassesFacade`" — **não há mais "um novo"**. Existe uma por
+     *    processo, em `SessaoDosOculos`. A frase descrevia o defeito, não o
+     *    contrato: `OculosViewModel` e `DiagnosticoViewModel` construíam uma cada.
+     *  - "segue transmitindo sem indicador" — o custo continua real, e foi
+     *    **trocado**, não ignorado: a sessão passa a viver entre `abrir()` e
+     *    `encerrar()`, que é o turno declarado pelo agente, o mesmo recorte da
+     *    notificação do `CopilotService` e do turno de posição da migração `0019`.
+     *
+     * Parar a sessão aqui é o que impedia o fluxo de câmera de 5 s de existir com o
+     * celular no bolso. O `stopSession()` mudou de casa para
+     * `MainActivity.aoEncerrarTurno`; ver
+     * `specs/dono-de-processo-para-a-facade-do-dat.spec.md`.
+     *
+     * (O motivo pelo qual `audio` e `saida` nunca foram liberados aqui continua
+     * valendo e é o mesmo desta mudança: donos de processo não morrem com a tela.
+     * `audio.liberarTudo()` chegou a estar aqui e derrubava a rota SCO por baixo do
+     * `AudioRecord` do rádio em todo encerramento de turno.)
+     */
 }

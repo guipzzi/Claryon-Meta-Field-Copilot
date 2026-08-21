@@ -19,6 +19,7 @@ import androidx.compose.ui.platform.LocalContext
 import com.claryon.agent.LexicoDeOcorrencias
 import com.claryon.agent.ModoOperacao
 import com.claryon.field.auth.SessaoDoAgente
+import com.claryon.field.oculos.SessaoDosOculos
 import com.claryon.field.permissoes.PermissoesEssenciais
 import com.claryon.field.service.CopilotService
 import com.claryon.field.voice.EstadoDaEscuta
@@ -106,6 +107,15 @@ class MainActivity : ComponentActivity() {
                         aoNavegar = { destino = it },
                         aoEncerrarTurno = {
                             CopilotService.parar(this@MainActivity)
+                            // **O `stopSession()` mora AQUI agora**, e não no
+                            // `onCleared()` do `OculosViewModel`. Lá ele matava a
+                            // sessão toda vez que a tela morria — e um fluxo de
+                            // câmera de 5 s com o celular no bolso não existia.
+                            // "Encerrar turno" é a única ação em que o agente
+                            // declara que parou de trabalhar; é o recorte certo,
+                            // o mesmo do `CopilotService` na linha acima. Ver
+                            // `specs/dono-de-processo-para-a-facade-do-dat.spec.md`.
+                            SessaoDosOculos.encerrar()
                             radio.fechar()
                             oculos.autenticacao.sair()
                             SessaoDoAgente.anunciar(false)
@@ -158,6 +168,10 @@ private fun Operacao(
         if (destino == Destino.PERFIL) quemMeConsultou.carregar()
     }
     val registro by oculos.registration.collectAsState()
+    // A causa tipada que o `errorStream` entrega. Ela era coletada desde 21/08 e
+    // **não tinha consumidor nenhum em produção** — causa capturada e não exibida é
+    // causa descartada com passos extras.
+    val motivoDosOculos by oculos.motivoDosOculos.collectAsState()
 
     LaunchedEffect(Unit) {
         oculos.anunciarEstadoDegradado()
@@ -180,6 +194,18 @@ private fun Operacao(
         // ter passado por esta linha — e o sistema recria o serviço por
         // `START_STICKY` sem tela nenhuma ter rodado.
         CopilotService.iniciar(contexto, ModoOperacao.ATIVO)
+
+        // **A sessão dos óculos abre com o turno — e este era o chamador que não
+        // existia.** `grep -rn "startSession()" app/src/main` devolvia zero: a
+        // sessão do DAT nunca era aberta em produção, só pelo painel de
+        // diagnóstico e pelos testes. Sem esta linha, dar dono de processo à
+        // fachada trocaria uma capacidade morta por outra.
+        //
+        // Não suspende e não bloqueia: instala um vigia no escopo do processo, que
+        // só toca o SDK quando os óculos estiverem REGISTERED. Abrir sob demanda
+        // não serviria — `startSession()` tem teto de 12 s e a consulta de placa
+        // tem 5 s para o OCR inteiro.
+        SessaoDosOculos.abrir()
         // O canal provisório é o ponto de partida; `RadioViewModel` reconcilia com
         // o cadastro assim que o léxico chega. Ver `CanaisDoAgente.grupoCorrenteId`.
         radio.abrir(
@@ -193,6 +219,10 @@ private fun Operacao(
             // O serviço **não** para aqui: é justamente ele que mantém a posição
             // subindo com o app fechado. Só o "Encerrar turno" o derruba, que é a
             // única ação em que o agente declara que parou de trabalhar.
+            //
+            // **E a sessão dos óculos também não.** Fechá-la aqui seria o
+            // `onCleared()` do `OculosViewModel` com outro nome — o defeito que
+            // este bloco veio consertar.
         }
     }
 
@@ -232,6 +262,7 @@ private fun Operacao(
                     estadoMapa.assinado,
                     escuta,
                     LexicoDeOcorrencias.gazetteer.size,
+                    motivoDosOculos,
                 ),
                 consultas = consultas,
                 aoSair = aoEncerrarTurno,
@@ -263,6 +294,7 @@ private fun capacidadesDe(
     mapaAssinado: Boolean,
     escuta: EstadoDaEscuta,
     logradouros: Int,
+    motivoDosOculos: String?,
 ): List<Capacidade> {
     val pttVivo = ptt !is com.claryon.field.ui.componentes.EstadoDoPtt.Indisponivel
     return listOf(
@@ -277,7 +309,12 @@ private fun capacidadesDe(
             // Sem identificador de plataforma no texto. "Registro em UNAVAILABLE"
             // é linguagem do SDK; o agente precisa saber o que fazer, e o que
             // fazer depende de qual dos estados é.
-            motivo = when (registro) {
+            //
+            // **A causa tipada tem precedência sobre o texto do registro.** Óculos
+            // REGISTERED cuja sessão não sobe (hastes dobradas, permissão do Meta
+            // AI negada, bateria no fim) caíam no `else` e ouviam "Verifique se
+            // estão ligados" — a única frase que descreve o que NÃO aconteceu.
+            motivo = motivoDosOculos ?: when (registro) {
                 "UNAVAILABLE" -> "Os óculos não estão pareados. Conecte pelo app Meta AI."
                 "UNKNOWN" -> "Ainda verificando os óculos."
                 else -> "Os óculos não responderam. Verifique se estão ligados."

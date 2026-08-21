@@ -46,6 +46,23 @@ import kotlinx.coroutines.launch
  *
  * Além do contrato [GlassesFacade], expõe StateFlows extras ([streamState],
  * [frameInfo], [deviceCount]) para o painel de diagnóstico do M2.
+ *
+ * ## O [scope] é o dono desta fachada — e ele NÃO pode ser de tela
+ *
+ * Tudo aqui roda no escopo recebido: o `stateIn(Eagerly)` de [registration] e
+ * [deviceCount], os coletores de `session.state`, `session.errors`, `stream.state`
+ * e `stream.errorStream`, e o vigia de primeiro frame de [withCamera]. Cancelar o
+ * escopo **é** desligar a fachada inteira.
+ *
+ * Isto já foi construído com `viewModelScope` em dois ViewModels ao mesmo tempo, e
+ * o resultado eram os dois defeitos que se esperam disso: a fachada morria no
+ * `onCleared()` — levando sessão, stream e a causa tipada junto —, e havia duas
+ * donas de um recurso que é global do aparelho.
+ *
+ * **Não construa esta classe.** Peça a do processo a
+ * `com.claryon.field.oculos.SessaoDosOculos`; uma varredura de fonte
+ * (`FachadaDoDatTemDonoUnicoTest`) reprova quem construir outra. Ver
+ * `specs/dono-de-processo-para-a-facade-do-dat.spec.md`.
  */
 class DatGlassesFacade(private val scope: CoroutineScope) : GlassesFacade {
 
@@ -248,10 +265,17 @@ class DatGlassesFacade(private val scope: CoroutineScope) : GlassesFacade {
 
     /**
      * Encerra a sessão na ordem do contrato: **câmera/stream primeiro, sessão
-     * depois**. Sem isto, sair da tela cancela apenas os coletores: a sessão e o
-     * stream continuam vivos no SDK, os óculos seguem transmitindo por Bluetooth
-     * sem nenhum indicador, e um `createSession` seguinte encontra a anterior
-     * ativa.
+     * depois**. Sem isto, a sessão e o stream continuam vivos no SDK, os óculos
+     * seguem transmitindo por Bluetooth sem nenhum indicador, e um `createSession`
+     * seguinte encontra a anterior ativa.
+     *
+     * **Quem chama isto é o FIM DE TURNO, não o fim da tela.** A frase anterior
+     * aqui era *"sem isto, sair da tela cancela apenas os coletores"*, e ela
+     * descrevia um mundo em que a fachada nascia de `viewModelScope`: sair da tela
+     * cancelava o escopo, e com ele a sessão, o stream e a coleta de `errorStream`.
+     * Hoje sair da tela não cancela **nada** — a dona é `SessaoDosOculos`, de
+     * processo, e é ela quem chama este método quando o agente encerra o turno.
+     * Ver `specs/dono-de-processo-para-a-facade-do-dat.spec.md`.
      *
      * `DeviceSession.stop()` confirmado no artefato `mwdat-core:0.9.0`.
      * Sessão parada é terminal: para voltar, criar uma **nova** (não reviver).

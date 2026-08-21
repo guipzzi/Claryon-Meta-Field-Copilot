@@ -172,11 +172,17 @@ o agente libera um veículo roubado porque o aparelho disse que estava limpo.
 
 ### O que precisa ser construído antes do passo 8
 
-`DatGlassesFacade` é construído com `viewModelScope` em `OculosViewModel`: **a
-facade morre com a Activity**, e leva sessão, stream e erros junto. Um fluxo de
-câmera que dura 5 s e sobrevive à tela apagada precisa de **dono de processo**, como
-o `CerebroDoCopiloto` já é para o ciclo de voz. Isso é pré-requisito, não detalhe —
-e é mudança de comportamento, então tem spec própria.
+~~`DatGlassesFacade` é construído com `viewModelScope` em `OculosViewModel`: **a
+facade morre com a Activity**~~ — **feito em 21/08**, e a spec própria existe:
+[`dono-de-processo-para-a-facade-do-dat`](dono-de-processo-para-a-facade-do-dat.spec.md).
+A fachada é uma por processo (`SessaoDosOculos`), o `stopSession()` mudou do
+`onCleared()` para o fim de turno, e o `SessaoSemTelaTest` roda sem construir
+ViewModel nenhum. **Achado no caminho:** `startSession()` não tinha um único chamador
+em `src/main` — a sessão do DAT nunca era aberta em produção —, então o bloco
+precisou trazer o abridor junto, ou trocaria uma capacidade morta por outra.
+
+Fica aberto do lado da câmera: o custo em bateria de uma sessão ociosa por turno
+não é mensurável sem óculos, e está em `docs/VERIFICACOES_COM_HARDWARE.md`.
 
 Do lado do DAT o caminho está pronto desde 21/08: `PermissaoDaCameraDoDat` pede a
 permissão pelo contrato oficial, `errorStream` é coletado antes do `start()`
