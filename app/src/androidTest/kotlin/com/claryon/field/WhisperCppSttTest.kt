@@ -2,8 +2,9 @@ package com.claryon.field
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.claryon.common.Result
 import com.claryon.common.getOrNull
-import com.whispercpp.whisper.WhisperContext
+import com.claryon.field.voice.Modelos
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertTrue
 import org.junit.Assume
@@ -14,9 +15,24 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 /**
- * Prova de que o **whisper.cpp nativo** funciona on-device: carrega o modelo
- * `ggml-tiny` (direto do asset, sem copiar para disco) e transcreve — no
- * emulador arm64, sem rede. Valida a cadeia JNI → C++ → texto.
+ * Prova de que o **whisper.cpp nativo** funciona on-device: carrega o modelo que o
+ * produto embarca e transcreve — no emulador arm64, sem rede. Valida a cadeia
+ * JNI → C++ → texto.
+ *
+ * ## Esta classe passou meses reportando verde sem rodar
+ *
+ * O `Assume` exigia `models/ggml-tiny.bin`, e este repositório embarca
+ * `models/ggml-small-q5_1.bin`. Assumção sempre falsa é teste sempre pulado, e
+ * JUnit conta teste pulado como `OK`. Medido no emulador em 21/08: **`OK (1 test)`
+ * em 0,008 s** — nenhuma transcrição, nenhuma diferença visível para um teste que
+ * de fato passou.
+ *
+ * É a pergunta 3 do §6 do `CLAUDE.md` respondida da pior forma: o nome afirma que o
+ * whisper transcreve português no aparelho, e o corpo não provava nada.
+ *
+ * O conserto não foi trocar a string. O nome do modelo saiu daqui e passou a vir de
+ * `Modelos.WHISPER_ASSET`, que é de onde o produto o carrega — assim trocar o modelo
+ * não deixa mais um teste para trás olhando para um caminho que ninguém mantém.
  *
  * ## A testemunha era da língua errada
  *
@@ -57,12 +73,33 @@ class WhisperCppSttTest {
      * inteira. Exigir transcrição literal de um `tiny` seria um teste que quebra
      * por ruído, não por regressão.
      */
+    /**
+     * As palavras de conteúdo da frase de teste, e o mínimo para aceitar.
+     *
+     * Separado do corpo do teste **de propósito**: um critério de aceite que só
+     * existe dentro do teste não pode ser conferido contra texto errado, e aí não
+     * se sabe se ele discrimina alguma coisa. Ver [oCriterioDeAceiteRecusaLixo].
+     */
+    private fun aceita(texto: String): Boolean =
+        listOf("central", "guarni", "caminho", "ocorr").count { texto.contains(it) } >= 2
+
     @Test
     fun whisperTranscrevePortuguesOnDevice() = runBlocking {
-        val temModelo = runCatching {
-            ctx.assets.open("models/ggml-tiny.bin").use { it.read() >= 0 }
-        }.getOrDefault(false)
-        Assume.assumeTrue("modelo ggml-tiny ausente nos assets", temModelo)
+        // **O modelo é o que o produto embarca, e vem por `Modelos`.**
+        //
+        // Antes daqui saía `models/ggml-tiny.bin`, que este repositório NUNCA
+        // embarcou: o asset é `models/ggml-small-q5_1.bin`. O `Assume` era portanto
+        // sempre falso, e a classe devolvia `OK (1 test)` em 0,008 s — verde
+        // indistinguível de teste que passou. Medido no emulador em 21/08.
+        //
+        // Ir por `Modelos.whisper` em vez de nomear o asset aqui é o conserto que
+        // impede a recaída: o nome do arquivo passa a existir num lugar só
+        // (`Modelos.WHISPER_ASSET`), e trocar o modelo do produto não deixa mais um
+        // teste para trás olhando para um caminho que ninguém mantém. É o mesmo
+        // caminho que `ConfiancaDoSttTest` e `VerificadorDoGatilhoTest` já usam — e
+        // esses dois rodavam de verdade enquanto este dormia.
+        val whisper = Modelos.whisper(ctx)
+        Assume.assumeTrue("modelo whisper ausente em ${Modelos.WHISPER_ASSET}", whisper != null)
 
         val alvo = InstrumentationRegistry.getInstrumentation().targetContext
         val piper = com.claryon.field.voice.Modelos.piper(alvo)
@@ -71,22 +108,59 @@ class WhisperCppSttTest {
         piper.release()
         Assume.assumeTrue("Piper não sintetizou", dito != null)
 
-        val whisper = WhisperContext.createContextFromAsset(ctx.assets, "models/ggml-tiny.bin")
-        try {
-            // O Piper gera na taxa da voz; o whisper.cpp exige 16 kHz.
-            val pcm = reamostrar(dito!!.samples, dito.sampleRateHz, 16_000)
-            val floats = FloatArray(pcm.size) { pcm[it] / 32768.0f }
-            val texto = whisper.transcribeData(floats, printTimestamp = false).trim().lowercase()
-            android.util.Log.i("ClaryonField", "WHISPER PT: $texto")
+        // O Piper gera na taxa da voz; o whisper.cpp exige 16 kHz.
+        val pcm = reamostrar(dito!!.samples, dito.sampleRateHz, 16_000)
+        val resultado = whisper!!.transcribe(pcm, 16_000)
+        val texto = (resultado as? Result.Success)?.value?.text.orEmpty().trim().lowercase()
+        android.util.Log.i("ClaryonField", "WHISPER PT: \"$texto\"")
 
-            assertTrue("texto vazio", texto.isNotBlank())
-            val achou = listOf("central", "guarni", "caminho", "ocorr").count { texto.contains(it) }
+        assertTrue("o STT não devolveu texto: $resultado", texto.isNotBlank())
+        assertTrue(
+            "esperava ao menos 2 palavras de conteúdo da frase falada; veio: \"$texto\"",
+            aceita(texto),
+        )
+    }
+
+    /**
+     * **O contra-teste: o critério de aceite RECUSA transcrição errada.**
+     *
+     * Sem isto, `whisperTranscrevePortuguesOnDevice` passaria também se
+     * [aceita] fosse largo demais — e "o teste passa" não distinguiria whisper
+     * funcionando de critério frouxo. É a pergunta 3 do §6: *se o teste passaria
+     * com o defeito de volta, ele não testa o defeito.*
+     *
+     * Os negativos não são aleatórios. Cada um é um jeito real de o STT errar:
+     * silêncio transcrito como nada, alucinação de modelo pequeno, e — o mais
+     * perigoso — uma frase do MESMO domínio operacional, que compartilha registro e
+     * vocabulário com a esperada sem ser ela.
+     */
+    @Test
+    fun oCriterioDeAceiteRecusaLixo() {
+        val deveAceitar = listOf(
+            "central, a guarnição está a caminho da ocorrência.",
+            "central a guarnicao esta a caminho da ocorrencia",
+            // Um erro de acentuação e um de palavra rara ainda passam: o aceite é
+            // sobre palavras de conteúdo, não sobre a frase literal.
+            "central, a guarniçao esta a caminho da ocorrencia",
+        )
+        val deveRecusar = listOf(
+            "",
+            "                    ",
+            "obrigado por assistir",                       // alucinação clássica
+            "you",                                          // idem, em modelo pequeno
+            "solicito apoio imediato na avenida brasil",    // MESMO domínio, outra frase
+            "a viatura seguiu pela rodovia",                // idem
+        )
+        deveAceitar.forEach {
+            assertTrue("o critério recusou transcrição BOA: \"$it\"", aceita(it))
+        }
+        deveRecusar.forEach {
             assertTrue(
-                "esperava ao menos 2 palavras de conteúdo da frase falada; veio: $texto",
-                achou >= 2,
+                "o critério ACEITOU transcrição errada: \"$it\" — enquanto isto for " +
+                    "verdade, o teste de transcrição passa por frouxidão e não por " +
+                    "o whisper ter funcionado",
+                !aceita(it),
             )
-        } finally {
-            whisper.release()
         }
     }
 
@@ -113,25 +187,24 @@ class WhisperCppSttTest {
     )
     @Test
     fun whisperTranscreveJfkOnDevice() = runBlocking {
-        val temModelo = runCatching {
-            ctx.assets.open("models/ggml-tiny.bin").use { it.read() >= 0 }
-        }.getOrDefault(false)
-        Assume.assumeTrue("modelo ggml-tiny ausente nos assets", temModelo)
+        // O asset aqui também apontava para `ggml-tiny`, que não existe. Corrigido
+        // junto, embora este teste esteja `@Ignore`: um dia alguém tira o `@Ignore`
+        // por um bom motivo, e encontrar o caminho errado esperando por ele é
+        // reinstalar a mesma armadilha com data marcada. `@Ignore` é honesto — ele
+        // aparece como pulado com o motivo escrito —, mas isso não é licença para o
+        // corpo apodrecer.
+        val whisper = Modelos.whisper(ctx)
+        Assume.assumeTrue("modelo whisper ausente em ${Modelos.WHISPER_ASSET}", whisper != null)
 
-        // initContextFromAsset é implementado no jni.c e lê do APK via AAssetManager
-        // (sem copiar 77 MB para o disco do emulador).
-        val whisper = WhisperContext.createContextFromAsset(ctx.assets, "models/ggml-tiny.bin")
-        try {
-            val pcm = readWavPcm(ctx.assets.open("jfk.wav"))
-            val floats = FloatArray(pcm.size) { pcm[it] / 32768.0f }
-            val texto = whisper.transcribeData(floats, printTimestamp = false).trim().lowercase()
-            android.util.Log.i("WhisperCppSttTest", "Transcrição: $texto")
-            assertTrue("texto vazio", texto.isNotBlank())
-            // JFK: "...ask not what your country can do for you..."
-            assertTrue("esperava conteúdo do discurso; veio: $texto",
-                texto.contains("country") || texto.contains("ask"))
-        } finally {
-            whisper.release()
-        }
+        val pcm = readWavPcm(ctx.assets.open("jfk.wav"))
+        val texto = (whisper!!.transcribe(pcm, 16_000) as? Result.Success)
+            ?.value?.text.orEmpty().trim().lowercase()
+        android.util.Log.i("WhisperCppSttTest", "Transcrição: $texto")
+        assertTrue("texto vazio", texto.isNotBlank())
+        // JFK: "...ask not what your country can do for you..."
+        assertTrue(
+            "esperava conteúdo do discurso; veio: $texto",
+            texto.contains("country") || texto.contains("ask"),
+        )
     }
 }
