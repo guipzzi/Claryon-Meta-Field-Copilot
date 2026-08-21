@@ -1,74 +1,60 @@
-# Onde estamos — 2026-08-20 · Os 12 fechados; transmissão por voz de ponta a ponta
+# Onde estamos — 2026-08-21 · Os dois bloqueios da Etapa B caíram; corpus de lei em pé
 
 **Reescrito a cada sessão, nunca acrescentado. Teto duro: 60 linhas.** O resto vai para `DECISIONS.md`.
 
 ## O que funciona hoje
 
-- `./gradlew build` verde. **707 testes JVM, 0 falhas, 0 pulados** · instrumentados OK.
+- `./gradlew build` verde. **813 testes JVM, 0 falhas, 0 pulados** · instrumentados OK.
 - **PTT:** toque→1º quadro **31–48 ms** (120) · P1 corta em **11 ms** (≤200) · **WER 3,4%** ·
-  earcon **305 ms** (500). **REVOGAÇÃO** (`0014`) · **AUTORIA** (`0013`+`0015`) conferida contra
-  `floor_grants`.
-- **CANAL PRIVADO POR JWT** (`0012`): não-membro recebe `Unauthorized`; token renovado pelo `exp`.
-  E o indicador parou de mentir — mandava **168 quadros para um canal em que não entrou**.
-- **PALAVRA DE ATIVAÇÃO LIGADA.** Faltava mais que chamador: os pesos viviam em
-  `androidTest/assets`, então `preparar()` em produção daria `false` — e o teste passava lendo os
-  assets do próprio APK de teste. Roda no serviço e só onde `PowerPolicy.hfpAberto`, a MESMA
-  regra do tipo `MICROPHONE` do FGS. No aparelho: **1500 quadros em 30,0 s** = 50/s exatos; com
-  PTT de 6 s, **300 calados** = 6,0 s. Cala na saída própria, no PTT e por um ciclo, e **reinicia
-  o anel nas duas bordas da mudez** — senão avaliaria uma janela que nunca existiu.
-- **O CÉREBRO SAIU DO VIEWMODEL.** O ciclo morria com a Activity, e bipe que não leva a nada
-  afirma ter ouvido. `CerebroDoCopiloto` é dono de processo; a captura de evidência foi junto
-  (custódia em `viewModelScope` era defeito) e o ViewModel caiu de 596 para **65 linhas**.
-  `CicloSemTelaTest` roda em 8,578 s — o teto do ciclo — sem construir ViewModel nenhum.
-- **TRANSCRIÇÃO NA ORIGEM (P1)**, com fala humana e servidor real: **80 000 amostras** = os 5,0 s
-  exatos → whisper → o par headless recebeu texto **idêntico**.
-- **DONO ÚNICO DA POSIÇÃO** (`0016`): políticas abertas foram **exploradas** (POST gravou
-  `updated_at = 2099`). **LOG DE ACESSO** (`0017`+`0018`) e **RETENÇÃO** (`0019`) no servidor, com
-  `pg_cron`; o que falta delas no cliente está nos quebrados.
-- **BATIMENTO ALCANÇÁVEL** — ele não existia. O `minDistance` suprime a entrega (*"will not
-  occur"*, AOSP): agente parado não recebia callback e a linha nunca rodava — pior em Ocorrência,
-  onde ele chega e fica. Emulador, parado, 3,5 min: **5 publicações com o conserto, 1 sem**.
-- **IDADE REAL DA CORREÇÃO** (`0020`): `updated_at` é hora do UPLOAD e cinco funções a liam como
-  idade — quem reconectava após 4 min entrava como `idade_s = 0` e `agentes_no_raio` o contava
-  como "está perto". O cliente manda **duração**, nunca instante: `now() - greatest(0, idade)`
-  não dá futuro **por construção**. `0009` 17/17: a mesma linha dá 0 no novo filtro, 1 no antigo.
-- **FALSO ACEITE QUE ABRE CANAL: 0 em 54 min** (meta ≤1 por 8 h). O único disparo do estágio 1
-  **não** passou pelo estágio 2 — a conjunção detector+transcrição fez o que promete. É a
-  primeira medida deste aceite.
-- **PORTA DE CORREÇÃO**: degradação relativa, salto por **incerteza combinada**, **válvula de 3
-  recusas** — sem ela um salto verdadeiro congela o marcador. E `ultimaPosicao()` pega a melhor.
+  earcon **305 ms** (500) · REVOGAÇÃO (`0014`) · AUTORIA (`0013`+`0015`) · CANAL PRIVADO POR
+  JWT (`0012`: não-membro recebe `Unauthorized`).
+- **PALAVRA DE ATIVAÇÃO LIGADA**, dona de processo (`CerebroDoCopiloto`; ViewModel 596→65
+  linhas): 1500 quadros em 30,0 s = 50/s exatos, calando na saída própria, no PTT e por um
+  ciclo, e reiniciando o anel nas duas bordas da mudez. **TRANSCRIÇÃO NA ORIGEM (P1)** com
+  fala humana e servidor real: o par headless recebeu texto **idêntico**. **POSIÇÃO:** dono
+  único (`0016`), log de acesso (`0017`+`0018`), retenção (`0019`), idade como duração
+  (`0020`), batimento alcançável (`minDistance` suprimia a entrega: 5 publicações contra 1).
+- **COLISÃO DO ggml RESOLVIDA — e o APK ENCOLHEU 884 KB** (−14%). Os três `libggml*.so`
+  existiam porque `ggml/CMakeLists.txt:74` põe `BUILD_SHARED_LIBS_DEFAULT` em ON fora do
+  Windows: **ninguém escolheu publicá-los.** Com `-DBUILD_SHARED_LIBS=OFF` o ggml linka
+  estático — 456 símbolos `ggml_*` dentro do `libwhisper.so`, zero `DT_NEEDED` em libggml,
+  zero libggml no `unzip -l` de debug E release. A armadilha era CMP0077: sob a política OLD
+  dos nossos escopos `set()` seria descartado calado — por isso vai pelo Gradle, como cache.
+- **CORPUS DE LEI**: 1817 trechos do Planalto (CTB, CPP, CP, Drogas, Desarmamento), com
+  procedência escrita e conferidor que reprova por 7 critérios, testado por mutação.
 
 ## O que está quebrado, e nós sabemos
 
-1. **Falso positivo do earcon: 0,99/h contra a meta de 0,5/h**, medido em **3,04 h retidas**
-   (5 podcasts, cada um cortado ao meio no tempo). A cabeça `v5` corta pela metade a que estava
-   em produção (1,65 → 0,99/h no mesmo áudio) sem custar recall — 100% nas retidas, com escore
-   mínimo MAIOR. Não subir o limiar: em 0,99 dá zero disparo, mas zero em 3,04 h tem teto de
-   0,99/h pela regra dos três, e o lado positivo são 9 clipes limpos de um locutor. **Antes:** o 0,52/h reportado era
-   **otimista por defeito do arranjo**: o teste fatia o áudio em 5 min e chama `reiniciar()`
-   entre as fatias, e produção nunca reinicia — é fluxo contínuo o turno inteiro. O avaliador
-   alinhado ao anel do aparelho, sobre o fluxo contínuo, acha 3 disparos onde o fatiado achava 1;
-   o PRIMEIRO bate ao segundo (1906,6 s), o que valida o alinhamento. Em 115,5 min. Era **89,85/h**;
-   dois retreinos com 177 min de podcast como negativo duro (protocolo do `duro.py`: cada podcast
-   cortado ao meio NO TEMPO, metade treina, metade mede). Escore máximo **0,997 → 0,647 → 0,508**,
-   e o único disparo cruza o limiar por 0,008. **O gargalo agora é POSITIVO, não negativo**: o
-   modelo treina com 18 elocuções de UM locutor, e no limiar que zera o falso positivo (0,9) o
-   recall cai para 85% — abaixo dos 90% do aceite. Mais podcast não resolve isso; mais vozes
-   dizendo "Claryon", sim.
-2. **Recall do gatilho: 3/4 locutores** (Bruna, Carla e Pedro sim; Guido virou "Blerium" — e é a
-   voz que TREINOU o detector). Quatro pronúncias por microfone de celular, não as 30 por fone
-   HFP que o aceite pede. E "na escuta" dito por 4 vozes humanas **não** abriu canal: 0/4.
-3. **`CaosDoDatTest` falha um teste por rodada**, variando qual; falha em `HEAD` limpo. E a
-   preempção de P1 **não alcança a fase de `render`** — o buraco do aceite (b).
-4. **Nada difícil é medido em ambiente próprio:** sem pilha de servidor separada (exige Docker)
-   e sem GPS ruim de verdade — a porta de correção só viu teste sintético e emulador a 5 m.
-5. **`medida_em` é otimista pelo tempo de ida**, sempre nessa direção: 0,4% de 120 s (ver `0020`).
-6. **O gazetteer versionado tem 2 logradouros** — é semente, não gazetteer; a lista operacional
-   é dado da corporação. · `errorStream` não coletado · `STOPPED` não terminal · câmera do DAT
-   nunca pedida · três cláusulas da Fase 2 presas a HFP · `security-crypto` em alpha.
+1. **A Etapa A da Fase 4 está em 2 de 5**, e falta o coração: **embedder e índice vetorial
+   não existem** (2 sessões). Há a porta (`PortaDoConhecimento`) e o contrato
+   (`BaseDeConhecimento`, sem implementação). **`core-knowledge` tem zero chamadores** e `app`
+   nem declara a dependência — escrito, não construído. E o teste da fronteira está em
+   `core-knowledge`, quando o ROADMAP exige que viva em `app`.
+2. **Eu dei ao extrator quatro contagens vindas do regex quebrado.** CTB 389, CP 430, drogas
+   114, desarmamento 52 são o que `Art\.\s*\d+` devolve sobre HTML cru sem resolver entidade
+   — a régua que o `PROCEDENCIA.md` já tinha desmascarado no CPP horas antes. Consertei um
+   caso e generalizei. Reais: 391/851/434/100/41. Viraram **regressão de sinal invertido**.
+3. **No aparelho, a `v5` PIORA neste áudio**: 4 disparos (2,08/h) contra 3 da `v3` (1,56/h),
+   mesmo material e arranjo. Não desmente o "cai pela metade", medido em Python sobre metades
+   **retidas** — desmente que a v5 melhore em toda parte. E **o negativo desta bancada virou
+   negativo de treino** (`podcast5.py` treina com a primeira metade de cinco podcasts, dois
+   são estes): sobre metade do material o número é otimista por construção.
+4. **Falso positivo do earcon: 0,99/h contra 0,5/h** (3,04 h retidas) e **recall do gatilho
+   3/4 locutores** — Guido, a voz que TREINOU o detector, virou "Blerium". O gargalo dos dois
+   é **POSITIVO**: 18 elocuções de UM locutor, e no limiar que zera o falso positivo o recall
+   cai a 85%, abaixo dos 90% do aceite. **Mais vozes dizendo "Claryon" resolvem os dois; mais
+   podcast, nenhum** — 15–20 elocuções por locutor, por fone HFP.
+5. **`WhisperCppSttTest` procura `ggml-tiny.bin`; o projeto embarca `ggml-small-q5_1.bin`** —
+   os dois testes da classe estão permanentemente pulados e reportam verde. · `CaosDoDatTest`
+   falha um teste por rodada em `HEAD` limpo · preempção de P1 não alcança `render` (aceite
+   (b)) · nada difícil medido em ambiente próprio (sem Docker, sem GPS ruim) · `medida_em`
+   otimista por 0,4% de 120 s · gazetteer com 2 logradouros · `errorStream` não coletado ·
+   `STOPPED` não terminal · `security-crypto` em alpha.
 
 ## O que vem a seguir
 
-**O prazo duro é 22/08**, e o que falta da Fase 0 é o **documento no template da organização** —
-não código. Depois: dar porta às duas capacidades do item 1 (barato, fecha a Fase 3 de verdade),
-e então Fase 4 (RAG extrativo, Etapa A) e Fase 5 (UX e ensaio).
+**O prazo duro é 22/08 — amanhã — e o que falta da Fase 0 é o documento no template da
+organização mais a análise de risco LGPD, não código.** Depois, o item 1: embedder e índice
+fecham a Etapa A, sem depender de decisão em aberto. A Etapa B está **destravada** (motor
+decidido, colisão resolvida, Regra Zero cumprida — o llama.cpp entra como submódulo, e não
+existe coordenada Maven a conferir), e segue sendo o primeiro item cortado se apertar.

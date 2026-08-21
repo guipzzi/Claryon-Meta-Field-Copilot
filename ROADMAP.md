@@ -486,15 +486,20 @@ antes de qualquer linha de código de LLM existir.
 
 **Dois fatos verificados neste repositório mudam a escolha de motor e precisam estar aqui:**
 
-1. **O ggml deste projeto é compilado como biblioteca compartilhada.**
-   `core-voice/build/intermediates/merged_native_libs/release/.../lib/arm64-v8a/` contém
-   `libggml.so`, `libggml-base.so` e `libggml-cpu.so`. O `lib/arm64-v8a/` dentro do APK é
-   um diretório plano, e llama.cpp compilado pelo mesmo CMake produz **os mesmos três nomes
-   de arquivo**. Ou o merge de jniLibs falha, ou um `pickFirst` faz whisper.cpp e llama.cpp
-   linkarem contra uma única revisão de ggml, com ABI incompatível e crash só em runtime.
-   Isso não é "alguns MB de disco duplicado": é renomear os alvos do llama.cpp ou unificar
-   revisões de ggml, e unificar arrisca o STT que hoje funciona. **"É uma tarde" está
-   errado.**
+1. ~~**O ggml deste projeto é compilado como biblioteca compartilhada.**~~ **RESOLVIDO em
+   21/08** — e a causa era mais rasa do que este item supunha. Os três `.so`
+   (`libggml.so`, `libggml-base.so`, `libggml-cpu.so`) existiam porque
+   `whisper/ggml/CMakeLists.txt:74` põe `BUILD_SHARED_LIBS_DEFAULT` em ON fora de
+   Emscripten e MinGW, e a `option()` da linha 85 só herda esse default: **ninguém
+   escolheu publicá-los.** Passando `-DBUILD_SHARED_LIBS=OFF` pelos argumentos do CMake
+   no `core-voice`, o ggml linka estático dentro de `libwhisper.so` e o APK fica com
+   **zero libggml** — conferido por `unzip -l` no debug e no release, e por
+   `llvm-readelf -d`, que já não lista libggml em `DT_NEEDED`. Assim o llama.cpp fica
+   livre para usar a configuração oficial dele em vez de receber remendo em CMake
+   vendorizado. O custo estimado aqui ("alguns MB de disco duplicado") também estava
+   errado, na direção contrária: o payload nativo **encolheu 884 KB** (−14%), porque
+   `--gc-sections` + `-flto` fazem cada `libwhisper` puxar só o ggml que chama. Detalhes
+   e a armadilha de política CMP0077 em `DECISIONS.md` (21/08).
 2. **Llama 3.2 1B e 3B são texto puro.** O pedido inclui interpretação de foto e vídeo
    depois; visão só existe em 11B/90B, que não cabem no aparelho. Escolher 1B hoje é
    escolher trocar de família, tokenizador e prompt depois — não "trocar um arquivo".
@@ -738,11 +743,12 @@ falham lá.
   todo mundo, o turno inteiro. Mitigação: a janela é o **teto** e cada abertura passa pelo
   log de acesso; emergência prolongada, se precisar de mais, ganha porta própria com
   registro de quem abriu.
-- **Regra Zero pode dobrar o tempo das Fases 3 e 4.** A API de canal privado/`setAuth` do
-  Supabase Realtime, a assinatura de `cron.schedule` e as coordenadas Maven do motor de LLM
-  **não estão confirmadas**. Mitigação: a primeira meia sessão de cada fase é só confirmação,
-  antes de qualquer diff; plano B do canal é validação de token na Edge Function com rotação
-  curta, não improviso no cliente.
+- ~~**Regra Zero pode dobrar o tempo das Fases 3 e 4.**~~ **As três confirmações foram
+  feitas** — canal privado/`setAuth` e `cron.schedule` em 18/08, motor de LLM em 21/08. E o
+  risco se pagou: em 21/08 a confirmação do llama.cpp corrigiu **duas** coisas que eu tinha
+  de memória e que teriam virado código errado (o módulo chama-se `lib`, não `llama`; e o
+  caminho que escrevi de cabeça deu 404). Meia sessão de confirmação continua sendo a
+  primeira coisa de cada fase.
 - **E2EE mal desenhado derruba o rádio em vez de protegê-lo.** Rotação de época iniciada
   pelo cliente, sem árbitro, produz split-brain justamente quando a composição do grupo
   muda. E chave de grupo sem assinatura por emissor não impede a forja de um P1. Mitigação:
@@ -757,14 +763,15 @@ falham lá.
 
 ## Decisões ainda em aberto
 
-- **1. Motor e modelo da Etapa B (Fase 4).** Duas opções, e a diferença é grande: **(a)**
-  llama.cpp com um GGUF de licença permissiva (Qwen3 1.7B é Apache-2.0), pagando o custo
-  confirmado de renomear alvos para não colidir com os `libggml*.so` do whisper; **(b)**
-  LiteRT-LM com um modelo multimodal, que atende a segunda metade do pedido (foto e vídeo)
-  sem trocar de família depois. A pesquisa indica que o artefato Maven do LiteRT-LM existe,
-  mas isso **não foi confirmado por doc oficial nesta sessão** — e a Regra Zero manda parar
-  e perguntar antes de qualquer linha em `build.gradle.kts`. Decisão pede meia sessão de
-  confirmação, não opinião.
+- ~~**1. Motor e modelo da Etapa B (Fase 4).**~~ **DECIDIDO: llama.cpp** (decisão humana em
+  20/08, licença adiada por decisão explícita). A Regra Zero foi cumprida em 21/08 e mudou
+  a pergunta: **não há artefato Maven a confirmar.** O caminho Android oficial do llama.cpp
+  é build de FONTE — `examples/llama.android/lib/src/main/cpp/CMakeLists.txt:34` faz
+  `add_subdirectory(${LLAMA_SRC} build-llama)`, e o módulo (que se chama `lib`, não
+  `llama`) declara `externalNativeBuild { cmake { path(...) } }`. É a mesma forma que o
+  whisper.cpp já tem aqui, então não há coordenada, versão nem `javap` a conferir: há um
+  submódulo a acrescentar. O custo de "renomear alvos" que este item cobrava **não existe
+  mais** — ver o fato 1 acima. O que resta em aberto é só a licença, adiada.
 - **2. Origem do corpus do RAG.** (material aberto e de fabricante / POP de corporação
   parceira / outro). É o item que trava a Fase 4 inteira e não é resolvível por engenharia.
 - **3. Verificação de locutor por embedding — permitido ou proibido?**
