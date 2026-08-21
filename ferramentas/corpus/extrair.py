@@ -546,6 +546,17 @@ def conferir(resumo: dict, linhas: list[dict]) -> list[str]:
                 f"{norma}: a contagem bateu com a régua INGÊNUA ({ingenua}). "
                 f"Entidade HTML voltou a não ser resolvida, ou o riscado voltou a contar.")
 
+    # Colisão = o mesmo artigo apareceu vivo duas vezes. Com o riscado sendo
+    # respeitado ela é zero em todas as cinco normas. Sem esta linha, desligar a
+    # detecção de riscado NÃO reprova: a deduplicação por identificador absorve
+    # as redações antigas e o total continua igual — só o TEXTO fica errado.
+    for norma, dados in resumo.items():
+        if dados["colisoes"]:
+            erros.append(
+                f"{norma}: {len(dados['colisoes'])} artigos vivos em duplicata "
+                f"({', '.join(dados['colisoes'][:6])}). A redação anterior "
+                f"deixou de ser reconhecida como riscada.")
+
     for norma, (lo, hi, lacunas) in FAIXAS.items():
         base = resumo[norma]["numeros_base"]
         if (min(base), max(base)) != (lo, hi):
