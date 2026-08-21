@@ -1,8 +1,10 @@
 package com.claryon.field
 
 import android.content.pm.PackageManager
+import android.graphics.Color
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.Composable
@@ -55,7 +57,17 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         // Borda a borda: a moldura de "no ar" precisa alcançar as bordas físicas
         // da tela para ser o aviso que ela promete ser.
-        enableEdgeToEdge()
+        //
+        // **`dark` explícito, e não o padrão `auto`.** O padrão segue o modo do
+        // sistema, e este aplicativo NÃO segue o modo do sistema — `TemaClaryon`
+        // recusa variante clara por escrito. Com o emulador em modo claro, o
+        // Android pedia ícones escuros para a barra de status e hora, bateria e
+        // sinal desapareciam sobre o ardósia. São dados que o agente lê de
+        // relance, e some justamente em quem não trocou o aparelho para escuro.
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
+        )
 
         setContent {
             TemaClaryon {

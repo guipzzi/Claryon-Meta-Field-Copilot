@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  A MARCA DO CLARYON FIELD — mesma geometria de `ui/marca/Marca.kt`.
+
+  Duas representações da mesma forma existem porque elas têm consumidores
+  diferentes e incompatíveis: o Compose desenha em `DrawScope` (e é o único que
+  anima, na abertura), e a abertura do sistema e o ícone adaptativo do launcher
+  só aceitam drawable de recurso. O que NÃO existe é uma segunda fonte da
+  verdade: os números abaixo são as frações de `GeometriaDaMarca` multiplicadas
+  pelo raio externo 29, e `MarcaTest` refaz essa multiplicação e compara com este
+  arquivo. Divergiu, quebra o build.
+
+  Viewport 108×108 — a medida do ícone adaptativo (`<foreground>`). Raio externo
+  29: a caixa da marca (58 × 36,25) tem meia-diagonal 34,2, então ela cabe inteira
+  num círculo de 68,4 — dentro dos 72 que qualquer máscara do launcher preserva,
+  redonda, quadrada ou squircle.
+
+    centro ......... (54; 43,125)     raio externo ... 29
+    pupila ......... 7,25             vão .......... 3,045
+    onda 1 ......... eixo 12,3975  traço 4,205
+    onda 2 ......... eixo 19,6475  traço 4,205
+    onda 3 ......... eixo 26,8975  traço 4,205
+
+  `fillColor` branco puro e não `Cores.Tinta`: aqui a marca é recortada por
+  máscara sobre o fundo do launcher, e num ícone de 48 dp o branco quebrado perde
+  contraste contra o ardósia. Dentro do aplicativo quem pinta é o Compose, com
+  `Tinta`.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!--
+      A pupila: círculo inteiro. Dois semiarcos porque `pathData` não tem
+      primitiva de círculo — é a mesma forma, escrita do jeito que o formato
+      aceita.
+    -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M46.75,43.125
+                          A7.25,7.25 0 0 1 61.25,43.125
+                          A7.25,7.25 0 0 1 46.75,43.125
+                          Z" />
+
+    <!-- Onda 1 — a íris. O vão de 3,045 entre ela e a pupila é o anel preto. -->
+    <path
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="4.205"
+        android:strokeLineCap="butt"
+        android:pathData="M41.6025,43.125 A12.3975,12.3975 0 0 0 66.3975,43.125" />
+
+    <!-- Onda 2. -->
+    <path
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="4.205"
+        android:strokeLineCap="butt"
+        android:pathData="M34.3525,43.125 A19.6475,19.6475 0 0 0 73.6475,43.125" />
+
+    <!-- Onda 3. -->
+    <path
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="4.205"
+        android:strokeLineCap="butt"
+        android:pathData="M27.1025,43.125 A26.8975,26.8975 0 0 0 80.8975,43.125" />
+</vector>

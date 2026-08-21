@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Mesma definição do `ic_launcher`. O ícone adaptativo já é recortado pela
+  máscara do launcher, então não há segunda arte para a variante redonda —
+  existe só porque alguns launchers pedem `roundIcon` explicitamente e, sem o
+  recurso, caem no ícone padrão do sistema.
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@drawable/fundo_do_icone" />
+    <foreground android:drawable="@drawable/marca_claryon" />
+    <monochrome android:drawable="@drawable/marca_claryon" />
+</adaptive-icon>

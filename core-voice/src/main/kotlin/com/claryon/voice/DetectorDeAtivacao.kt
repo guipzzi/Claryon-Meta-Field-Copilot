@@ -166,8 +166,23 @@ class DetectorDeAtivacao(
      * **A janela desenrolada, alocada UMA vez.**
      *
      * Antes era um `FloatArray(AMOSTRAS)` novo a cada avaliação. Medido no aparelho
-     * em 21/08: **781 KB/s de lixo** — 16 000 floats × 4 bytes × 12,5 avaliações/s
-     * —, gerados o turno inteiro, num aparelho que também roda mapa, rádio e cofre.
+     * em 21/08, com `OficinaDeDesperdicioTest`:
+     *
+     * ```
+     *                          antes      depois
+     * CPU contínua            24,9%        4,5%   de UM núcleo
+     * por quadro (p50)       11,2 µs      1,0 µs
+     * lixo gerado           781 KB/s         0
+     * ```
+     *
+     * São 16 000 floats × 4 bytes × 12,5 avaliações/s, o turno inteiro, num aparelho
+     * que também roda mapa, rádio e cofre.
+     *
+     * **Estes números estavam só na mensagem de commit, e isso foi apontado como
+     * defeito** — com razão. Uma auditoria de energia procurou "24,9%" em `.kt` e
+     * `.md` e não achou: medida que vive só no histórico do git é medida perdida,
+     * porque ninguém faz arqueologia de commit para saber por que uma linha existe.
+     * O lugar do número é ao lado do que ele mediu.
      *
      * O buffer é seguro de reusar porque `avaliar()` roda numa thread só (o laço de
      * captura) e o conteúdo é sobrescrito por completo antes de ser lido: as

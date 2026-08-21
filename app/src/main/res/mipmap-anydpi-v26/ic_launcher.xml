@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Ícone adaptativo, gerado A PARTIR DO VETOR — não há PNG em densidade nenhuma
+  neste projeto, e não precisa haver: `minSdk` é 31, e ícone adaptativo existe
+  desde a 26. Um conjunto de bitmaps por densidade seria uma segunda fonte da
+  verdade para a mesma forma, que envelheceria sozinha na primeira vez que a
+  proporção mudasse.
+
+  `<monochrome>` aponta para a mesma marca: nos ícones temáticos do Android 13+ o
+  sistema recolore a silhueta com a cor do papel de parede. A marca funciona
+  porque é forma pura, sem texto e sem gradiente — que era o argumento para
+  desenhá-la assim desde o começo.
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@drawable/fundo_do_icone" />
+    <foreground android:drawable="@drawable/marca_claryon" />
+    <monochrome android:drawable="@drawable/marca_claryon" />
+</adaptive-icon>

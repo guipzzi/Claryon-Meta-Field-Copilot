@@ -1,9 +1,56 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!--
-      Tema base mínimo apenas para o manifest. A aparência real é definida em
-      Compose (MaterialTheme). Usar um tema base do Android evita puxar a
-      dependência de Material Components (XML).
+      Tema base do manifest. A aparência real é definida em Compose
+      (`TemaClaryon`); este arquivo cuida do que existe ANTES da primeira
+      composição — e o que existia era uma tela branca.
+
+      **O defeito, medido no emulador em 21/08:** o tema herdava de
+      `Theme.Material.Light`, então a tela de abertura automática do Android 12+
+      (que todo aplicativo tem, queira ou não) pintava o fundo de BRANCO por todo
+      o tempo de partida a frio. `Tema.kt` recusa variante clara com um argumento
+      literal — *"uma tela branca queima a visão noturna dele por minutos"* — e o
+      aplicativo abria exatamente com isso, no único instante que ele não
+      controlava por Compose.
+
+      Os três atributos abaixo são de API 31, e `minSdk` é 31: não há
+      `values-v31` a manter.
     -->
-    <style name="Theme.ClaryonField" parent="android:Theme.Material.Light.NoActionBar" />
+    <style name="Theme.ClaryonField" parent="android:Theme.Material.NoActionBar">
+
+        <!-- O mesmo `Cores.Vazio` do aplicativo. A partida deixa de piscar. -->
+        <item name="android:windowSplashScreenBackground">#FF0A0C0F</item>
+
+        <!--
+          A marca na abertura do sistema, e não o ícone adaptativo inteiro: o
+          ícone traz o próprio fundo ardósia, que sobre o fundo ardósia da
+          abertura desenharia um disco levemente diferente por causa do
+          antialiasing da máscara. A marca sozinha flutua.
+
+          Ela aparece duas vezes seguidas — aqui parada, e depois em
+          `AberturaDoTurno` construindo-se. Não é repetição acidental: as duas
+          estão sobre o MESMO fundo, e a saída em fusão do sistema sobrepõe a
+          entrada da nossa, então a leitura é de uma marca só que ganha vida.
+          A alternativa era abertura de sistema vazia — preto puro durante a
+          partida a frio —, que é o vazio sem rosto que este projeto vem
+          eliminando.
+        -->
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/marca_claryon</item>
+
+        <!--
+          O que fica entre a abertura do sistema e o primeiro quadro do Compose.
+          Sem isto, o padrão do tema volta a valer por um quadro — e um quadro
+          branco é visível.
+        -->
+        <item name="android:windowBackground">#FF0A0C0F</item>
+
+        <!--
+          Ícones da barra de status CLAROS. O tema claro pedia ícones escuros, e
+          sobre o ardósia eles somem. Não é decisão de gosto: hora e bateria são
+          dados que o agente lê de relance.
+        -->
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
 </resources>

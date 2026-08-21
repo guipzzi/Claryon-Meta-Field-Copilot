@@ -105,6 +105,19 @@ android {
             isReturnDefaultValues = true
         }
     }
+
+    // **`MarcaTest` lê o `VectorDrawable` do disco, e o Gradle não sabia disso.**
+    //
+    // Ele compara `res/drawable/marca_claryon.xml` com as frações de
+    // `GeometriaDaMarca` — é o que impede a marca do ícone e a marca da abertura
+    // de virarem duas formas diferentes. Sem esta linha o arquivo não é entrada da
+    // tarefa: depois de uma rodada verde, mexer SÓ no vetor deixava o teste
+    // `UP-TO-DATE`, ele nem rodava, e a divergência passava. Medido: a primeira
+    // tentativa de contra-teste "passou" exatamente assim.
+    testOptions.unitTests.all {
+        it.inputs.file("src/main/res/drawable/marca_claryon.xml")
+            .withPathSensitivity(org.gradle.api.tasks.PathSensitivity.RELATIVE)
+    }
     // Lint ATIVO (o AGP 8.9.2 corrigiu o bug com Kotlin 2.2). O único achado
     // suprimido é o MissingPermission do AudioRecord, com justificativa no
     // próprio ponto de uso.
