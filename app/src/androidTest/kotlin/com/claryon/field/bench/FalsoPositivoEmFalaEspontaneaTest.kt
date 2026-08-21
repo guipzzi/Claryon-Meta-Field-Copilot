@@ -45,7 +45,7 @@ private const val UM_SEGUNDO = 16_000
  *
  * ## O que este teste NÃO faz
  *
- * Não transcreve. O whisper sobre 54 min levaria horas e a pergunta não é sobre
+ * Não transcreve. O whisper sobre quase 2 h levaria horas e a pergunta não é sobre
  * transcrição: é sobre o **estágio 1**, o detector acústico que roda o turno
  * inteiro. Ele é quem dispara o earcon, e é o falso positivo DELE que o aceite
  * limita em 0,5/h.
@@ -67,11 +67,11 @@ private const val UM_SEGUNDO = 16_000
  *
  * Consertar a emenda faz o número **subir**, e é esse o ponto: um arranjo que fica
  * surdo em pedaços do material conta menos disparos do que o turno real teria.
- * Medido no emulador, mesmo áudio (115,5 min, dois podcasts) e mesma cabeça:
+ * No emulador, mesmo áudio (115,5 min, dois podcasts) e mesma cabeça (`cabeca_v3`):
  *
  * ```
- * fatiado, com reiniciar()    1 disparo    0,52/h    maior escore 0,508
- * contínuo, como no turno     3 disparos   1,56/h    maior escore 0,743
+ * fatiado, com reiniciar()    1 disparo    0,52/h    maior escore 0,508   (20/08)
+ * contínuo, como no turno     3 disparos   1,56/h    maior escore 0,743   (21/08)
  * ```
  *
  * O maior escore é o que mais denuncia o arranjo: o fatiado não perdeu só evento na
@@ -82,13 +82,32 @@ private const val UM_SEGUNDO = 16_000
  * É a coincidência que valida o alinhamento: os arranjos concordam sobre o disparo
  * que ambos veem e divergem sobre os que a emenda apagava.
  *
- * O Python e o aparelho ainda **não** contam igual, e a causa é aritmética: a decisão
- * sai quando `desde % 1280 == 0` com `desde` andando módulo 16 000, e 16 000 não é
- * múltiplo de 1280. A cada volta do anel a grade escorrega 640 amostras — o aparelho
- * decide 13 vezes por segundo, em instantes que derivam, e o avaliador decide 12,5 em
- * instantes fixos. Com eventos que cruzam o limiar por 0,008, grade diferente é
- * contagem diferente. **Quem manda é este teste**: é o laço que roda no bolso do
- * agente.
+ * O Python e o aparelho ainda **não** contam igual, e agora dá para dizer por quanto:
+ * no primeiro podcast o avaliador acha 3 (1906,6 · 2010,5 · 2939,4 s) e o aparelho,
+ * já contínuo, acha 2 — os mesmos 1906,6 e 2939,4, com o mesmo maior escore (0,706).
+ * O que sobra é um evento, e o suspeito é a grade de decisão — isto está **lido** em
+ * `aceitar`, não medido evento a evento; medida é a divergência. A decisão sai quando
+ * `desde % 1280 == 0` com `desde` andando módulo 16 000, e 16 000 **não** é múltiplo
+ * de 1280. A cada volta do anel a grade escorrega 640 amostras: o aparelho decide 13
+ * vezes por segundo, em instantes que derivam, e o avaliador decide 12,5 em instantes
+ * fixos. As janelas são as mesmas (`x[n-16 000, n)`); o que muda é o `n`. Com eventos
+ * que cruzam o limiar por 0,008, grade diferente é contagem diferente.
+ *
+ * **Quem manda é este teste**, não o avaliador: aqui roda o laço que roda no bolso do
+ * agente. O Python continua útil para varrer cabeça nova em minutos — só não fecha
+ * aceite sozinho.
+ *
+ * A cabeça trocou logo depois desta medida: a `v5` entrou em produção em `7d8337a`.
+ * A tabela acima não envelheceu com isso, porque ela nunca foi sobre a cabeça — é
+ * comparação de **arranjo**, com a mesma `v3` dos dois lados. O que o teste imprime
+ * ao rodar é sempre a cabeça que estiver no APK.
+ *
+ * E a `v5` foi medida aqui, no mesmo material e no mesmo arranjo contínuo: **4
+ * disparos, 2,08/h**, contra os 3 da `v3`. O quarto (`p2@214,4 s`) cai dentro da
+ * metade que **treinou** a `v5`. Isso não desmente o "cai pela metade" do retreino,
+ * que foi medido em Python sobre as metades retidas de cinco podcasts — material
+ * diferente, grade diferente. Desmente qualquer leitura de que a `v5` melhora em
+ * toda parte: neste áudio, no laço do aparelho, ela piora.
  *
  * **Entre PODCASTS o reinício continua correto**, e continua aqui: ali o áudio muda
  * de fonte de verdade, e emendar o fim de um no começo do outro avaliaria uma janela
@@ -99,14 +118,16 @@ private const val UM_SEGUNDO = 16_000
  * Os 89,85/h de `02d9dad` saíram **deste mesmo teste, neste mesmo aparelho, com o
  * arranjo fatiado**: 81 disparos em 0,90 h. Os dois lados da comparação carregam,
  * portanto, o mesmo viés — e o viés é subcontagem. Se ele move o número antigo, move
- * para **cima**: 11 emendas × 1 s de anel são 0,3% do material, e com escore máximo
- * de 0,997 nenhum daqueles 81 disparos dependia de 80 ms de fase para existir.
+ * para **cima**: as 10 emendas daquele podcast × 1 s de anel são 0,3% do material, e
+ * com escore máximo de 0,997 nenhum daqueles 81 disparos dependia de 80 ms de fase
+ * para existir.
  *
  * A comparação sobrevive porque o erro é conservador: o ganho do retreino é, no
- * mínimo, o que os números dizem. O que **não** sobreviveria é comparar o 0,52/h
- * fatiado com qualquer coisa medida em fluxo contínuo — no regime de 1 a 3 eventos,
- * em que o disparo cruza o limiar por 0,008, a fase decide se o evento existe. Por
- * isso o arranjo fatiado foi removido em vez de mantido "por compatibilidade".
+ * mínimo, o que os números dizem. O que **não** sobrevive é tratar o 0,52/h fatiado
+ * como a taxa do turno, ou medir a próxima cabeça em fluxo e declará-la pior que ele
+ * — no regime de 1 a 3 eventos, em que o disparo cruza o limiar por 0,008, a fase
+ * decide se o evento existe. Por isso o arranjo fatiado foi removido em vez de
+ * mantido "por compatibilidade": ter os dois convidaria exatamente essa comparação.
  *
  * ## Sobre o material
  *
@@ -120,6 +141,21 @@ private const val UM_SEGUNDO = 16_000
  * ffmpeg -i negativo.wav -f segment -segment_time 300 -c copy fatia_%02d.wav
  * adb push fatia_*.wav .../files/bench/negativo/   # 2º podcast entra como p2_*.wav
  * ```
+ *
+ * ## O que este arranjo ainda NÃO garante
+ *
+ * **O negativo desta bancada virou negativo de treino.** `ferramentas/ativacao/podcast5.py`
+ * treina a cabeça `v5` com a **primeira metade** de cinco podcasts, e dois deles são
+ * exatamente estes (`fatia_*` é `negativo.wav`, `p2_*` é `negativo2.wav`). Metade do
+ * material daqui o modelo já viu, e sobre essa metade o número é otimista por
+ * construção. Quem mede negativo retido hoje é o protocolo em Python, com as metades
+ * que não treinaram.
+ *
+ * Isso é arranjo, não código, e fecha empurrando para o aparelho as **metades
+ * retidas** (`retido_*.wav`, que o agrupamento por prefixo já trata como material
+ * próprio) em vez dos podcasts inteiros. Fica escrito porque um número medido em
+ * parte sobre o treino, sem esta linha, passaria por número do mundo — que é o mesmo
+ * erro da emenda, só que na outra ponta.
  */
 @RunWith(AndroidJUnit4::class)
 class FalsoPositivoEmFalaEspontaneaTest {
@@ -270,7 +306,7 @@ class FalsoPositivoEmFalaEspontaneaTest {
      * ruído de ambiente para a guarnição inteira.
      *
      * Medir isto é barato e o motivo é a arquitetura: só as janelas em que o
-     * estágio 1 disparou chegam ao estágio 2. Transcrever 54 min levaria horas;
+     * estágio 1 disparou chegam ao estágio 2. Transcrever quase 2 h levaria horas;
      * transcrever os poucos segundos ao redor de cada disparo leva minutos.
      *
      * A janela é de 4 s a partir de 1 s ANTES do disparo — é o que a
