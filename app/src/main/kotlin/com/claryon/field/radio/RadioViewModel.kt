@@ -12,9 +12,16 @@ import com.claryon.audio.GlassesAudioRoute
 import com.claryon.common.Earcon
 import com.claryon.common.Result
 import com.claryon.field.BuildConfig
+import com.claryon.field.agent.ClaryonIntentExecutor.TrocaDeGrupo
+import com.claryon.agent.FalhaOperacional
 import com.claryon.field.ui.componentes.EstadoDoPtt
+import com.claryon.field.ui.telas.CanalCorrente
 import com.claryon.field.ui.telas.FalaNoGrupo
-import com.claryon.field.ui.telas.ParPresente
+import com.claryon.field.ui.telas.Guarnicao
+import com.claryon.field.ui.telas.GuarnicaoNaLista
+import com.claryon.field.ui.telas.MembroDaGuarnicao
+import com.claryon.field.ui.telas.RecusaDaTroca
+import com.claryon.field.ui.telas.ResultadoDaTroca
 import com.claryon.field.auth.SessaoDoAgente
 import com.claryon.net.ClienteDePiso
 import com.claryon.net.ClienteDePisoLocal
@@ -110,9 +117,74 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
     private val _falas = MutableStateFlow<List<FalaNoGrupo>>(emptyList())
     val falas: StateFlow<List<FalaNoGrupo>> = _falas.asStateFlow()
 
-    private val _pares = MutableStateFlow<List<ParPresente>>(emptyList())
+    /**
+     * `{indicativo → idade da posição em segundos}` — só de quem TEM posição.
+     *
+     * Deliberadamente separado do cadastro: as duas fontes respondem perguntas
+     * diferentes e uma delas é menor que a guarnição. Ver [guarnicao].
+     */
+    private val _idadeDaPosicao = MutableStateFlow<Map<String, Int>>(emptyMap())
 
     private val _quemFala = MutableStateFlow<String?>(null)
+
+    /**
+     * **O canal em que estamos, para a tela.**
+     *
+     * Existe porque `MainActivity` passava `CanalDoPiloto.NOME` — uma **constante**
+     * — para o cabeçalho, enquanto este ViewModel reconciliava o canal com o
+     * cadastro trinta linhas abaixo. Um agente de outra lotação lia "GTA-3 Alfa"
+     * no topo estando noutra guarnição, e nada na tela denunciava: era o mesmo
+     * defeito que `CanaisDoAgente` foi criado para matar, sobrevivendo na camada
+     * de cima.
+     *
+     * É **projeção** de `CanaisDoAgente`, nunca uma segunda verdade: só é escrito
+     * a partir de `grupoCorrenteId/Nome`, e só depois de o rádio aceitar a troca.
+     */
+    private val _canal = MutableStateFlow(
+        CanalCorrente(CanalDoPiloto.ID, CanalDoPiloto.NOME, confirmadoPeloServidor = false),
+    )
+    val canal: StateFlow<CanalCorrente> = _canal.asStateFlow()
+
+    /**
+     * **A guarnição: cadastro completo, com a idade de quem publicou posição.**
+     *
+     * `null` significa "o cadastro ainda não respondeu" e vira
+     * `cadastroCarregado = false` na exposição — vazio ≠ nulo, a mesma distinção
+     * que `CanaisDoAgente.lexico` faz e pelo mesmo motivo: lista ausente e lista
+     * vazia pedem frases diferentes.
+     */
+    private val _cadastro = MutableStateFlow<Map<String, String>?>(null)
+
+    /**
+     * A idade da posição **deste** aparelho, de `idade_solicitante_s`.
+     *
+     * Vem da mesma resposta de `posicoes_do_grupo` (`0007`), então não custa
+     * chamada nenhuma — e sem ela o portador apareceria na própria guarnição como
+     * "sem posição" enquanto publica normalmente, que é a mentira mais fácil de
+     * notar e a mais fácil de deixar passar.
+     */
+    private val _idadePropria = MutableStateFlow<Int?>(null)
+
+    /**
+     * `true` depois que o agente pediu escuta, `false` depois que pediu para sair.
+     *
+     * **Intenção, e nada além.** Nunca vira "está no canal": quem afirma isso é
+     * [estado], que vem do rádio. A separação é a lição dos 168 quadros publicados
+     * para um canal em que este aplicativo não tinha entrado, com o indicador
+     * aceso — o indicador estava lendo o pedido, não o fato.
+     */
+    private val _pediuEscuta = MutableStateFlow(false)
+    val pediuEscuta: StateFlow<Boolean> = _pediuEscuta.asStateFlow()
+
+    /**
+     * As guarnições em que este agente pode entrar. `null` = o léxico não carregou.
+     *
+     * `CanaisDoAgente.grupos` existia com o comentário *"Exposto para a tela"* e
+     * **zero chamadores** — `grep` devolvia só a própria definição. Este é o
+     * caminho até a tela.
+     */
+    private val _guarnicoes = MutableStateFlow<List<GuarnicaoNaLista>?>(null)
+    val guarnicoes: StateFlow<List<GuarnicaoNaLista>?> = _guarnicoes.asStateFlow()
 
     /**
      * **Quem detém o piso agora.** `null` quando o canal está calado.
@@ -130,31 +202,56 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
     val quemFala: StateFlow<String?> = _quemFala.asStateFlow()
 
     /**
-     * `{agentId → indicativo}` do grupo, vindo de `cadastro_do_grupo` — a fonte
-     * contra a qual o autor de uma fala é resolvido.
+     * **A guarnição, montada das duas fontes — e é aqui que o denominador muda.**
      *
-     * `@Volatile` porque é escrito na recarga do canal e lido pelo `RadioTatico`
-     * na chegada de cada anúncio, que vem de outra linha de execução. Vazio
-     * significa "ainda não sei", e o efeito é degradar para origem não confirmada
-     * — nunca cair de volta na string livre do emissor.
-     */
-    @Volatile
-    private var cadastroDoGrupo: Map<String, String> = emptyMap()
-
-
-    /**
-     * A régua de presença, com `falando` **combinado na exposição**.
+     * Até esta entrega a tela recebia `posicoes_do_grupo` e nada mais. Aquela
+     * função faz `join` com `agent_positions`, então **quem nunca publicou posição
+     * não aparecia — nem como ausente**: a contagem do cabeçalho não era a
+     * guarnição, era quem tem posição, e o KDoc do painel de detalhes já escrevia
+     * que a lista "é menor que a guarnição, e não sabe dizer quanto menor".
      *
-     * A lista crua vem da recarga de 10 s; quem detém o piso muda em milissegundos.
-     * Gravar `falando` dentro de `_pares` faria o indicador ficar até dez segundos
-     * atrasado — mostrando "falando" depois que a pessoa calou, que é pior que não
-     * mostrar. `combine` mantém cada fonte na sua cadência e junta as duas na
-     * leitura.
+     * `cadastro_do_grupo` (`0013`) devolve a `memberships` inteira e **já era
+     * buscada a cada dez segundos** — este ViewModel a colapsava num `Map` de
+     * autoria e a tela nunca a via. O que faltava não era dado nem rede: era
+     * caminho. Custo desta correção em chamadas de rede: **zero**.
+     *
+     * Três fontes, três cadências, combinadas só na leitura:
+     *
+     *  - o **cadastro** (10 s) dá quem é da guarnição;
+     *  - a **posição** (10 s) dá a idade de quem publicou;
+     *  - **quem fala** (milissegundos) dá o piso. Gravar `falando` na lista crua o
+     *    deixaria até dez segundos atrasado — mostrando "falando" depois que a
+     *    pessoa calou, que é pior que não mostrar.
      */
-    val pares: StateFlow<List<ParPresente>> =
-        combine(_pares, _quemFala) { lista, quem ->
-            lista.map { it.copy(falando = it.indicativo == quem) }
-        }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val guarnicao: StateFlow<Guarnicao> =
+        combine(_cadastro, _idadeDaPosicao, _idadePropria, _quemFala) { cadastro, idades, minha, quem ->
+            if (cadastro == null) {
+                // Sem cadastro, só resta o que a lista de posições sabe — e ela é
+                // menor que a guarnição. A tela declara isso; ver `resumoDaGuarnicao`.
+                Guarnicao(
+                    membros = idades.map { (indicativo, idade) ->
+                        MembroDaGuarnicao(indicativo, idade, proprio = false, falando = indicativo == quem)
+                    },
+                    cadastroCarregado = false,
+                )
+            } else {
+                Guarnicao(
+                    membros = cadastro.values.map { indicativo ->
+                        val proprio = indicativo == indicativoProprio
+                        MembroDaGuarnicao(
+                            indicativo = indicativo,
+                            // O próprio portador tem idade própria, de
+                            // `idade_solicitante_s`. Sem isso ele apareceria "sem
+                            // posição" na própria guarnição enquanto publica.
+                            idadeDaPosicaoS = if (proprio) minha else idades[indicativo],
+                            proprio = proprio,
+                            falando = indicativo == quem,
+                        )
+                    },
+                    cadastroCarregado = true,
+                )
+            }
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, Guarnicao())
 
     /** `true` enquanto transmitimos. É o que acende a moldura da tela inteira. */
     val noAr: StateFlow<Boolean> get() = _noAr
@@ -171,6 +268,19 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
     private val redeConfigurada =
         BuildConfig.SUPABASE_URL.isNotBlank() && BuildConfig.SUPABASE_ANON_KEY.isNotBlank()
 
+    /**
+     * A identidade da sessão, guardada na primeira abertura.
+     *
+     * Existe para [entrarNaEscuta] poder reabrir o rádio sem que a tela precise
+     * guardar `agenteId` e `indicativo` — dado de sessão que sobe para a interface
+     * é dado que alguém esquece de descer de volta. O **canal** não é guardado
+     * aqui de propósito: ele vem de [_canal] no instante da reabertura, senão
+     * reentrar depois de trocar de guarnição devolveria o agente à anterior.
+     */
+    private data class Credenciais(val agenteId: String, val indicativo: String)
+
+    private var credenciais: Credenciais? = null
+
     // ── Ciclo de vida do rádio ────────────────────────────────────────────────
 
     /**
@@ -181,6 +291,12 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
      * o inverso produz captura de voz intermitente.
      */
     fun abrir(canal: String, nomeDoCanal: String, agenteId: String, indicativo: String) {
+        // A INTENÇÃO é registrada antes de qualquer trabalho, e é só isso que ela
+        // é: pedir escuta. Quem afirma que estamos no canal é `estado`, que vem do
+        // rádio — ver o KDoc de `_pediuEscuta`.
+        _pediuEscuta.value = true
+        credenciais = Credenciais(agenteId, indicativo)
+        _canal.value = CanalCorrente(canal, nomeDoCanal, CanaisDoAgente.canalConfirmadoPeloServidor)
         if (radio != null) return
         if (!redeConfigurada) {
             _estado.value = EstadoDoPtt.Indisponivel("Servidor não configurado.")
@@ -215,7 +331,7 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
                 talkGroupId = canal,
                 agenteId = agenteId,
                 indicativo = indicativo,
-                resolverAutor = { id -> cadastroDoGrupo[id] },
+                resolverAutor = { id -> _cadastro.value?.get(id) },
                 // Fecha o residual que a resolução local deixou: um membro do grupo
                 // reivindicando o id de outro membro. `floor_grants.agent_id` vem do
                 // JWT em `pedir_canal`, então ninguém obtém piso em nome de terceiro.
@@ -258,7 +374,12 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
                     viewModelScope.launch {
                         registro?.registrar(
                             transmissaoId = id,
-                            talkGroupId = canal,
+                            // `_canal.value.id`, e **não** o parâmetro `canal`: ele é
+                            // capturado na abertura e não acompanha a troca de
+                            // guarnição. Registrar a transmissão no talk group
+                            // anterior é escrever no livro-razão errado, e o RLS não
+                            // reclama — o agente é membro dos dois.
+                            talkGroupId = _canal.value.id,
                             // `ptt` e não "fala": o CHECK da tabela aceita
                             // `('ptt','alerta')` e a função ramifica por este
                             // campo — com um valor inventado ela caía no ramo
@@ -347,20 +468,34 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
                 // numa guarnição que não é a dele — e nada na tela denunciaria,
                 // porque o nome exibido também vinha da constante.
                 val agora = CanaisDoAgente.grupoCorrenteId
+                // A lista de guarnições ganha caminho até a tela. `CanaisDoAgente.grupos`
+                // existia com o comentário "Exposto para a tela" e zero chamadores.
+                publicarGuarnicoes()
                 if (agora != antes) {
                     Log.i(TAG, "canal reconciliado com o cadastro: ${CanaisDoAgente.grupoCorrenteNome}")
                     if (novo.trocarDeGrupo(agora)) {
-                        nomeDoCanalAtual = CanaisDoAgente.grupoCorrenteNome
+                        // **Adotar o canal derruba o histórico do anterior.**
+                        //
+                        // Antes daqui, a reconciliação trocava o socket e deixava a
+                        // recarga lendo o grupo capturado no parâmetro de `abrir` —
+                        // ou seja, TODA abertura em que o cadastro discordasse do
+                        // canal provisório deixava a tela mostrando o histórico da
+                        // guarnição errada, indefinidamente. O `Log.i` acima dizia
+                        // "canal reconciliado" enquanto a tela mentia.
+                        adotarCanalCorrente()
                     } else {
                         // Falha nunca é silêncio: seguir no canal errado achando
                         // que trocou é o pior desfecho desta feature.
                         Log.w(TAG, "NÃO consegui entrar no canal do cadastro — seguindo no provisório")
                     }
+                } else {
+                    // Mesmo sem troca, o NOME e a confirmação vêm do cadastro: o da
+                    // constante é chute de código.
+                    adotarCanalCorrente(recarregar = false)
                 }
             }
             indicativoProprio = indicativo
-            nomeDoCanalAtual = nomeDoCanal
-            vigiaDeRede = viewModelScope.launch { vigiarRede(nomeDoCanal, transporte) }
+            vigiaDeRede = viewModelScope.launch { vigiarRede(transporte) }
 
             registro = RegistroDeTransmissao(
                 config = ConfigRealtime(
@@ -378,11 +513,79 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
                 tokenDeSessao = tokenDeSessao,
             )
             historicoDoCanal = historico
-            recarga = viewModelScope.launch {
-                while (true) {
-                    carregarCanal(canal, historico)
-                    delay(INTERVALO_DE_RECARGA_MS)
-                }
+            iniciarRecarga(historico)
+        }
+    }
+
+    /**
+     * **O laço de recarga segue o canal CORRENTE, não o da abertura.**
+     *
+     * O defeito que isto conserta não era teórico: `carregarCanal(canal, …)`
+     * capturava o `talkGroupId` do parâmetro de [abrir], e nada mais no ViewModel
+     * o reescrevia. Depois de qualquer troca — a reconciliação automática com o
+     * cadastro, que roda em **toda** abertura, o comando falado "guarnição N na
+     * escuta", e agora o toque na lista — o socket ia para o grupo novo e a tela
+     * continuava lendo o histórico, o cadastro e as posições do **grupo antigo**.
+     *
+     * A tela ficava impossível de desmentir: o nome no topo vinha da constante, e
+     * as falas de baixo vinham do grupo anterior. Duas mentiras que se sustentavam.
+     */
+    private fun iniciarRecarga(historico: HistoricoDoCanal) {
+        recarga?.cancel()
+        recarga = viewModelScope.launch {
+            while (true) {
+                carregarCanal(_canal.value.id, historico)
+                delay(INTERVALO_DE_RECARGA_MS)
+            }
+        }
+    }
+
+    /**
+     * Adota em [_canal] o que `CanaisDoAgente` já decidiu, e limpa o que era do
+     * grupo anterior.
+     *
+     * **Limpar é a parte que não pode faltar.** Sem isto, entre a troca e a
+     * próxima recarga a tela mostraria por até dez segundos as falas, o cadastro e
+     * as idades da guarnição anterior sob o nome da nova — que é pior que a versão
+     * antiga do defeito, porque agora o cabeçalho estaria certo e o conteúdo
+     * errado.
+     *
+     * Não é uma segunda verdade: só lê `CanaisDoAgente`, nunca escreve nele, e só
+     * roda **depois** de o rádio ter aceitado a troca.
+     */
+    private fun adotarCanalCorrente(recarregar: Boolean = true) {
+        _canal.value = CanalCorrente(
+            id = CanaisDoAgente.grupoCorrenteId,
+            nome = CanaisDoAgente.grupoCorrenteNome,
+            confirmadoPeloServidor = CanaisDoAgente.canalConfirmadoPeloServidor,
+        )
+        publicarGuarnicoes()
+        if (!recarregar) return
+        _falas.value = emptyList()
+        _cadastro.value = null
+        _idadeDaPosicao.value = emptyMap()
+        _idadePropria.value = null
+        _quemFala.value = null
+        historicoDoCanal?.let { iniciarRecarga(it) }
+    }
+
+    /** Projeta o léxico de `CanaisDoAgente` na lista que a tela desenha. */
+    private fun publicarGuarnicoes() {
+        val lista = CanaisDoAgente.grupos
+        // Vazio aqui significa "não carregou": `CanaisDoAgente.carregar` recusa
+        // adotar lista vazia e deixa o léxico nulo de propósito. Publicar `null`
+        // preserva a distinção — a tela precisa dizer "não carregou", nunca "você
+        // não tem guarnição".
+        _guarnicoes.value = if (lista.isEmpty()) {
+            null
+        } else {
+            lista.map {
+                GuarnicaoNaLista(
+                    id = it.id,
+                    nome = it.nome,
+                    rotuloFalado = it.rotuloFalado,
+                    corrente = it.id == CanaisDoAgente.grupoCorrenteId,
+                )
             }
         }
     }
@@ -454,26 +657,30 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
             } + locaisPendentes
         }
 
-        // O cadastro vem ANTES da lista de presença: é ele que decide se o nome de
+        // O cadastro vem ANTES da lista de posições: é ele que decide se o nome de
         // quem fala pode aparecer, e chegar atrasado significaria mostrar "origem
         // não confirmada" para colega legítimo nos primeiros segundos do turno.
-        historico.cadastroDoGrupo(canal).onSuccess { cadastroDoGrupo = it }
+        //
+        // **E agora ele é o denominador da guarnição, não só a tabela de autoria.**
+        // Conjunto vazio é resposta legítima de `cadastro_do_grupo` para chamada
+        // sem sessão e para grupo de que não somos membro — nesse caso o cadastro
+        // continua "não carregado", e a tela diz isso em vez de afirmar guarnição
+        // de zero pessoas. Ver `resumoDaGuarnicao`.
+        historico.cadastroDoGrupo(canal).onSuccess { mapa ->
+            if (mapa.isNotEmpty()) _cadastro.value = mapa
+        }
 
-        historico.membros(canal).onSuccess { lista ->
-            _pares.value = lista
-                .filter { it.indicativo != indicativoProprio }
-                .map { m ->
-                    ParPresente(
-                        indicativo = m.indicativo,
-                        // "Online" = publicou posição faz pouco. Um booleano de
-                        // presença fica `true` quando o processo morre sem avisar,
-                        // e um agente que sumiu apareceria disponível.
-                        online = m.idadeDaPosicaoS?.let { it <= LIMIAR_DE_PRESENCA_S } == true,
-                        // Sempre `false` aqui de propósito: quem preenche é o
-                        // `combine` em `pares`. Ver o KDoc lá.
-                        falando = false,
-                    )
-                }
+        historico.posicoesDoGrupo(canal).onSuccess { lista ->
+            _idadeDaPosicao.value = lista
+                .filter { it.indicativo != indicativoProprio && it.idadeS != Int.MAX_VALUE }
+                .associate { it.indicativo to it.idadeS }
+            // A idade da posição DESTE aparelho vem na mesma resposta
+            // (`idade_solicitante_s`, migração `0007`), então não custa chamada
+            // nenhuma. Sem ela o portador apareceria "sem posição" na própria
+            // guarnição enquanto publica normalmente.
+            _idadePropria.value = lista.firstOrNull()
+                ?.idadeDoSolicitanteS
+                ?.takeIf { it != Int.MAX_VALUE }
         }
     }
 
@@ -498,7 +705,7 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
      * diferencia os dois — e a mentira só é descoberta na hora em que a diferença
      * importa.
      */
-    private suspend fun vigiarRede(canal: String, transporte: TransporteAoVivo) {
+    private suspend fun vigiarRede(transporte: TransporteAoVivo) {
         while (true) {
             val conectado = transporte.conectado()
             val atual = _estado.value
@@ -506,7 +713,10 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
             // sobre o relatório de conectividade, e o pré-roll cobre a queda.
             if (atual !is EstadoDoPtt.NoAr) {
                 _estado.value = if (conectado) {
-                    EstadoDoPtt.Pronto(canal)
+                    // Lido a cada volta, não capturado: a barra de PTT escreve o
+                    // nome do canal, e um nome congelado na abertura continuaria
+                    // dizendo a guarnição anterior depois de uma troca.
+                    EstadoDoPtt.Pronto(_canal.value.nome)
                 } else {
                     // A causa muda o que o agente faz: rede se resolve andando,
                     // credencial se resolve entrando. Dizer "sem dados" quando é
@@ -535,7 +745,94 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
     private val taxaDaTranscricaoHz = 16_000
     private var recarga: Job? = null
     private var indicativoProprio: String = ""
-    private var nomeDoCanalAtual: String = ""
+
+    // ── Entrar e sair da escuta ───────────────────────────────────────────────
+
+    /**
+     * **Reentrada no canal, pelo controle do cabeçalho.**
+     *
+     * Esta função foi **recusada** numa sessão anterior, e a recusa está escrita no
+     * KDoc de `EntradaNoCanal`: *"um botão precisaria de uma função nova no
+     * ViewModel e de um parâmetro novo ligado no `MainActivity`; sem os dois, seria
+     * mais uma capacidade construída, testada e sem chamador"*. Os dois existem
+     * agora, e a mudança de comportamento passou por
+     * `specs/guarnicao-como-grupo.spec.md` antes do diff — que é a ordem do §7.
+     *
+     * **O canal vem de [canal], não de um valor guardado.** Guardar o canal da
+     * primeira abertura faria reentrar depois de trocar de guarnição devolver o
+     * agente à anterior, em silêncio.
+     *
+     * O que ela **não** faz: afirmar que entramos. Ela chama [abrir] e volta; quem
+     * diz se estamos no canal é [estado], alimentado pelo vigia de rede. É a mesma
+     * regra do botão de PTT — a interface reporta o que aconteceu, não o que foi
+     * pedido —, e é a lição dos 168 quadros.
+     */
+    fun entrarNaEscuta() {
+        val cred = credenciais ?: run {
+            // Sem credencial não houve primeira abertura, e reabrir com identidade
+            // inventada é pior que não reabrir. Falha nunca é silêncio.
+            Log.w(TAG, "entrarNaEscuta sem credencial de sessão — o rádio nunca foi aberto")
+            _estado.value = EstadoDoPtt.Indisponivel("Sessão não iniciada. Entre de novo.")
+            return
+        }
+        val alvo = _canal.value
+        abrir(alvo.id, alvo.nome, cred.agenteId, cred.indicativo)
+    }
+
+    /**
+     * Sai da escuta por vontade do agente.
+     *
+     * Separado de [fechar] só pela intenção que registra — e a distinção é o que
+     * permite à tela diferenciar *"você saiu"* de *"o canal recusou"*. São o mesmo
+     * fato (não estamos no canal) com gestos opostos: o primeiro não é erro e não
+     * pode sair na cor de falha, senão o agente aprende a ignorar a cor de falha.
+     */
+    fun sairDaEscuta() {
+        _pediuEscuta.value = false
+        fechar()
+    }
+
+    /**
+     * **Entra noutra guarnição, pelo mesmo caminho do comando falado.**
+     *
+     * `CanaisDoAgente.trocar` e não `RadioTatico.trocarDeGrupo`: uma segunda porta
+     * até o socket seriam duas verdades sobre em que grupo estamos, e é exatamente
+     * para não ter isso que `CanaisDoAgente` existe. De quebra, o toque herda
+     * `PoliticaDeTrocaDeGrupo` inteira — inclusive a guarda que **recusa trocar
+     * durante uma transmissão**, que ninguém lembraria de escrever de novo aqui.
+     *
+     * A função **suspende até o rádio responder** e só então devolve. Não há
+     * desfecho otimista: a tela não pode desenhar a guarnição nova como corrente
+     * antes disto retornar `Entrou`.
+     */
+    suspend fun entrarEm(rotuloFalado: String): ResultadoDaTroca =
+        when (val r = CanaisDoAgente.trocar(rotuloFalado)) {
+            is TrocaDeGrupo.Trocado -> {
+                adotarCanalCorrente()
+                ResultadoDaTroca.Entrou(r.nome)
+            }
+
+            TrocaDeGrupo.NaoReconhecido ->
+                ResultadoDaTroca.Recusada(RecusaDaTroca.NAO_RECONHECIDO)
+
+            is TrocaDeGrupo.Falhou -> ResultadoDaTroca.Recusada(
+                when (r.falha) {
+                    FalhaOperacional.TRANSMISSAO_EM_CURSO -> RecusaDaTroca.TRANSMITINDO
+                    FalhaOperacional.SEM_LEXICO_DE_CANAIS -> RecusaDaTroca.SEM_LEXICO
+                    // `RADIO_FECHADO` é a única outra falha que a política produz.
+                    // O `else` existe porque `FalhaOperacional` tem trinta valores e
+                    // um `when` exaustivo aqui só criaria ruído — mas colapsar tudo
+                    // em "rádio fechado" seria dizer o gesto errado, então qualquer
+                    // outra causa vira log antes de virar frase.
+                    else -> {
+                        if (r.falha != FalhaOperacional.RADIO_FECHADO) {
+                            Log.w(TAG, "troca de grupo recusada por causa inesperada: ${r.falha}")
+                        }
+                        RecusaDaTroca.RADIO_FECHADO
+                    }
+                },
+            )
+        }
 
     /** Fecha o rádio e devolve a rota. Chamado ao sair da tela ou encerrar o turno. */
     fun fechar() {
@@ -666,8 +963,7 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
         )
     }
 
-    private fun canalAtual(): String =
-        nomeDoCanalAtual.ifBlank { CanalDoPiloto.NOME }
+    private fun canalAtual(): String = _canal.value.nome.ifBlank { CanalDoPiloto.NOME }
 
     // ── Telemetria ────────────────────────────────────────────────────────────
 

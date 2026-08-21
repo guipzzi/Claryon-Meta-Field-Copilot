@@ -6,6 +6,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -13,12 +14,15 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -29,6 +33,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -89,6 +94,56 @@ fun TextoCorpoMenor(
 @Composable
 fun Fio(modifier: Modifier = Modifier, cor: Color = Cores.Traco) {
     Box(modifier.fillMaxWidth().height(Espaco.Fio).background(cor))
+}
+
+// ── Os três tamanhos de ícone ────────────────────────────────────────────────
+//
+// **Isto quer ser `Regua.IconeDeAcao/DeLinha/DeAba`**, e não está lá porque
+// `ui/tema/` estava fora do território desta sessão. Vive aqui pelo mesmo padrão
+// que `MARGEM_DO_LADO_OPOSTO` e `CANTO_DO_BLOCO` já usavam em
+// `TelaDeGuarnicao.kt`: um símbolo, com o porquê ao lado, e nunca um literal
+// repetido em duas telas.
+//
+// Os três degraus são deliberadamente **próximos** (1,1× entre eles), e por isso
+// não seguem a escala de 1,4× de `Espaco`: espaçamento separa blocos, mas ícone
+// acompanha o texto ao lado dele. Cada tamanho é o corpo do estilo que ele
+// acompanha, arredondado para par:
+//
+//  - [IconeDeAcao] 18 dp — ao lado de `Tipo.Acao` (13 sp, caixa-alta).
+//  - [IconeDeLinha] 20 dp — na frente de linha de dado, com `Tipo.Corpo` (15 sp).
+//  - [IconeDeAba] 22 dp — sozinho **acima** do rótulo da aba, onde não há texto
+//    na mesma linha para dar escala e o ícone é a metade que se vê de relance.
+
+/** Ícone dentro de botão ou pílula. */
+val IconeDeAcao: Dp = 18.dp
+
+/** Ícone na frente de uma linha de dado. */
+val IconeDeLinha: Dp = 20.dp
+
+/** Ícone da barra de abas — o único que fica sozinho. */
+val IconeDeAba: Dp = 22.dp
+
+/**
+ * Ícone de contorno, pintado por quem o usa.
+ *
+ * `contentDescription = null` **sempre**, e é decisão e não esquecimento: neste
+ * sistema o ícone nunca aparece sozinho — há rótulo de aba, título de linha ou
+ * verbo de botão dizendo a mesma coisa ao lado. Descrição aqui faria o leitor de
+ * tela repetir cada item. Ver o KDoc de [com.claryon.field.ui.icones.Icones].
+ */
+@Composable
+fun IconeTatico(
+    icone: ImageVector,
+    cor: Color = Cores.TintaMedia,
+    tamanho: Dp = IconeDeLinha,
+    modifier: Modifier = Modifier,
+) {
+    Icon(
+        imageVector = icone,
+        contentDescription = null,
+        tint = cor,
+        modifier = modifier.size(tamanho),
+    )
 }
 
 /**
@@ -201,6 +256,39 @@ fun CabecalhoTatico(
  * também. Não há regra geral de "controle é reto" para citar; há estes três.
  *
  * Se um dia `BotaoTatico` arredondar, arredonda por diff de spec, não por contágio.
+ *
+ * ---
+ * ### O estado desabilitado, medido — e o que estava errado nele
+ *
+ * O botão desabilitado era `TintaFraca` sobre `Elevado`: **4,70:1**, que passa em
+ * AA por 0,2 e mesmo assim era o defeito que a captura do emulador denunciava. O
+ * número certo para olhar não era o do texto: era o da **caixa**. `Elevado`
+ * (`#1E1E1E`) sobre `Vazio` (`#0C0C0C`) rende **1,17:1** — menos que o fio de 1 px
+ * que a paleta já registra como exceção. A borda do controle simplesmente não
+ * existia: o que se via na tela de login era uma mancha cinza mal descolada do
+ * fundo, com letra cinza dentro. Não parecia apagado; parecia quebrado.
+ *
+ * Duas correções, e as duas têm número:
+ *
+ *  1. O rótulo sobe de `TintaFraca` para `TintaMedia`: **4,70 → 7,01:1**. WCAG
+ *     dispensa controle desabilitado de contraste mínimo; esta é uma tela de
+ *     abertura de turno, e o agente precisa **ler** o que ainda falta.
+ *  2. O contorno passa a ser desenhado em `TracoForte` (1 px). Ele não conserta o
+ *     contraste — `TracoForte` sobre `Vazio` é **1,72:1**, e a paleta registra que
+ *     fio abaixo de 3:1 é exceção consciente deste sistema. O que ele conserta é a
+ *     **forma**: com quatro lados marcados, o retângulo volta a ser um controle
+ *     desligado em vez de uma área morta, e é a mesma gramática de fio que o resto
+ *     do painel usa.
+ *
+ * O estado habilitado já estava certo e não mudou: `Vazio` sobre `Tinta` é
+ * **17,01:1** — o par de maior contraste que esta paleta tem.
+ *
+ * O destrutivo ganhou o mesmo contorno neutro, pela mesma razão (antes era texto
+ * solto sobre o fundo, sem limite nenhum), e o rótulo saiu de `Falha` para
+ * `FalhaTexto`: **4,93 → 7,93:1** sobre `Vazio`. `Falha` é token de **marca**, e
+ * "ENCERRAR TURNO" é palavra — a distinção está escrita na paleta. O contorno é
+ * neutro de propósito: cor em elemento permanente é cor que deixou de significar, e
+ * este botão fica na tela o turno inteiro.
  */
 @Composable
 fun BotaoTatico(
@@ -209,10 +297,11 @@ fun BotaoTatico(
     modifier: Modifier = Modifier,
     habilitado: Boolean = true,
     destrutivo: Boolean = false,
+    icone: ImageVector? = null,
 ) {
     val corTexto = when {
-        !habilitado -> Cores.TintaFraca
-        destrutivo -> Cores.Falha
+        !habilitado -> Cores.TintaMedia
+        destrutivo -> Cores.FalhaTexto
         else -> Cores.Vazio
     }
     val corFundo = when {
@@ -220,17 +309,92 @@ fun BotaoTatico(
         destrutivo -> Color.Transparent
         else -> Cores.Tinta
     }
-    Box(
+    // O preenchido não leva contorno: ele já tem limite de sobra (17,01:1 contra o
+    // fundo). Contorno em cima de fundo claro só somaria uma linha que ninguém vê.
+    val comContorno = !habilitado || destrutivo
+
+    Row(
         modifier
             .fillMaxWidth()
             .background(corFundo)
+            .then(
+                if (comContorno) {
+                    Modifier.border(Regua.Fio, Cores.TracoForte, RectangleShape)
+                } else {
+                    Modifier
+                },
+            )
             .tocavel(habilitado = habilitado, aoTocar = aoTocar)
             .padding(vertical = 14.dp),
-        contentAlignment = Alignment.Center,
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (icone != null) {
+            IconeTatico(icone, cor = corTexto, tamanho = IconeDeAcao)
+            Box(Modifier.width(Espaco.Medio))
+        }
         Text(rotulo.uppercase(), style = Tipo.Acao, color = corTexto)
     }
 }
+
+/**
+ * **Pílula de ação: contorno, ícone e rótulo.**
+ *
+ * A ação secundária deste sistema não tinha forma nenhuma — era `Etiqueta`
+ * tocável, ou um `Button` do Material que não pertencia a lugar nenhum. A
+ * referência do produto resolve isso com pílula de contorno, e é o que esta é.
+ *
+ * A diferença para [BotaoTatico] é de **peso**, e ela é dita por três canais ao
+ * mesmo tempo, não por um: fundo (preenchido × vazado), forma (reto × pílula) e
+ * cor de rótulo (`Vazio` sobre claro × `TintaMedia` sobre o fundo da tela,
+ * **8,23:1**). Numa tela com as duas, o polegar acha a primária sem ler.
+ *
+ * O canto arredondado **não** contraria o que [BotaoTatico] tem escrito: aquela
+ * regra nomeia três controles que continuam retos — o próprio `BotaoTatico`, o
+ * `Fio` e a barra de navegação. A pílula segue o precedente que a barra de
+ * composição da guarnição abriu, por decisão humana, no dia 21/08.
+ *
+ * [Regua.Toque] de altura mínima, como todo alvo deste produto: quem toca isto está
+ * de luva, em pé, numa abordagem.
+ */
+@Composable
+fun PilulaDeAcao(
+    rotulo: String,
+    icone: ImageVector,
+    aoTocar: () -> Unit,
+    modifier: Modifier = Modifier,
+    habilitado: Boolean = true,
+) {
+    val cor = if (habilitado) Cores.TintaMedia else Cores.TintaFraca
+    Row(
+        modifier
+            .fillMaxWidth()
+            .defaultMinSize(minHeight = Regua.Toque)
+            .clip(PILULA)
+            .border(Regua.Fio, if (habilitado) Cores.TracoForte else Cores.Traco, PILULA)
+            .tocavel(habilitado = habilitado, forma = PILULA, aoTocar = aoTocar)
+            .padding(horizontal = Espaco.Padrao, vertical = Espaco.Medio),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconeTatico(icone, cor = cor, tamanho = IconeDeAcao)
+        Box(Modifier.width(Espaco.Medio))
+        Text(rotulo.uppercase(), style = Tipo.Acao, color = cor)
+    }
+}
+
+/**
+ * Pílula — canto totalmente arredondado.
+ *
+ * `percent` e não `Dp`: a pílula acompanha a altura, e um raio fixo deixaria as
+ * pontas retas assim que a linha crescesse com a escala de fonte.
+ *
+ * **Isto é a segunda cópia deste símbolo** — a primeira é o `PILULA` privado de
+ * `TelaDeGuarnicao.kt`, e o KDoc de lá já diz o que os dois querem ser:
+ * `Regua.Pilula`. `ui/tema/` estava fora do território das duas sessões que
+ * criaram as cópias. Quem mover isto para `Regua` apaga as duas de uma vez.
+ */
+private val PILULA = RoundedCornerShape(percent = 50)
 
 /**
  * Estado vazio.

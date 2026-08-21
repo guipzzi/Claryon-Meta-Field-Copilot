@@ -184,7 +184,17 @@ private fun Operacao(
 ) {
     val estadoPtt by radio.estado.collectAsState()
     val falas by radio.falas.collectAsState()
-    val pares by radio.pares.collectAsState()
+    // Era `pares`, de `posicoes_do_grupo` — que faz `join` com `agent_positions` e
+    // por isso **omitia quem nunca publicou posição**. Agora vem do cadastro do
+    // grupo, com a posição dando só a idade. Ver `RadioViewModel.guarnicao`.
+    val guarnicao by radio.guarnicao.collectAsState()
+    // O canal do SERVIDOR. Esta linha passava `CanalDoPiloto.NOME` — uma constante
+    // — enquanto o `RadioViewModel` reconciliava o canal com o cadastro trinta
+    // linhas abaixo, então um agente de outra lotação lia "GTA-3 Alfa" no topo
+    // estando noutra guarnição.
+    val canalCorrente by radio.canal.collectAsState()
+    val guarnicoes by radio.guarnicoes.collectAsState()
+    val pediuEscuta by radio.pediuEscuta.collectAsState()
     val quemFala by radio.quemFala.collectAsState()
     val noAr by radio.noAr.collectAsState()
     val copilotoOcupado by copiloto.copilotoOcupado.collectAsState()
@@ -259,19 +269,27 @@ private fun Operacao(
     CascoTatico(destino = destino, aoNavegar = aoNavegar, noAr = noAr) { modifier ->
         when (destino) {
             Destino.GUARNICAO -> TelaDeGuarnicao(
-                canal = CanalDoPiloto.NOME,
-                pares = pares,
+                canal = canalCorrente,
+                guarnicao = guarnicao,
                 falas = falas,
                 estadoDoPtt = estadoPtt,
+                pediuEscuta = pediuEscuta,
                 aoPressionarPtt = radio::aoPressionar,
                 aoSoltarPtt = radio::aoSoltar,
-                // O ciclo de voz ganha porta de entrada. Estava pronto, testado e
-                // inalcançável desde o commit d888970: o único chamador vivia numa
-                // tela que não é composta.
-                aoAbrirCopiloto = copiloto::cicloDeVoz,
-                copilotoOcupado = copilotoOcupado,
+                // **A reentrada no canal, que este projeto tinha recusado.** A
+                // recusa estava escrita no KDoc de `EntradaNoCanal` e era boa: sem
+                // função no ViewModel e sem parâmetro ligado aqui, o botão seria a
+                // oitava capacidade construída e não ligada. Estas duas linhas são
+                // a tomada, e a mudança de comportamento passou por
+                // `specs/guarnicao-como-grupo.spec.md` antes do diff.
+                aoEntrarNaEscuta = radio::entrarNaEscuta,
+                aoSairDaEscuta = radio::sairDaEscuta,
+                // `CanaisDoAgente.grupos` tinha o comentário "Exposto para a tela"
+                // e zero chamadores. Este é o caminho até ela.
+                guarnicoes = guarnicoes,
+                aoEntrarEm = radio::entrarEm,
                 // Sem esta linha, `AUTOR_NAO_CONFIRMADO` continuaria sem caminho
-                // até a tela: a régua de presença casa por indicativo e ele não
+                // até a tela: a lista de membros casa por indicativo e ele não
                 // casa com par nenhum. Ver o KDoc de `RadioViewModel.quemFala`.
                 quemEstaNoAr = quemFala,
                 modifier = modifier,

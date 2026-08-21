@@ -8,7 +8,11 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.ui.Modifier
 import com.claryon.field.ui.componentes.EstadoDoPtt
 import com.claryon.field.ui.telas.FalaNoGrupo
-import com.claryon.field.ui.telas.ParPresente
+import com.claryon.field.ui.telas.CanalCorrente
+import com.claryon.field.ui.telas.Guarnicao
+import com.claryon.field.ui.telas.MembroDaGuarnicao
+import com.claryon.field.ui.telas.GuarnicaoNaLista
+import com.claryon.field.ui.telas.ResultadoDaTroca
 import com.claryon.field.ui.telas.TelaDeGuarnicao
 import com.claryon.field.ui.tema.TemaClaryon
 
@@ -69,17 +73,48 @@ class VitrineDaGuarnicao : ComponentActivity() {
                 // defeito que o produto não tem.
                 TelaDeGuarnicao(
                     modifier = Modifier.statusBarsPadding().navigationBarsPadding(),
-                    canal = "GTA-3 Alfa",
-                    pares = listOf(
-                        ParPresente("BRAVO UM", online = true, falando = false),
-                        ParPresente("ALFA DOIS", online = true, falando = false),
-                        ParPresente("CHARLIE 4", online = false, falando = false),
+                    // **Trocado em 21/08 junto com a fonte de dados da tela.**
+                    //
+                    // Era `pares: List<ParPresente>`, derivado de `posicoes_do_grupo` —
+                    // que faz `join` com `agent_positions` e portanto SOME com quem nunca
+                    // publicou posição. A contagem não era a guarnição; era quem tinha
+                    // posição. `Guarnicao` vem do cadastro e sabe quem existe;
+                    // `idadeDaPosicaoS` diz há quanto tempo cada um foi visto, e `null`
+                    // é "nunca publicou" — que é informação, não ausência dela.
+                    canal = CanalCorrente(
+                        id = "gta-3-alfa",
+                        nome = "GTA-3 Alfa",
+                        confirmadoPeloServidor = true,
+                    ),
+                    guarnicao = Guarnicao(
+                        membros = listOf(
+                            MembroDaGuarnicao("BRAVO UM", idadeDaPosicaoS = 12),
+                            MembroDaGuarnicao("ALFA DOIS", idadeDaPosicaoS = 47),
+                            // Passou dos 120 s: existe no cadastro, sem posição recente.
+                            MembroDaGuarnicao("CHARLIE 4", idadeDaPosicaoS = 900),
+                            // `null` = NUNCA publicou. É quem o `join` antigo apagava.
+                            MembroDaGuarnicao("DELTA CINCO", idadeDaPosicaoS = null),
+                        ),
+                        cadastroCarregado = true,
                     ),
                     falas = falas,
                     estadoDoPtt = estadoDoPtt,
                     aoPressionarPtt = {},
                     aoSoltarPtt = {},
-                    aoAbrirCopiloto = {},
+                    // `aoAbrirCopiloto` saiu: o atalho do copiloto foi retirado da barra
+                    // desta tela por decisão do usuário em 21/08. A capacidade continua
+                    // alcançável por VOZ, pelo gatilho — o que saiu foi o botão.
+                    pediuEscuta = true,
+                    aoEntrarNaEscuta = {},
+                    aoSairDaEscuta = {},
+                    // A lista de guarnições em que este agente PODE entrar — o botão
+                    // de voltar do topo. `null` seria "ainda não sei"; aqui é a
+                    // demonstração, então vem preenchida.
+                    guarnicoes = listOf(
+                        GuarnicaoNaLista("gta-3-alfa", "GTA-3 Alfa", "guarnicao 3 alfa", corrente = true),
+                        GuarnicaoNaLista("gta-3-bravo", "GTA-3 Bravo", "guarnicao 3 bravo", corrente = false),
+                    ),
+                    aoEntrarEm = { ResultadoDaTroca.Entrou("GTA-3 Bravo") },
                     quemEstaNoAr = quemNoAr,
                 )
             }

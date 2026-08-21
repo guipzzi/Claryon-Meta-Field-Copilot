@@ -33,8 +33,9 @@ import androidx.compose.ui.unit.em
 import com.claryon.field.ui.componentes.BotaoTatico
 import com.claryon.field.ui.componentes.Etiqueta
 import com.claryon.field.ui.componentes.Fio
-import com.claryon.field.ui.componentes.tocavel
+import com.claryon.field.ui.componentes.PilulaDeAcao
 import com.claryon.field.ui.componentes.TextoCorpoMenor
+import com.claryon.field.ui.icones.Icones
 import com.claryon.field.ui.marca.MarcaClaryon
 import com.claryon.field.ui.tema.Cores
 import com.claryon.field.ui.tema.Espaco
@@ -140,7 +141,7 @@ fun TelaDeLogin(
                     "indisponíveis; o ciclo de voz e a gravação funcionam.",
             )
             Box(Modifier.height(Espaco.Largo))
-            BotaoTatico("Continuar sem rede", aoSeguirSemRede)
+            BotaoTatico("Continuar sem rede", aoSeguirSemRede, icone = Icones.Adiante)
             return@Column
         }
 
@@ -173,25 +174,38 @@ fun TelaDeLogin(
         }
 
         Box(Modifier.height(Espaco.Largo))
+        // **O botão que não parecia acionável, e o que era o defeito.**
+        //
+        // Ao chegar nesta tela os dois campos estão vazios, então `podeEntrar` é
+        // `false` e o que o agente vê é o estado DESABILITADO — caixa cinza, letra
+        // cinza. O conserto é no `BotaoTatico`, e está medido lá: o rótulo subiu de
+        // 4,70 para 7,01:1 e a caixa ganhou contorno, porque `Elevado` sobre
+        // `Vazio` rende 1,17:1 e portanto não tinha borda nenhuma.
+        //
+        // Habilitado ele é `Vazio` sobre `Tinta`: **17,01:1**, o maior contraste
+        // desta paleta. O ícone entra só aqui, na ação de maior consequência da
+        // tela — seta atravessando o batente, que é o turno começando.
         BotaoTatico(
             rotulo = if (entrando) "Entrando" else "Iniciar turno",
             aoTocar = entrar,
             habilitado = podeEntrar,
+            icone = Icones.Entrar,
         )
 
         Box(Modifier.height(Espaco.Padrao))
         // Seguir sem entrar é legítimo: ciclo de voz, earcons e gravação de
         // evidência funcionam offline. O que não funciona é o que depende de
         // saber quem é o agente — e isso é dito quando for pedido.
-        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-            Etiqueta(
-                "Seguir sem entrar",
-                cor = Cores.TintaFraca,
-                modifier = Modifier
-                    .tocavel(aoTocar = aoSeguirSemRede)
-                    .padding(Espaco.Curto),
-            )
-        }
+        //
+        // Era uma `Etiqueta` tocável de 10 sp, sem forma nenhuma: um alvo que só
+        // existe para quem já sabia que ele estava ali. Virou pílula de contorno —
+        // a ação secundária deste sistema passou a ter forma, e o rótulo subiu de
+        // `Tipo.Etiqueta` a 5,52:1 para `Tipo.Acao` a **8,23:1**.
+        PilulaDeAcao(
+            rotulo = "Seguir sem entrar",
+            icone = Icones.Adiante,
+            aoTocar = aoSeguirSemRede,
+        )
     }
 }
 
