@@ -228,11 +228,20 @@ fun TelaDePermissoes(aoConcluir: () -> Unit) {
 
     // Lido uma vez por composição, não a cada recomposição: `SharedPreferences`
     // na main thread dentro do corpo do composable rodava a cada quadro.
-    val podePedir = remember(estado) { podePedirDeNovo(context) }
-
-    // **O conjunto que separa "negada" de "ainda não pedida".** É o que faz o
-    // vermelho desta tela ser verdadeiro. Ver o KDoc do composable.
-    val pedidas = remember(estado) { context.jaPedidas() }
+    //
+    // **A chave era `estado`, e `estado` nunca muda de valor** — `data class` com
+    // conteúdo idêntico depois de uma negativa. O fecho devolvido por
+    // `podePedirDeNovo` fotografa `jaPedidas` na hora em que é criado, então ele
+    // congelava no conjunto vazio da primeira composição e `Recuperacao` nunca
+    // chegava a `AbrirAjustes`: o botão continuaria dizendo "Permitir" para sempre,
+    // abrindo um diálogo que o Android não mostra mais — que é **exatamente** o
+    // sintoma que o comentário do `registrarPedido`, trinta linhas abaixo, diz que
+    // este código existe para evitar. Defeito anterior a esta sessão, encontrado
+    // porque a decisão de cor passou a depender do mesmo dado.
+    //
+    // [pedidas] é a chave certa: ela muda de conteúdo quando um pedido é feito, e
+    // [voltas] cobre a volta dos ajustes do Android.
+    val podePedir = remember(pedidas, voltas) { podePedirDeNovo(context) }
 
     // **As barras do sistema, e por que a conta é desta tela.**
     //
@@ -359,6 +368,7 @@ fun TelaDePermissoes(aoConcluir: () -> Unit) {
                         // permissão só pode aparecer como NEGADA depois de passar
                         // por aqui.
                         context.registrarPedido(r.permissoes)
+                        pedidas = context.jaPedidas()
                         pedido.launch(r.permissoes.toTypedArray())
                     },
                 )
