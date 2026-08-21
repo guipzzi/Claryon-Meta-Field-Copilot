@@ -40,8 +40,12 @@
 
 ## O que está quebrado, e nós sabemos
 
-1. **Falso positivo do earcon: ~3,3/h contra a meta de 0,5/h.** O 0,52/h que eu reportei era
-   **otimista por defeito do meu arranjo**: o teste fatia o áudio em 5 min e chama `reiniciar()`
+1. **Falso positivo do earcon: 0,99/h contra a meta de 0,5/h**, medido em **3,04 h retidas**
+   (5 podcasts, cada um cortado ao meio no tempo). A cabeça `v5` corta pela metade a que estava
+   em produção (1,65 → 0,99/h no mesmo áudio) sem custar recall — 100% nas retidas, com escore
+   mínimo MAIOR. Não subir o limiar: em 0,99 dá zero disparo, mas zero em 3,04 h tem teto de
+   0,99/h pela regra dos três, e o lado positivo são 9 clipes limpos de um locutor. **Antes:** o 0,52/h reportado era
+   **otimista por defeito do arranjo**: o teste fatia o áudio em 5 min e chama `reiniciar()`
    entre as fatias, e produção nunca reinicia — é fluxo contínuo o turno inteiro. O avaliador
    alinhado ao anel do aparelho, sobre o fluxo contínuo, acha 3 disparos onde o fatiado achava 1;
    o PRIMEIRO bate ao segundo (1906,6 s), o que valida o alinhamento. Em 115,5 min. Era **89,85/h**;
