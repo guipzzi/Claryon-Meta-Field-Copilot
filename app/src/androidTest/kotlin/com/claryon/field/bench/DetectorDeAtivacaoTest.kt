@@ -41,9 +41,15 @@ import kotlin.system.measureNanoTime
  *
  * ## O que este teste NÃO mede
  *
- * Falso positivo. O único negativo humano disponível são 3,8 s de fala, e `0
- * disparos` em 3,8 s é ausência de amostra, não taxa. A métrica que decide se isto
- * pode ir a campo é **falsos por hora** sobre fala espontânea.
+ * Falso positivo. Estes 3,8 s continuam sendo ausência de amostra, e o teste diz
+ * isso no log — mas a lacuna que eles nomeavam **foi fechada em 21/08 por outro
+ * arquivo**: `FalsoPositivoEmFalaEspontaneaTest` mede 3,04 h de fala espontânea
+ * retida e dá 0,99/h para a cabeça em produção, contra a meta de 0,5/h.
+ *
+ * Os dois continuam existindo porque medem coisas diferentes: aqui é regressão do
+ * caminho limpo (o detector reage à palavra e cala no resto do MESMO material); lá
+ * é a taxa que decide se pode ir a campo. Ler este arquivo como se ele ainda fosse
+ * a única evidência de falso positivo é que seria erro.
  */
 @RunWith(AndroidJUnit4::class)
 class DetectorDeAtivacaoTest {
@@ -241,7 +247,8 @@ class DetectorDeAtivacaoTest {
                 "ClaryonField",
                 "ATIVAÇÃO — \"na escuta\" (${"%.1f".format(pcm.size / 16000.0)} s): " +
                     "$disparos disparo(s) · último escore ${"%.3f".format(it.ultimoEscore)}\n" +
-                    "  ⚠️ 3,8 s não é taxa de falso positivo. É ausência de amostra.",
+                    "  ⚠️ 3,8 s não é taxa de falso positivo — é ausência de amostra. " +
+                        "A taxa está em FalsoPositivoEmFalaEspontaneaTest: 0,99/h em 3,04 h.",
             )
             assertTrue("o detector disparou em fala que não é comando", disparos == 0)
         }
