@@ -49,6 +49,50 @@ enum class StreamStatus {
 }
 
 /**
+ * Causa tipada vinda de `Stream.errorStream` — o fluxo que diz **por que** o
+ * stream parou, separado do estado, que só diz **que** parou.
+ *
+ * Os nomes espelham `StreamError` do DAT 0.9 de propósito, como os enums acima,
+ * para que o mapeamento continue sendo por nome e resista a acréscimos do SDK.
+ *
+ * **`StreamError` é um `enum`, não uma sealed class** — o que importa porque um
+ * `when` sobre ele não precisa de `is`, e porque `description` é um método da
+ * própria constante. Confirmado por `javap` no artefato `mwdat-camera-0.9.0`:
+ *
+ * ```
+ * javap -cp classes.jar com.meta.wearable.dat.camera.types.StreamError
+ * public final class ...StreamError extends java.lang.Enum<...StreamError>
+ *     implements com.meta.wearable.dat.core.types.DatError {
+ *   STREAM_ERROR; CRITICAL_STREAM_ERROR; HINGE_CLOSED; PERMISSIONS_DENIED;
+ *   THERMAL_HOT; BATTERY_LOW; PEAK_POWER_LIMIT; TIMEOUT;
+ *   public final java.lang.String getDescription();
+ * }
+ * ```
+ *
+ * [frase] é o que o agente **ouve**, no vocabulário dele e dentro do teto de 7
+ * palavras da fala operacional — sustentado por teste, não por disciplina.
+ * `HINGE_CLOSED` vira "óculos dobrados" porque é isso que aconteceu no mundo: o
+ * agente guardou os óculos no bolso sem perceber que a câmera estava aberta.
+ */
+enum class ErroDeStream(val frase: String) {
+    STREAM_ERROR("Câmera falhou. Tente de novo."),
+    CRITICAL_STREAM_ERROR("Câmera parou. Reabra a sessão."),
+    HINGE_CLOSED("Óculos dobrados. Abra as hastes."),
+    PERMISSIONS_DENIED("Libere a câmera no Meta AI."),
+    THERMAL_HOT("Óculos quentes. Câmera pausada."),
+    BATTERY_LOW("Bateria dos óculos acabando."),
+    PEAK_POWER_LIMIT("Óculos sem energia para transmitir."),
+    TIMEOUT("Câmera não respondeu."),
+
+    /** O SDK acrescentou um valor que esta versão não conhece. */
+    DESCONHECIDO("Câmera falhou."),
+    ;
+
+    /** Código estável para telemetria e para o mapeamento erro → earcon. */
+    val codigo: String get() = "glasses.stream_error.$name"
+}
+
+/**
  * Perfil de câmera pedido ao stream. Deliberadamente modesto: pedir resolução
  * menor reduz a compressão por frame e pode MELHORAR a qualidade visual efetiva
  * sob Bluetooth Classic.

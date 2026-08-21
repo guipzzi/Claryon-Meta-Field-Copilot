@@ -165,6 +165,30 @@ veste deixa de valer. Um PTT apertado nessa condição difunde a conversa ao red
 Mitigações que já existem no produto: o PTT é explícito, tem teto de 30 s, e o
 pré-roll nunca é persistido — mas nenhuma delas substitui a notificação.
 
+## Câmera do DAT — erro tipado e permissão
+
+Os dois itens **[SEG]** da Fase 5 estão implementados e **nenhum dos dois é
+verificável no simulador**. Não é falta de esforço: é limitação medida do
+MockDeviceKit, confirmada por `javap` no artefato `mwdat-mockdevice-0.9.0` —
+`MockCameraKit` expõe exatamente três métodos (`setCameraFeed(Uri)`,
+`setCameraFeed(CameraFacing)`, `setCapturedImage(Uri)`) e **nada** para injetar
+erro de stream ou derrubar o stream mantendo a sessão viva.
+
+| O que verificar no aparelho real | Por que importa |
+|---|---|
+| Dobrar as hastes com a câmera aberta emite `HINGE_CLOSED` no `errorStream`? | No MDK o campo `erros` sai **vazio** em toda rodada. Se em hardware também vier vazio, o `errorStream` não é a fonte da causa e o produto precisa de outra |
+| `THERMAL_HOT` / `BATTERY_LOW` param a câmera **com a sessão de pé**? | É o único caso em que o tratamento terminal (`Camera.stop()` no `STOPPED`) é o que libera o `addCamera` seguinte. No MDK a sessão cai junto, e `cleanupSession()` já soltava as referências — por isso o teste instrumentado passa mesmo sem o conserto |
+| O `addCamera` seguinte a um stream morto **entrega frames**? | O MDK não reabre o decodificador no mesmo processo, então ausência de frames lá é indistinguível da limitação conhecida |
+| Com óculos pareados, `checkPermissionStatus(CAMERA)` responde em quanto tempo? | Está no caminho do onboarding, com teto de 5 s. Se a resposta real passar disso, o agente vê "Os óculos não responderam" numa permissão que existe |
+| O diálogo do Meta AI concede por aparelho, e a concessão sobrevive a reiniciar o app? | A doc diz "Allow once" / "Allow always". Se o agente escolher *once*, a leitura de placa quebra no meio do turno e não no onboarding |
+
+**O que já foi medido, e não precisa de hardware:** com o Meta AI ausente, o
+deeplink `fb-viewapp://device/permissions/request` estoura
+`ActivityNotFoundException`, e o app converte isso em "Instale o app Meta AI." na
+própria tela, sem cair. Sem óculos pareados, `checkPermissionStatus` responde
+`NO_DEVICE` e a tela mostra "Óculos não encontrados." — nunca "negada", que
+mandaria o agente consertar a coisa errada.
+
 ## Modo avião
 
 Comando de voz com o rádio desligado: transcrição local, resposta falada, e o

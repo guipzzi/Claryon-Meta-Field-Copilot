@@ -48,6 +48,27 @@ class DiagnosticoViewModel(app: Application) : AndroidViewModel(app) {
     val frameInfo = facade.frameInfo
     val deviceCount = facade.deviceCount
 
+    /**
+     * **A causa da última falha do stream, não só o estado.**
+     *
+     * `Stream.errorStream` passou a ser coletado dentro da fachada; este é o
+     * consumidor vivo dele no único caminho que hoje abre câmera de verdade — o
+     * painel. Em produção a causa chega por outra porta, tipada no
+     * `Result.Failure` de `withCamera`, que é o que um chamador precisa.
+     *
+     * O estado sozinho dizia "STOPPED" para hastes dobradas, permissão negada,
+     * bateria no fim e superaquecimento — quatro problemas com quatro ações
+     * diferentes e um único rótulo.
+     */
+    private val _causaDoStream = MutableStateFlow("—")
+    val causaDoStream: StateFlow<String> = _causaDoStream.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            facade.streamErrors.collect { erro -> _causaDoStream.value = erro.message }
+        }
+    }
+
     val mockAvailable: Boolean = true
 
     private val _mockStatus = MutableStateFlow("desligado")

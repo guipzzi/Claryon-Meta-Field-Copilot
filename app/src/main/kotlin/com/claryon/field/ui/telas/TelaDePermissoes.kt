@@ -21,6 +21,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.neverEqualPolicy
 import androidx.compose.runtime.mutableStateOf
@@ -37,6 +38,8 @@ import androidx.compose.ui.unit.sp
 import com.claryon.field.permissoes.EstadoDePermissoes
 import com.claryon.field.permissoes.PermissoesEssenciais
 import com.claryon.field.permissoes.Recuperacao
+import com.claryon.glasses.PermissaoDaCameraDoDat
+import com.claryon.glasses.RespostaDePermissao
 
 /**
  * Tela de permissões do onboarding.
@@ -70,6 +73,23 @@ fun TelaDePermissoes(aoConcluir: () -> Unit) {
         mutableStateOf(avaliarAgora(context), policy = neverEqualPolicy())
     }
 
+    // **A permissão de câmera do DAT — a que nunca era pedida.**
+    //
+    // `null` enquanto a consulta não respondeu. Ela é distinta de
+    // `Manifest.permission.CAMERA`: aquela é do celular e sai do diálogo do
+    // Android; esta é concedida no app Meta AI, por aparelho. O `catalogo()`
+    // acima cobre a primeira e não tem como cobrir a segunda.
+    var oculos by remember { mutableStateOf<RespostaDePermissao?>(null) }
+
+    // O agente já respondeu ao diálogo do Meta AI nesta abertura? Negada + já
+    // perguntado libera o portão: insistir seria prender o onboarding em cima de
+    // uma escolha que o agente acabou de fazer.
+    var jaPediuOculos by remember { mutableStateOf(false) }
+
+    // Incrementado a cada volta para a tela; é a chave que refaz a consulta ao
+    // DAT depois da ida ao Meta AI.
+    var voltas by remember { mutableStateOf(0) }
+
     // Conceder pelos ajustes do Android **não reinicia o processo** (só revogar
     // reinicia). Sem observar o retorno, a tela continuaria mostrando tudo negado
     // depois de o agente ter liberado tudo.
@@ -78,11 +98,22 @@ fun TelaDePermissoes(aoConcluir: () -> Unit) {
         val observador = LifecycleEventObserver { _, evento ->
             if (evento == Lifecycle.Event.ON_RESUME) {
                 estado = avaliarAgora(context)
-                if (estado.tudoConcedido) aoConcluir()
+                voltas++
             }
         }
         dono.lifecycle.addObserver(observador)
         onDispose { dono.lifecycle.removeObserver(observador) }
+    }
+
+    // A consulta é suspensa (a resposta vem dos óculos por Bluetooth) e tem teto
+    // próprio dentro de `PermissaoDaCameraDoDat`, para não prender a abertura.
+    LaunchedEffect(voltas) {
+        oculos = PermissaoDaCameraDoDat.status()
+    }
+
+    val pedidoDosOculos = rememberLauncherForActivityResult(PermissaoDaCameraDoDat.Contrato()) {
+        oculos = it
+        jaPediuOculos = true
     }
 
     val pedido = rememberLauncherForActivityResult(RequestMultiplePermissions()) {
@@ -90,7 +121,24 @@ fun TelaDePermissoes(aoConcluir: () -> Unit) {
         // usuário pode ter concedido pelos ajustes numa ida e volta anterior, e
         // o resultado do diálogo não sabe disso.
         estado = avaliarAgora(context)
-        if (estado.tudoConcedido) aoConcluir()
+    }
+
+    // **Um só lugar decide que o onboarding acabou.**
+    //
+    // Antes eram três (`ON_RESUME`, o retorno do diálogo e os botões), e
+    // acrescentar a condição dos óculos aos três significaria esquecê-la num
+    // deles. O portão dos óculos NÃO bloqueia: sem óculos por perto a resposta é
+    // `Indisponivel` e a tela segue igual a antes. Ele só segura a abertura no
+    // caso em que segurar é a coisa certa — óculos presentes, permissão negada,
+    // e o agente ainda não respondeu ao diálogo do Meta AI. Este é o instante
+    // que o roadmap chama de "a única janela".
+    val podeConcluir = estado.tudoConcedido &&
+        (oculos is RespostaDePermissao.Concedida ||
+            oculos is RespostaDePermissao.Indisponivel ||
+            jaPediuOculos)
+
+    LaunchedEffect(podeConcluir) {
+        if (podeConcluir) aoConcluir()
     }
 
     // Lido uma vez por composição, não a cada recomposição: `SharedPreferences`
@@ -143,6 +191,63 @@ fun TelaDePermissoes(aoConcluir: () -> Unit) {
                             color = MaterialTheme.colorScheme.error,
                         )
                     }
+                }
+            }
+        }
+
+        // **Câmera dos óculos — permissão do DAT, não do Android.**
+        //
+        // Fica depois das do sistema de propósito: é a única que sai do app, e
+        // pedir a que abre outro aplicativo antes das locais gasta a paciência do
+        // agente na mais cara.
+        Card(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+            Column(Modifier.padding(14.dp)) {
+                Text("Câmera dos óculos", fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "É por ela que o app enxerga pela câmera dos óculos. " +
+                        "Quem libera é o app Meta AI, não o Android.",
+                    fontSize = 13.sp,
+                )
+                Spacer(Modifier.height(6.dp))
+                val (texto, boa) = when (val o = oculos) {
+                    null -> "Verificando…" to true
+                    is RespostaDePermissao.Concedida -> "Liberado" to true
+                    is RespostaDePermissao.Negada -> "Sem ela, não enxergo pelos óculos." to false
+                    // A causa, não um "negada" genérico: "óculos desconectados"
+                    // pede que o agente ligue os óculos; "negada" pediria que ele
+                    // mudasse de ideia. Mandar consertar a coisa errada é o modo
+                    // de falha que esta tela existe para evitar.
+                    is RespostaDePermissao.Indisponivel -> o.causa.frase to false
+                }
+                Text(
+                    texto,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = if (boa) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    },
+                )
+                if (oculos !is RespostaDePermissao.Concedida) {
+                    Spacer(Modifier.height(8.dp))
+                    Button(
+                        // **O chamador que faltava.** Sem este toque, nada no
+                        // aplicativo jamais pede a permissão de câmera do DAT.
+                        onClick = {
+                            // `pedir` devolve resposta quando nem deu para pedir
+                            // (Meta AI ausente ⇒ `ActivityNotFoundException` no
+                            // deeplink). Sem isso, o toque não faria nada e o
+                            // sintoma seria "apertei e não aconteceu nada" — o
+                            // mesmo que o resto desta tela evita.
+                            PermissaoDaCameraDoDat.pedir(pedidoDosOculos)?.let {
+                                oculos = it
+                                jaPediuOculos = true
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Liberar no Meta AI") }
                 }
             }
         }

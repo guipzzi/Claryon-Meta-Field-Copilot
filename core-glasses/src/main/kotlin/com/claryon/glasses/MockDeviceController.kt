@@ -155,11 +155,26 @@ class MockDeviceController(context: Context) {
                 glasses.powerOn()
                 glasses.don() // "vestir" — o streaming exige o dispositivo ligado e vestido
                 // Câmera do celular como fonte simulada (feed ao vivo, sem arquivo).
-                runCatching {
-                    CameraFacing.entries.firstOrNull()?.let { facing ->
-                        glasses.services.camera.setCameraFeed(facing)
+                //
+                // **BACK explicitamente, e não `entries.firstOrNull()`.**
+                // `javap` no artefato `mwdat-mockdevice-0.9.0`:
+                // `CameraFacing { FRONT; BACK; }` — nessa ordem. Então
+                // `firstOrNull()` escolhia FRONT, e o AVD deste projeto tem
+                // `hw.camera.front=none` (`~/.android/avd/claryon.avd/config.ini`).
+                //
+                // O sintoma era caro de diagnosticar porque não parecia falha de
+                // câmera: o stream ficava em `[STOPPED, STARTING, STOPPED,
+                // STARTING, STOPPED]` — o SDK tentando e retentando um feed que
+                // não existia — e todo teste instrumentado de câmera esperava
+                // `STREAMING` até estourar o prazo. Nenhum erro, nenhum log: a
+                // câmera pedida simplesmente não estava no aparelho.
+                //
+                // Traseira é também a escolha certa em si: é a que aponta para
+                // onde o agente olha, que é o que os óculos veem.
+                runCatching { glasses.services.camera.setCameraFeed(CameraFacing.BACK) }
+                    .onFailure {
+                        runCatching { glasses.services.camera.setCameraFeed(CameraFacing.FRONT) }
                     }
-                }
                 paired = true
             }
             .onFailure { _, _ -> paired = false }

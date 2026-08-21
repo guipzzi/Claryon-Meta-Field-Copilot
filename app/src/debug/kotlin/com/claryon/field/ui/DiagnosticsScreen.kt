@@ -61,6 +61,7 @@ fun DiagnosticsScreen(
     val session by vm.session.collectAsState()
     val stream by vm.streamState.collectAsState()
     val frame by vm.frameInfo.collectAsState()
+    val causaDoStream by vm.causaDoStream.collectAsState()
     val devices by vm.deviceCount.collectAsState()
     val mockStatus by vm.mockStatus.collectAsState()
     val audioStatus by vm.audioStatus.collectAsState()
@@ -97,6 +98,10 @@ fun DiagnosticsScreen(
         StatusCard("Dispositivos visíveis", devices.toString())
         StatusCard("Sessão", session.name)
         StatusCard("Stream de câmera", stream.name)
+        // O estado diz QUE parou; esta linha diz POR QUÊ. Medido: o MockDeviceKit
+        // não emite `StreamError` para gesto nenhum, então aqui fica "—" no
+        // emulador — o valor só aparece com óculos reais.
+        StatusCard("Causa da última falha", causaDoStream)
         StatusCard(
             "Frames",
             frame?.let { "#${it.count} · ${it.width}×${it.height}" } ?: "—",

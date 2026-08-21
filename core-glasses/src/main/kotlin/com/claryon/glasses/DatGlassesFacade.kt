@@ -77,6 +77,44 @@ class DatGlassesFacade(private val scope: CoroutineScope) : GlassesFacade {
     private val _sessionErrors = MutableSharedFlow<ClaryonError>(replay = 1, extraBufferCapacity = 8)
     val sessionErrors: SharedFlow<ClaryonError> = _sessionErrors.asSharedFlow()
 
+    /**
+     * Erros **do stream de câmera**, tipados — distintos dos de sessão.
+     *
+     * `Stream.errorStream` é `Flow<StreamError>` (não `StateFlow`), e por baixo é
+     * um `MutableSharedFlow(replay = 0, extraBufferCapacity = 16, DROP_OLDEST)`.
+     * Confirmado no construtor de `StreamImpl` por `javap -p -c`:
+     *
+     * ```
+     * 55: iconst_0            // replay = 0
+     * 56: bipush 16           // extraBufferCapacity = 16
+     * 58: getstatic ...BufferOverflow.DROP_OLDEST
+     * 63: invokestatic ...MutableSharedFlow$default
+     * 66: putfield  _errors
+     * ```
+     *
+     * **`replay = 0` é a razão de assinar antes de `start()`**: erro emitido sem
+     * assinante vivo não é bufferizado nem reentregue — some para sempre. É por
+     * isso que a coleta entra em [observeStream], que já roda antes do
+     * `stream.start()` nos dois caminhos, e não num `LaunchedEffect` de tela.
+     *
+     * Aqui usamos `replay = 1` de propósito: quem assinar logo depois da falha
+     * (o painel, um earcon atrasado) ainda recebe a causa.
+     */
+    private val _streamErrors = MutableSharedFlow<ClaryonError>(replay = 1, extraBufferCapacity = 8)
+    val streamErrors: SharedFlow<ClaryonError> = _streamErrors.asSharedFlow()
+
+    /**
+     * A última causa tipada do stream corrente, para virar **motivo** do
+     * `Result.Failure` de [withCamera].
+     *
+     * Sem isto o erro existe, é logado, e o chamador ainda recebe
+     * `glasses.no_frames` — "a câmera abriu e não entregou imagem" — que descreve
+     * o sintoma e esconde a causa. Saber que parou sem saber por que é o que o
+     * item do roadmap chama de "não se sabe por que a demonstração parou".
+     */
+    private val ultimoErroDeStream =
+        java.util.concurrent.atomic.AtomicReference<ErroDeStream?>(null)
+
     // Uma única instância viva do seletor — como o sample oficial (`by lazy`).
     // Criar um seletor novo a cada createSession pode não ter resolvido o
     // dispositivo ativo ainda (leva a NO_ELIGIBLE_DEVICE).
@@ -94,6 +132,19 @@ class DatGlassesFacade(private val scope: CoroutineScope) : GlassesFacade {
 
     /** `capturePhoto()` é uma por vez (regra do DAT). */
     private val capturaEmCurso = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /**
+     * Uma parada por câmera — reposto a `false` a cada `addCamera`.
+     *
+     * A câmera corrente passou a ter **quatro** caminhos que a param: o vigia de
+     * primeiro frame, o `finally` de [withCamera], [stopCameraStream] e agora o
+     * estado terminal. Sem o guarda, o caso normal (vigia estoura ⇒ `stop()` ⇒
+     * estado vai a `STOPPED` ⇒ terminal ⇒ `stop()` de novo) chamaria `stop()`
+     * duas ou três vezes na mesma câmera. Não é um guarda de processo: é por
+     * câmera, senão a segunda leitura de placa do turno encontraria o guarda já
+     * fechado e nunca pararia nada.
+     */
+    private val cameraEncerrada = java.util.concurrent.atomic.AtomicBoolean(false)
 
 
     // ── Registro ────────────────────────────────────────────────────────────
@@ -206,7 +257,7 @@ class DatGlassesFacade(private val scope: CoroutineScope) : GlassesFacade {
      * Sessão parada é terminal: para voltar, criar uma **nova** (não reviver).
      */
     fun stopSession() {
-        activeCamera?.stop()
+        pararCamera()
         activeSession?.stop()
     }
 
@@ -246,6 +297,7 @@ class DatGlassesFacade(private val scope: CoroutineScope) : GlassesFacade {
         s.addCamera(profile.toStreamConfiguration())
             .onSuccess { camera ->
                 activeCamera = camera
+                cameraEncerrada.set(false)
                 val stream = camera.stream
                 activeStream = stream
                 observeStream(stream)
@@ -257,16 +309,76 @@ class DatGlassesFacade(private val scope: CoroutineScope) : GlassesFacade {
 
     /** Desliga o stream. `Camera.stop()` desanexa e cascateia para o stream filho. */
     fun stopCameraStream() {
-        activeCamera?.stop()
+        pararCamera()
+    }
+
+    /**
+     * Para a câmera corrente **uma vez** e solta as referências.
+     *
+     * `Camera.stop()` confirmado por `javap` no artefato `mwdat-camera-0.9.0`:
+     * `public interface Camera extends java.io.Closeable { getState(); getStream();
+     * stop(); }` — `stop()` devolve `void`, não `DatResult`, então não há
+     * resultado para conferir; o efeito aparece em `Camera.state`/`Stream.state`.
+     */
+    private fun pararCamera(alvo: Camera? = null) {
+        // `alvo` explícito para o caminho de [withCamera]: se a sessão cair no
+        // meio, `cleanupSession()` já zerou `activeCamera`, e sem a referência
+        // local a câmera daquela chamada nunca receberia `stop()`. O
+        // *cascading stop* da sessão provavelmente a levaria junto — mas
+        // "provavelmente" não é a garantia que o `finally` existia para dar.
+        val cam = alvo ?: activeCamera ?: return
+        if (!cameraEncerrada.compareAndSet(false, true)) return
+        runCatching { cam.stop() }
+        clearStreamRefs()
     }
 
     private fun observeStream(stream: Stream) {
         streamObserver?.cancel()
+        ultimoErroDeStream.set(null)
         streamObserver = scope.launch {
             launch {
+                // **`STOPPED` só é terminal DEPOIS de o stream ter subido.**
+                //
+                // Medido no artefato, não suposto: `StreamImpl` nasce com
+                // `_state = MutableStateFlow(StreamState.STOPPED)` — `javap -p -c`
+                // no construtor, `143: getstatic ...StreamState.STOPPED` seguido de
+                // `146: invokestatic ...StateFlowKt.MutableStateFlow`.
+                //
+                // Como `state` é `StateFlow`, o coletor recebe esse valor inicial
+                // **na hora em que assina** — e assinamos de propósito antes de
+                // `stream.start()`. Tratar esse primeiro `STOPPED` como terminal
+                // chamaria `camera.stop()` sobre a câmera recém-criada e mataria o
+                // stream antes de ele existir: o conserto do roadmap, aplicado ao
+                // pé da letra, quebraria a câmera em vez de consertá-la.
+                //
+                // A regra inteira — e o porquê de cada ramo — vive em
+                // [VidaDoStream], que é função pura e por isso testável sem
+                // óculos, sem emulador e sem o decodificador do MockDeviceKit.
+                val vida = VidaDoStream()
                 stream.state.collect { state ->
-                    _stream.value = state.name.toEnumOr(StreamStatus.STOPPED)
-                    if (_stream.value == StreamStatus.CLOSED) clearStreamRefs()
+                    val nosso = state.name.toEnumOr(StreamStatus.STOPPED)
+                    _stream.value = nosso
+                    when (vida.aoMudarPara(nosso)) {
+                        // Terminal. Sem `Camera.stop()` aqui a câmera continua
+                        // anexada à sessão no SDK, e o próximo `addCamera` não
+                        // abre — o agente aponta para a placa seguinte e nada
+                        // acontece, sem erro nenhum, porque o estado do app diz
+                        // que não há stream ativo.
+                        AcaoDeStream.PARAR_CAMERA -> pararCamera()
+                        AcaoDeStream.SOLTAR_REFERENCIAS -> clearStreamRefs()
+                        AcaoDeStream.NADA -> Unit
+                    }
+                }
+            }
+            launch {
+                // **A coleta que faltava.** Sem ela o estado dizia "parou" e a
+                // causa — hastes dobradas, permissão negada, bateria, térmico —
+                // era descartada pelo `DROP_OLDEST` sem nunca ter sido lida.
+                stream.errorStream.collect { erro ->
+                    val nosso = erro.name.toEnumOr(ErroDeStream.DESCONHECIDO)
+                    ultimoErroDeStream.set(nosso)
+                    Log.w(TAG, "Erro de stream: ${erro.name}")
+                    _streamErrors.emit(ClaryonError.Glasses(nosso.codigo, nosso.frase))
                 }
             }
             // **Não se coleta `videoStream` aqui.**
@@ -313,6 +425,7 @@ class DatGlassesFacade(private val scope: CoroutineScope) : GlassesFacade {
             ?: return Result.failure(ClaryonError.Glasses("glasses.add_camera_failed", "addCamera falhou."))
 
         activeCamera = camera
+        cameraEncerrada.set(false)
         val stream = camera.stream
         activeStream = stream
         observeStream(stream)
@@ -332,10 +445,15 @@ class DatGlassesFacade(private val scope: CoroutineScope) : GlassesFacade {
         val primeiroFrame = CompletableDeferred<Unit>()
         val comVigia = scope.launch {
             if (withTimeoutOrNull(PRAZO_PRIMEIRO_FRAME_MS) { primeiroFrame.await() } == null) {
-                Log.w(TAG, "nenhum frame em ${PRAZO_PRIMEIRO_FRAME_MS}ms — abortando o stream")
+                Log.w(
+                    TAG,
+                    "nenhum frame em ${PRAZO_PRIMEIRO_FRAME_MS}ms " +
+                        "(causa: ${ultimoErroDeStream.get()?.name ?: "nenhuma no errorStream"}) " +
+                        "— abortando o stream",
+                )
                 // Parar a câmera desfaz o fluxo e faz `block` retornar, em vez de
                 // deixar o consumidor suspenso para sempre.
-                camera.stop()
+                pararCamera(camera)
             }
         }
 
@@ -359,8 +477,21 @@ class DatGlassesFacade(private val scope: CoroutineScope) : GlassesFacade {
             if (primeiroFrame.isCompleted) {
                 Result.success(Unit)
             } else {
+                // **A causa, quando o `errorStream` a entregou.** `glasses.no_frames`
+                // descreve o sintoma — "abriu e não entregou imagem" — e é a mesma
+                // frase para hastes dobradas, permissão negada, bateria no fim e
+                // superaquecimento. Com a coleta ligada, o chamador recebe qual
+                // deles foi, e o earcon/fala deixa de ser genérico.
+                val causa = ultimoErroDeStream.get()
                 Result.failure(
-                    ClaryonError.Glasses("glasses.no_frames", "A câmera abriu e não entregou imagem."),
+                    if (causa != null) {
+                        ClaryonError.Glasses(causa.codigo, causa.frase)
+                    } else {
+                        ClaryonError.Glasses(
+                            "glasses.no_frames",
+                            "A câmera abriu e não entregou imagem.",
+                        )
+                    },
                 )
             }
         } finally {
@@ -368,7 +499,7 @@ class DatGlassesFacade(private val scope: CoroutineScope) : GlassesFacade {
             // corrotina sobreviveria até o prazo e chamaria `camera.stop()` sobre
             // uma câmera já parada. Uma corrotina órfã por chamada que falha.
             comVigia.cancel()
-            camera.stop()
+            pararCamera(camera)
             // Soltar as referências aqui também: esperar só pelo CLOSED deixaria
             // activeStream apontando para um stream morto se o evento não vier.
             streamObserver?.cancel()
