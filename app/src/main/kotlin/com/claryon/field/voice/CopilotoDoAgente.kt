@@ -20,6 +20,7 @@ import com.claryon.common.Priority
 import com.claryon.common.Result
 import com.claryon.evidence.EncryptedEvidenceVault
 import com.claryon.field.agent.AnexoDeEvidencia
+import com.claryon.field.norma.ConsultaDeNorma
 import com.claryon.field.agent.ClaryonIntentExecutor
 import com.claryon.field.agent.Identidade
 import com.claryon.field.audio.AudioDoAgente
@@ -189,6 +190,18 @@ class CerebroDoCopiloto(private val app: Context) {
         // `AudioRecord` que alimenta o cofre. Repetir o literal aqui recriaria a
         // coincidência que este parâmetro existe para eliminar.
         taxaDeAmostragemHz = { audio.taxaDeAmostragemHz },
+
+        // **A Etapa A ligada.** Sem esta linha o executor devolveria
+        // `NormaNaoEncontrada` para sempre e o índice de 1744 trechos seria
+        // capacidade escrita e nunca construída — o defeito que o §6 do CLAUDE.md
+        // conta seis vezes neste projeto.
+        //
+        // `ConsultaDeNorma` é o ÚNICO arquivo de `app` que conhece
+        // `com.claryon.knowledge`, e ele não conhece executor nem intenção. Este
+        // arquivo conhece o executor e não conhece conhecimento. Nenhum dos dois,
+        // sozinho, transforma norma em ação — que é a fronteira que
+        // `FronteiraDoConhecimentoEmAppTest` mede.
+        consultarNorma = { pergunta -> ConsultaDeNorma.consultar(pergunta) },
 
         minhaPosicao = { local.ultimaPosicao() },
         permissaoDeLocal = { local.temPermissao() },

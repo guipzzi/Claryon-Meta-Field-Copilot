@@ -127,6 +127,7 @@ dependencies {
     implementation(project(":core-net"))
     // Etapa B da Fase 4: llama.cpp como camada de REDAÇÃO. O módulo não tem
     // `core-agent` no classpath — a saída do modelo não consegue nomear ação.
+    implementation(project(":core-knowledge"))
     implementation(project(":core-llm"))
 
     // sherpa-onnx (Piper TTS): o app empacota as .so + classes; core-voice usa compileOnly.

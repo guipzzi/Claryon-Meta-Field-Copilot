@@ -64,6 +64,32 @@ class FronteiraDoConhecimentoEmAppTest {
     /** Piso de material. Abaixo disto o corpus foi truncado e o teste não vale. */
     private val minimoDeTrechos = 1_000
 
+    /**
+     * O fonte sem comentário — porque **falar sobre** um símbolo não é **usá-lo**.
+     *
+     * Achado em 21/08, ao ligar a Etapa A: a varredura reprovou `ConsultaDeNorma.kt`
+     * e `CopilotoDoAgente.kt`, e os dois estavam **certos**. O que casou foi o KDoc,
+     * que explica a regra nomeando o que a regra proíbe: *"não sabe o que é `Intent`,
+     * `ActionOutcome` ou `IntentExecutor`"*. O código não menciona nenhum deles.
+     *
+     * É exatamente a falha que este teste mede no roteador, virada contra o próprio
+     * teste: **varredura de texto não distingue usar de comentar.** Um teste que
+     * reprova a documentação da regra ensina a apagar a documentação — e a próxima
+     * pessoa escreve o violador de verdade sem KDoc nenhum, passando limpo.
+     *
+     * Abrir exceção nominal para os dois arquivos era a outra saída, e a pior: lista
+     * de exceção é onde a próxima entra sem ninguém notar.
+     *
+     * **Limite honesto:** isto tira `//`, `/* */` e KDoc, e não trata `//` dentro de
+     * literal de string. Um arquivo com `val s = "http://x"` perderia o resto da
+     * linha na varredura. Para o que este teste procura — `import` e uso de tipo —
+     * o efeito é nenhum, e o custo de um parser de Kotlin aqui não se paga.
+     */
+    private fun semComentarios(fonte: String): String =
+        fonte.replace(Regex("/\\*.*?\\*/", RegexOption.DOT_MATCHES_ALL), " ")
+            .lineSequence()
+            .joinToString("\n") { it.substringBefore("//") }
+
     private fun raizDoRepositorio(): File {
         var dir: File? = File(".").canonicalFile
         while (dir != null) {
@@ -215,6 +241,54 @@ class FronteiraDoConhecimentoEmAppTest {
     }
 
     /**
+     * **O contra-teste da varredura: tirar comentário não pode cegá-la.**
+     *
+     * `semComentarios` foi acrescentado porque o KDoc que EXPLICA a regra estava
+     * reprovando os arquivos que a obedecem. Só que afrouxar uma varredura é a forma
+     * mais fácil de matar um teste sem que ninguém perceba: se o filtro comesse
+     * demais, `nenhumArquivoDeProducaoJuntaConhecimentoEExecutor` passaria a aprovar
+     * tudo, inclusive o violador de verdade — e continuaria verde para sempre.
+     *
+     * Então: um violador **sintético**, com o import e o uso em CÓDIGO, tem de ser
+     * pego. E um arquivo que só fala dos dois em comentário tem de passar. As duas
+     * asserções juntas prendem o filtro pelos dois lados; uma sozinha não prende.
+     */
+    @Test
+    fun aVarreduraAINDAPegaViolador_comOFiltroDeComentarioLigado() {
+        val violador = """
+            package com.claryon.field.exemplo
+            import com.claryon.knowledge.Trecho
+            import com.claryon.agent.ActionOutcome
+            fun perigoso(t: Trecho): ActionOutcome = TODO()
+        """.trimIndent()
+
+        val inocente = """
+            package com.claryon.field.exemplo
+            /** Este arquivo NÃO usa com.claryon.knowledge nem ActionOutcome. */
+            // e também não usa IntentExecutor — só fala deles aqui.
+            fun inofensivo() = Unit
+        """.trimIndent()
+
+        fun junta(fonte: String): Boolean {
+            val t = semComentarios(fonte)
+            return t.contains("com.claryon.knowledge") &&
+                (t.contains("IntentExecutor") || t.contains("ActionOutcome"))
+        }
+
+        assertTrue(
+            "O filtro de comentário cegou a varredura: um arquivo que IMPORTA o " +
+                "conhecimento e devolve ActionOutcome passou. Enquanto isto for " +
+                "verdade, o teste da fronteira aprova qualquer coisa.",
+            junta(violador),
+        )
+        assertTrue(
+            "Um arquivo que só MENCIONA os símbolos em comentário foi reprovado — " +
+                "é o defeito que o filtro existe para consertar, e ele voltou.",
+            !junta(inocente),
+        )
+    }
+
+    /**
      * **O segundo estágio da ativação NÃO barra — ele só tira o prefixo.**
      *
      * Achado de 21/08, e ele contradiz o KDoc de `PalavraDeAtivacaoNaFala`, que diz:
@@ -314,7 +388,7 @@ class FronteiraDoConhecimentoEmAppTest {
         )
 
         val infratores = arquivos.filter { f ->
-            val texto = f.readText()
+            val texto = semComentarios(f.readText())
             texto.contains("com.claryon.knowledge") &&
                 (texto.contains("IntentExecutor") || texto.contains("ActionOutcome"))
         }.map { it.relativeTo(fontes).path }
