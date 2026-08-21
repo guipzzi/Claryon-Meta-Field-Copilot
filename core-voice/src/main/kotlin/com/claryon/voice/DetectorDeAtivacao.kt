@@ -38,13 +38,56 @@ import kotlin.math.exp
  *
  * O modelo de referência foi treinado com **um** locutor e 27 elocuções aumentadas.
  * Ele acerta 26 de 26 em fluxo contínuo e as 9 elocuções retidas com escore mínimo
- * de 0,995 — mas **o falso positivo não tem taxa medida**: o único negativo humano
- * disponível são 3,8 s de fala. `0 disparos` em 3,8 s é ausência de amostra, não
- * garantia. Antes de ligar isto no caminho do rádio em campo, a métrica que decide é
- * **falsos por hora** sobre fala espontânea.
+ * de 0,995.
  *
- * @param limiar acima disto o quadro é considerado ativação. `0,5` é convenção, não
- *   medida — só uma curva ROC sobre fala espontânea justifica outro valor.
+ * ### O falso positivo PASSOU a ter taxa medida (21/08)
+ *
+ * Este parágrafo dizia que não tinha, e a frase estava certa até 20/08: o único
+ * negativo humano eram 3,8 s de fala, e `0 disparos` ali é ausência de amostra.
+ *
+ * Agora são **3,04 h de fala espontânea retida** — metade de cada um de cinco
+ * podcasts em pt-BR, cortados ao meio **no tempo** para que a metade que mede nunca
+ * tenha sido vista pelo treino. Múltiplos locutores, sobreposição, música de
+ * abertura. Medido com o refratário de 1 s desta própria classe.
+ *
+ * Cabeça em produção (`assets/models/ativacao/cabeca.f32` = `cabeca_v5.f32`), e a
+ * anterior (`v3`) para comparação:
+ *
+ * ```
+ *  limiar    v5 FP/h   v3 FP/h   recall v5 (9 retidas)
+ *   0,50       0,99      1,65      100%
+ *   0,70       0,33      0,66      100%
+ *   0,90       0,33      0,00      100%
+ *   0,99       0,00      0,00      100%
+ *   0,999      0,00      0,00       89%
+ * ```
+ *
+ * Escore máximo no negativo: v5 0,9558 · v3 0,8907. Mínimo nas retidas: v5 0,9986.
+ *
+ * **Nenhuma linha de `0,00` é uma taxa.** Zero evento em 3,04 h dá, pela regra dos
+ * três, teto de 95% em **0,99/h** — ainda o dobro da meta de 0,5/h do aceite da
+ * Fase 2. Para afirmar 0,5/h seriam necessárias ~6 h retidas.
+ *
+ * ### O que continua SEM medida, e é o outro lado da curva
+ *
+ * O lado negativo tem 3,04 h de áudio real. O lado **positivo** continua sendo **9
+ * clipes limpos, centrados, de um locutor só** — não é fala pelo microfone dos
+ * óculos por HFP, que comprime e estreita a banda.
+ *
+ * Isso muda a conclusão de lugar: subir o limiar acima de 0,5 continua sem
+ * justificativa medida, e agora **por falta do lado positivo**, não do negativo. Uma
+ * tabela que mostra 100% de recall até 0,995 sobre 9 clipes de laboratório não
+ * autoriza apertar o portão em campo.
+ *
+ * Scripts: `ferramentas/ativacao/podcast5.py` (fatorial 2×2),
+ * `podcast5_semente.py` (10 sementes por braço — uma medida sem variância não é
+ * medida) e `comparar_cabecas.py` (as cabeças gravadas, com o escore calculado como
+ * este arquivo calcula).
+ *
+ * @param limiar acima disto o quadro é considerado ativação. `0,5` **permanece** o
+ *   valor, e agora por razão medida: no negativo ele custa 0,99/h contra 0,33/h em
+ *   0,7, e essa diferença não paga o risco do lado positivo não medido. Mudar isto
+ *   exige a curva com fala real por HFP, não a que existe hoje.
  * @param refratarioMs janela morta após um disparo, para uma elocução não gerar dois.
  */
 class DetectorDeAtivacao(

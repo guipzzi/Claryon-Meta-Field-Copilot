@@ -225,11 +225,18 @@ Números desta máquina. O custo no aparelho ainda não foi medido, e a folga é
 
 - **Não é independente de locutor.** Treino e teste são o Guido. A generalização para
   três locutores inéditos foi medida antes, com um arranjo mais simples e `n=4`.
-- **Não tem falso positivo medido.** `0 disparos` em 3,8 s de `na escuta` não é taxa —
-  é ausência de amostra. A métrica real é **falsos por hora** de fala espontânea, e
-  para ela faltam horas, não minutos. **É a maior lacuna que existe hoje.**
-- **Não passou por HFP.** As gravações são do microfone do celular; a banda estreita é
-  simulada.
+- **~~Não tem falso positivo medido.~~ Medido em 21/08: 0,99/h** sobre **3,04 h** de
+  fala espontânea retida (metade de cada um de cinco podcasts, cortados ao meio no
+  tempo). A meta do aceite é 0,5/h, então ainda falta — mas por um fator de 2, não
+  por ausência de amostra. A cabeça `v5` cortou pela metade o que a `v3` fazia
+  (1,65/h no mesmo áudio) sem custar recall.
+  **As linhas de `0,00/h` da tabela não são taxa:** zero evento em 3,04 h dá teto de
+  95% em 0,99/h pela regra dos três. Fechar 0,5/h exige ~6 h retidas.
+- **Não passou por HFP**, e isto virou a lacuna PRINCIPAL. As gravações são do
+  microfone do celular; a banda estreita é simulada. O lado negativo da curva agora
+  tem 3,04 h de áudio real, mas o lado positivo continua sendo 9 clipes limpos de um
+  locutor — então subir o limiar acima de 0,5 segue sem justificativa medida, **por
+  falta do lado positivo**. A lacuna trocou de lado, não sumiu.
 
 ## O que ainda não foi medido, e sem o que nada disso vira aceite
 

@@ -6,7 +6,15 @@ Extrator de trechos citáveis da legislação — `corpus/bruto/*.html` -> `corp
 Uma linha por artigo VIGENTE (ou revogado, marcado como tal):
 
     {"norma": "CTB", "documento": "Lei 9.503/1997", "artigo": "Art. 301",
-     "texto": "...", "citacao": "Art. 301 do CTB", "revogado": false}
+     "titulo": "", "texto": "...", "citacao": "Art. 301 do CTB",
+     "revogado": false}
+
+`titulo` é o nomen iuris — "Furto", "Roubo", "Lesão corporal", "Posse ou porte
+ilegal de arma de fogo de uso restrito". Ele existe porque é o termo pelo qual o
+agente pergunta, e em 84 artigos ele NÃO aparece em nenhum outro lugar do texto:
+descartá-lo apagava "Infanticídio", "Maus-tratos" e "Perseguição" do corpus
+inteiro. Fica em campo próprio, e não colado ao texto, porque é título e não
+preceito. `""` quando a norma não dá um — CTB e Lei de Drogas não dão.
 
 Só stdlib.
 
@@ -301,9 +309,11 @@ SOBRAS = re.compile(r"^[\s.\-–—:]+")
 # As três exclusões é que a tornam segura: "Pena - reclusão, de 12 (doze) a 30
 # (trinta) anos" tem algarismo, "III – se a vítima é maior de 60 anos" tem
 # algarismo e marcador, "§ 5º" tem os dois.
+# O travessão depois de "Pena" é obrigatório: "Pena – reclusão" é preceito
+# secundário, "Pena cumprida no estrangeiro" é o título do art. 8º do CP.
 LISTA = re.compile(
-    r"^(?:Pena|Penas|Infra[çc][ãa]o|Penalidade|Medida|Par[áa]grafo|§|"
-    r"[IVXLCDM]+\s*[-–—.)]|[a-z]\s*[).])", re.I)
+    r"^(?:(?:Pena|Penas|Infra[çc][ãa]o|Penalidade|Medida)\s*[-–—:]|"
+    r"Par[áa]grafo|§|[IVXLCDM]+\s*[-–—.)]|[a-z]\s*[).])", re.I)
 
 
 def caixa_alta(t: str) -> bool:
@@ -321,7 +331,10 @@ def parece_titulo(t: str) -> bool:
     return (len(t) <= 130
             and not caixa_alta(t)
             and not SECAO.match(t)
-            and not re.search(r"[.:;!?)]$", t)
+            # ")" fica FORA do conjunto: "Intimidação sistemática (bullying)" é
+            # título. "(VETADO)" e "(Revogado ...)" já caem no teste de inicial
+            # maiúscula e no de algarismo.
+            and not re.search(r"[.:;!?]$", t)
             and not re.search(r"[\d§]", t)
             and bool(re.match(r"[A-ZÀ-Ý]", t))
             and not LISTA.match(t))
@@ -432,17 +445,12 @@ def extrair(arquivo: str, com_notas: bool) -> tuple[list[Artigo], dict]:
         # guardado para o próximo — ele NÃO encerra o artigo, porque no CP
         # aparece no MEIO dele, antes de cada parágrafo. Encerrar aqui custou os
         # §§ 1º a 7º do art. 121 (privilégio, qualificadoras) na primeira versão.
-        if (b.todo_negrito() and len(bruto) <= 80 and not caixa_alta(bruto)
-                and not re.search(r"[.:;!?]$", bruto)):
-            diag["nomen_iuris"] += 1
-            pendente = normalizar(bruto, com_notas)
-            continue
-
-        # Entre dois artigos (depois de um CAPÍTULO, ou de uma redação riscada)
-        # nenhum bloco pode ser corpo de artigo — então aqui a forma basta, sem
-        # depender do negrito. É o que recupera "Lesão corporal" (art. 129 do
-        # CP), que não está em negrito nenhum no HTML.
-        if atual is None and parece_titulo(bruto):
+        # Um só teste de forma, em duas posições. NO MEIO de um artigo ele só
+        # vale com negrito, porque ali um bloco também pode ser corpo. ENTRE
+        # dois artigos — depois de um CAPÍTULO, ou de uma redação riscada — não
+        # pode ser corpo de nada, e a forma basta: é o que recupera "Lesão
+        # corporal" (art. 129 do CP), que não está em negrito nenhum no HTML.
+        if parece_titulo(bruto) and (atual is None or b.todo_negrito()):
             diag["nomen_iuris"] += 1
             pendente = normalizar(bruto, com_notas)
             continue
