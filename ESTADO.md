@@ -26,10 +26,10 @@
   abertura do sistema era **BRANCA**, no app que recusa tema claro por visão noturna. **DESIGN**:
   base croma zero, e `TintaFraca` foi de **2,51:1** (abaixo do AA) para **4,70** — ela é a cor
   padrão dos rótulos que este projeto brigou para tornar honestos.
-- **ETAPA A DA FASE 4**: 1817 trechos do Planalto, índice com 1744. As **14 perguntas de gramatura
-  foram todas recusadas**, porque a Lei de Drogas não fixa número.
-- **OTIMIZADO E MEDIDO**: 1ª consulta ao índice **4855→618 ms** · detector **24,9%→4,5%** de um
-  núcleo · earcons **14 476→1,3 µs** · APK **−884 KB** ao resolver a colisão do ggml.
+- **ETAPA A DA FASE 4**: 1817 trechos, índice com 1744, e as **14 perguntas de gramatura foram
+  todas recusadas** porque a Lei de Drogas não fixa número. **MEDIDO E OTIMIZADO**: 1ª consulta ao
+  índice **4855→618 ms** · detector **24,9%→4,5%** de um núcleo · earcons **14 476→1,3 µs** ·
+  APK **−884 KB** ao resolver a colisão do ggml.
 
 ## O que está quebrado, e nós sabemos
 
