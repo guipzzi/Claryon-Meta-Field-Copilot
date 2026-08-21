@@ -4,6 +4,7 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -12,6 +13,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -21,13 +25,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.drawscope.Stroke
 import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.pointerInput
@@ -36,6 +42,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.claryon.field.ui.tema.Cores
 import com.claryon.field.ui.tema.Espaco
@@ -90,6 +97,12 @@ fun BarraDePtt(
     estado: EstadoDoPtt,
     aoPressionar: () -> Unit,
     aoSoltar: () -> Unit,
+    /**
+     * Raio do bloco de fala. Vem de fora e não de um valor próprio: é o mesmo dos
+     * balões da conversa, e quem o define é a tela. Mesmo caminho de
+     * `BotaoDeIrParaOFim`.
+     */
+    canto: Dp,
     modifier: Modifier = Modifier,
 ) {
     val haptico = LocalHapticFeedback.current
@@ -164,9 +177,9 @@ fun BarraDePtt(
     ) {
         when (estado) {
             is EstadoDoPtt.NoAr -> ConteudoNoAr(estado)
-            is EstadoDoPtt.Pronto -> ConteudoPronto(estado.canal, pressao)
-            is EstadoDoPtt.Ocupado -> ConteudoOcupado(estado.porQuem)
-            is EstadoDoPtt.Indisponivel -> ConteudoIndisponivel(estado.motivo)
+            is EstadoDoPtt.Pronto -> ConteudoPronto(estado.canal, pressao, canto)
+            is EstadoDoPtt.Ocupado -> ConteudoOcupado(estado.porQuem, canto)
+            is EstadoDoPtt.Indisponivel -> ConteudoIndisponivel(estado.motivo, canto)
         }
     }
 }
@@ -206,13 +219,14 @@ private fun ConteudoNoAr(estado: EstadoDoPtt.NoAr) {
  * precisar decodificar um ponto colorido de 7 px.
  */
 @Composable
-private fun ConteudoPronto(canal: String, pressao: Float) {
+private fun ConteudoPronto(canal: String, pressao: Float, canto: Dp) {
     LinhaDeCanal(canal, "meio-duplex", Cores.Vivo)
-    Box(Modifier.height(Espaco.Medio))
+    Box(Modifier.height(Espaco.Curto))
     BlocoDeFala(
         rotulo = "Segure para falar",
         habilitado = true,
         pressao = pressao,
+        canto = canto,
     )
 }
 
@@ -242,20 +256,46 @@ private fun LinhaDeCanal(canal: String, direita: String, corDoPonto: Color) {
 }
 
 /**
- * O bloco de fala.
+ * **O bloco de fala.**
  *
- * Sem borda, sem canto, sem ornamento. A disponibilidade é a **claridade da
- * superfície**: bloco claro convida, bloco apagado recusa. É a mesma leitura que
- * um botão físico dá pelo relevo, traduzida para uma tela plana.
+ * A disponibilidade é a **claridade da superfície**: bloco claro convida, bloco
+ * apagado recusa. É a mesma leitura que um botão físico dá pelo relevo, traduzida
+ * para uma tela plana.
  *
  * A barra de pressão nasce na base e cresce — fica na borda inferior justamente
  * para não competir com o rótulo, e some junto com o dedo.
+ *
+ * ---
+ * ### O que mudou em 21/08: um canto, e um microfone
+ *
+ * Era um retângulo cinza de ponta a ponta com uma frase dentro, e a leitura de quem
+ * olhou a captura foi exata: **caixa cinza vazia**. Faltavam as duas coisas que um
+ * mensageiro usa para dizer "aqui se fala": a **forma** e a **marca**.
+ *
+ *  - **Canto**, o mesmo dos balões e da pílula acima. O bloco passa a ter começo e
+ *    fim em vez de ser um corte na barra.
+ *  - **O microfone**, num disco à direita — o lugar em que qualquer aplicativo de
+ *    mensagem põe o botão de voz. Desenhado com as primitivas do arquivo, não como
+ *    glifo: um caractere viria com a métrica da fonte e o risco de o sistema
+ *    resolver por emoji.
+ *
+ * **O disco NÃO é o alvo, e essa é a diferença que o produto impõe.** No mensageiro
+ * o círculo de 48 dp é o botão inteiro; aqui o alvo é a **barra toda** — 136 dp de
+ * altura, largura cheia, o gesto capturado lá em cima em [BarraDePtt]. O agente que
+ * aperta isto está de luva, dirigindo, ou em pé numa abordagem, e mirar num círculo
+ * é o que ele não vai fazer. O disco é a marca que diz o que a barra faz; encolher
+ * o alvo até ele seria trocar a função pela citação.
+ *
+ * A "recessão" do disco é [Cores.Vazio] — o fundo da aplicação, a superfície mais
+ * baixa do sistema. Ele fica escuro nos dois estados do bloco, inclusive com o
+ * bloco branco sob pressão, e é o que o faz parecer furo e não adesivo.
  */
 @Composable
 private fun BlocoDeFala(
     rotulo: String,
     habilitado: Boolean,
     pressao: Float,
+    canto: Dp,
     detalhe: String? = null,
 ) {
     val avanco = pressao.coerceIn(0f, 1f)
@@ -274,10 +314,14 @@ private fun BlocoDeFala(
         else -> Cores.Tinta
     }
 
-    Column(
+    Row(
         Modifier
             .fillMaxWidth()
             .height(if (detalhe == null) 60.dp else 72.dp)
+            // `clip` ANTES do fundo e do desenho, e a ordem é o resultado: a barra
+            // de pressão é um retângulo reto tirado da base, e é o recorte que a
+            // faz acompanhar o canto em vez de furar o bloco.
+            .clip(RoundedCornerShape(canto))
             .background(fundo)
             .drawBehind {
                 if (avanco > 0f) {
@@ -289,40 +333,128 @@ private fun BlocoDeFala(
                 }
             }
             .padding(horizontal = Espaco.Padrao),
-        verticalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(rotulo, style = Tipo.Acao, color = tinta)
-        detalhe?.let {
-            Box(Modifier.height(Espaco.Micro))
-            TextoCorpoMenor(it, cor = Cores.TintaFraca, maxLinhas = 1, overflow = TextOverflow.Ellipsis)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
+            Text(rotulo, style = Tipo.Acao, color = tinta)
+            detalhe?.let {
+                Box(Modifier.height(Espaco.Micro))
+                TextoCorpoMenor(it, cor = Cores.TintaFraca, maxLinhas = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        Box(Modifier.width(Espaco.Medio))
+        DiscoDoMicrofone(cor = tinta, habilitado = habilitado)
+    }
+}
+
+/**
+ * **O microfone, no disco à direita do bloco de fala.**
+ *
+ * A marca que o mensageiro usa para "aqui se fala", desenhada com o vocabulário
+ * deste arquivo — cápsula, haste e base, três primitivas — em vez de um glifo.
+ *
+ * Não é tocável e não tem gesto próprio: o gesto vive em [BarraDePtt] e cobre a
+ * barra inteira. Ver a nota em [BlocoDeFala] sobre por que o alvo não encolhe até
+ * aqui.
+ *
+ * Quando o rádio recusa (`habilitado = false`), a haste ganha um risco atravessado
+ * — o microfone cortado, que é a mesma convenção do mudo em qualquer aparelho. É
+ * **geometria**, não cor: o motivo da recusa já está escrito por extenso ao lado, e
+ * cor neste painel está reservada a prioridade e a transmissão.
+ */
+@Composable
+private fun DiscoDoMicrofone(cor: Color, habilitado: Boolean) {
+    Box(
+        Modifier
+            .size(TAMANHO_DO_DISCO)
+            .clip(CircleShape)
+            .background(Cores.Vazio),
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(Modifier.size(18.dp)) {
+            val traco = 1.8.dp.toPx()
+            val larguraCapsula = size.width * 0.42f
+            val alturaCapsula = size.height * 0.56f
+            val esquerda = (size.width - larguraCapsula) / 2f
+            // Cápsula: retângulo de cantos redondos, cheio. É a única forma cheia
+            // do desenho, e é o que faz a marca ser legível a 18 dp.
+            drawRoundRect(
+                color = cor,
+                topLeft = Offset(esquerda, 0f),
+                size = Size(larguraCapsula, alturaCapsula),
+                cornerRadius = CornerRadius(larguraCapsula / 2f, larguraCapsula / 2f),
+            )
+            // Arco de suporte, aberto para cima — desenhado como arco e não como
+            // círculo inteiro, senão vira uma bolha em volta da cápsula.
+            val margem = size.width * 0.16f
+            drawArc(
+                color = cor,
+                startAngle = 0f,
+                sweepAngle = 180f,
+                useCenter = false,
+                topLeft = Offset(margem, alturaCapsula * 0.42f),
+                size = Size(size.width - margem * 2f, size.height * 0.66f),
+                style = Stroke(width = traco, cap = StrokeCap.Round),
+            )
+            // Haste até a base.
+            drawLine(
+                color = cor,
+                start = Offset(size.width / 2f, size.height * 0.86f),
+                end = Offset(size.width / 2f, size.height),
+                strokeWidth = traco,
+                cap = StrokeCap.Round,
+            )
+            if (!habilitado) {
+                // O risco do mudo. Diagonal cheia, de canto a canto: a mesma
+                // leitura que qualquer aparelho dá, e sobrevive a daltonismo, sol
+                // forte e captura em preto e branco.
+                drawLine(
+                    color = cor,
+                    start = Offset(0f, 0f),
+                    end = Offset(size.width, size.height),
+                    strokeWidth = traco,
+                    cap = StrokeCap.Round,
+                )
+            }
         }
     }
 }
 
+/**
+ * 44 dp — o disco cabe nos 60 dp do bloco com folga de 8 de cada lado.
+ *
+ * Não é alvo tocável e por isso não responde a [com.claryon.field.ui.tema.Regua.Toque]:
+ * o alvo é a barra inteira. É medida de **marca**, e o que ela precisa é caber e
+ * ser lida de relance.
+ */
+private val TAMANHO_DO_DISCO = 44.dp
+
 @Composable
-private fun ConteudoOcupado(porQuem: String) {
+private fun ConteudoOcupado(porQuem: String, canto: Dp) {
     LinhaDeCanal(porQuem, "falando", Cores.P2)
-    Box(Modifier.height(Espaco.Medio))
+    Box(Modifier.height(Espaco.Curto))
     // Mesmo bloco, apagado. Meio-duplex: falar por cima não é uma opção que o
     // botão deva oferecer e depois recusar.
     BlocoDeFala(
         rotulo = "Canal ocupado",
         habilitado = false,
         pressao = 0f,
+        canto = canto,
         detalhe = "$porQuem está transmitindo.",
     )
 }
 
 @Composable
-private fun ConteudoIndisponivel(motivo: String) {
+private fun ConteudoIndisponivel(motivo: String, canto: Dp) {
     LinhaDeCanal("sem canal", "indisponível", Cores.Falha)
-    Box(Modifier.height(Espaco.Medio))
+    Box(Modifier.height(Espaco.Curto))
     // A causa vive DENTRO do bloco desabilitado, não num aviso separado: quem
     // olha o botão para falar é quem precisa saber por que não dá.
     BlocoDeFala(
         rotulo = "Não é possível falar",
         habilitado = false,
         pressao = 0f,
+        canto = canto,
         detalhe = motivo,
     )
 }

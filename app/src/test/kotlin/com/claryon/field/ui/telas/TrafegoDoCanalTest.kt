@@ -86,28 +86,116 @@ class TrafegoDoCanalTest {
         assertTrue(itens[1].mostraIndicativo)
     }
 
-    // ── Tempo (critérios 11 e 12) ─────────────────────────────────────────────
+    // ── Tempo: o separador mede LACUNA, não hora cheia ────────────────────────
+    //
+    // Os dois primeiros são **contra-testes da régua anterior**, e é por isso que
+    // vêm em par: cada um passaria errado com o defeito de volta. A régua de hora
+    // cheia separava 14:58 de 15:01 (virou a hora) e NÃO separava 15:01 de 15:41
+    // (mesma hora) — ou seja, ela punha a marca exatamente onde a informação não
+    // estava. Se um dia alguém restaurar `faixaDe`, estes dois falham juntos.
 
     @Test
-    fun trocaDeHora_abreSeparadorDeFaixa() {
+    fun falasSeguidasNaoSaoCortadas_mesmoVirandoAHora() {
+        // 14:58:12 → 15:01:02 são 2 min 50 s: a mesma conversa. A régua velha
+        // cortava aqui, porque virou de 14:00 para 15:00.
         val itens = montarTrafego(
             listOf(
-                fala(id = "1", hora = "14:05:00"),
-                fala(id = "2", hora = "14:58:00"),
-                fala(id = "3", hora = "15:02:00"),
+                fala(id = "1", hora = "14:58:12"),
+                fala(id = "2", hora = "15:01:02"),
             ),
         )
-        assertEquals("14:00", itens[0].faixaHoraria)
-        assertNull("mesma faixa não repete separador", itens[1].faixaHoraria)
-        assertEquals("15:00", itens[2].faixaHoraria)
+        assertNull(itens[1].separadorDeTempo)
     }
 
     @Test
-    fun horaDesconhecida_naoInventaFaixa() {
-        // `--:--:--` é o fallback do RadioViewModel. Inventar "--:00" seria a
-        // interface afirmando o que o dado não sustenta.
-        val i = montarTrafego(listOf(fala(hora = HORA_DESCONHECIDA))).single()
-        assertNull(i.faixaHoraria)
+    fun silencioLongoSepara_mesmoDentroDaMesmaHora() {
+        // 15:01 → 15:41 são 40 min de canal calado. A régua velha não marcava
+        // nada, porque as duas caem na faixa 15:00.
+        val itens = montarTrafego(
+            listOf(
+                fala(id = "1", hora = "15:01:00"),
+                fala(id = "2", hora = "15:41:00"),
+            ),
+        )
+        assertEquals("40 min sem tráfego", itens[1].separadorDeTempo)
+    }
+
+    @Test
+    fun oLimiarEhDeQuinzeMinutos_eOSegundoAbaixoDeleNaoSepara() {
+        // Par de fronteira. Sem o lado de baixo, qualquer limiar menor passaria
+        // neste arquivo — inclusive o zero, que marcaria toda fala.
+        assertEquals(15 * 60, LACUNA_QUE_SEPARA_S)
+        assertEquals("15 min sem tráfego", separadorDeLacuna("10:00:00", "10:15:00"))
+        assertNull(separadorDeLacuna("10:00:00", "10:14:59"))
+    }
+
+    @Test
+    fun aViradaDaMeiaNoiteNaoInventaSilencio() {
+        // Turno da madrugada. 23:58 → 00:03 são 5 minutos; sem a soma do dia
+        // daria −23 h 55 min, e um número negativo aqui vira lixo na tela.
+        assertNull(separadorDeLacuna("23:58:00", "00:03:00"))
+    }
+
+    @Test
+    fun aViradaDaMeiaNoiteAindaMedeOSilencioVerdadeiro() {
+        // Contra-teste do anterior: se a virada passasse a devolver `null` sempre,
+        // o turno da madrugada perderia a régua inteira sem ninguém notar.
+        assertEquals("40 min sem tráfego", separadorDeLacuna("23:30:00", "00:10:00"))
+    }
+
+    @Test
+    fun falaForaDeOrdemNaoAfirmaVinteETresHorasDeSilencio() {
+        // `RadioViewModel` acrescenta as falas locais pendentes NO FIM da lista,
+        // então um balão local antigo cai depois de um do servidor mais novo. Com
+        // a soma da meia-noite isso viraria "23 h sem tráfego" — silêncio que não
+        // houve, e logo abaixo de uma fala que o desmente.
+        assertNull(separadorDeLacuna("15:10:00", "15:03:00"))
+    }
+
+    @Test
+    fun oPrimeiroItemNuncaAbreSeparador() {
+        // Antes dele não há intervalo medido: a lista é uma janela sobre o canal,
+        // não o começo dele.
+        val i = montarTrafego(listOf(fala(hora = "14:05:00"))).single()
+        assertNull(i.separadorDeTempo)
+        assertNull(separadorDeLacuna(null, "14:05:00"))
+    }
+
+    @Test
+    fun horaDesconhecida_naoInventaLacuna() {
+        // `--:--:--` é o fallback do RadioViewModel. Medir contra ele daria um
+        // número inventado — o mesmo erro que o esmaecimento do mapa evita.
+        val itens = montarTrafego(
+            listOf(
+                fala(id = "1", hora = "14:05:00"),
+                fala(id = "2", hora = HORA_DESCONHECIDA),
+                fala(id = "3", hora = "14:50:00"),
+            ),
+        )
+        assertNull(itens[1].separadorDeTempo)
+        // …e a hora desconhecida no meio não apaga a régua: a medida seguinte
+        // atravessa o buraco a partir da última hora legível, porque o silêncio
+        // de 45 min aconteceu de verdade.
+        assertEquals("45 min sem tráfego", itens[2].separadorDeTempo)
+    }
+
+    @Test
+    fun lacunaDeHorasEhEscritaEmHoras() {
+        assertEquals("1 h sem tráfego", separadorDeLacuna("08:00:00", "09:00:00"))
+        assertEquals("2 h 40 min sem tráfego", separadorDeLacuna("08:00:00", "10:40:00"))
+    }
+
+    @Test
+    fun oSilencioAbreSequencia_mesmoSendoOMesmoAutor() {
+        // Proximidade é o agrupador desta lista. Duas falas do mesmo par separadas
+        // por meia hora não são um turno de fala só, e adensá-las diria que são.
+        val itens = montarTrafego(
+            listOf(
+                fala(id = "1", indicativo = "Bravo Um", hora = "15:01:00"),
+                fala(id = "2", indicativo = "Bravo Um", hora = "15:41:00"),
+            ),
+        )
+        assertTrue(itens[1].abreSequencia)
     }
 
     // ── Entrega (critérios 17 a 19) ───────────────────────────────────────────

@@ -79,7 +79,7 @@ português. Não tem conserto por prompt.
 
 **Proposta:** quem decide a intenção continua sendo o roteador determinístico —
 *"consultar placa"*, *"verificar placa"*, *"checar placa"*, *"rodar placa"* já casam
-hoje. O LLM ganha **um papel legítimo e estreito**, que é preencher campo de
+hoje. O LLM ganharia **um papel legítimo e estreito**, que é preencher campo de
 intenção já decidida:
 
 > o agente dita a placa em alfabeto fonético — *"tango bravo unido três delta sete
@@ -89,6 +89,39 @@ Isso é preenchimento de campo, não escolha de ação, e é exatamente o que a 
 permite. E tem contra-teste natural: **placa tem formato**. Saída que não casar com
 Mercosul (`LLLNLNN`) ou com o padrão antigo (`LLLNNNN`) é erro de leitura, não
 consulta — e vira recusa, nunca uma consulta com dado inventado.
+
+### O que foi construído em vez disso — e o LLM ficou de fora
+
+**A normalização é `core-agent/PlacaDitada.kt`, determinística, sem modelo nenhum.**
+O alfabeto fonético é tabela fixa de 26 entradas: um parser é exato onde o modelo é
+provável, custa microssegundos onde a redação mediu **mediana de 4 680 ms**, e não
+depende da decisão pendente sobre qual modelo embarcar. A proposta acima continua
+escrita porque foi o que se propôs; o que existe é o parágrafo seguinte.
+
+**E ela ficou escrita e não construída até 22/08.** `PlacaDitada` tinha zero
+chamadores em `src/main`: quem extraía placa em produção era
+`DeterministicIntentRouter.extrairPlaca`, casamento literal de sete caracteres — de
+modo que a ditada do exemplo acima virava `ConsultarPlaca(placa = null)` e **abria a
+câmera** para ler a placa que o agente acabara de falar. O roteador agora tenta o
+literal primeiro e a ditada depois, e pelo caminho de produção o banco de 40
+elocuções positivas saiu de **2/40 para 40/40**, com **0 falsos positivos em 44
+negativos** — os mesmos de antes.
+
+A **ordem** entre os dois, porém, não tem prova própria: as duas só divergem quando
+ambas devolvem placa e as placas diferem, e sobre 84 elocuções mais 1817 trechos de
+lei isso dá **zero**. Há uma divergência construível, e nela a ordem escolhida perde:
+na **correção falada** (*"consultar placa ABC1234, não — placa XYZ5678"*) o literal lê
+a primeira placa e a ditada lê depois da última menção, de modo que se consulta a
+placa que o agente acabou de corrigir. Está asserido em `PlacaDitadaNoRoteadorTest` e
+**não** consertado — trocar quem vence é decisão de spec, e é a segunda pendência
+deste documento.
+
+**Pendência de decisão humana (§7): a palavra "unido".** Ela está no exemplo de
+aceite acima e **não foi encontrada em fonte alguma** — toda fonte brasileira dá
+*Uniform*/*Uniforme* para U (a PMERJ registra "uniforme" como a pronúncia da
+corporação). Ela vive rotulada `SEM_FONTE` em `AlfabetoFonetico.kt` por um motivo só:
+é a palavra deste documento. Trocar o exemplo por *"uniforme"* e tirá-la da tabela é
+decisão de spec, não de código, e está aqui esperando.
 
 ---
 
@@ -157,7 +190,9 @@ o agente libera um veículo roubado porque o aparelho disse que estava limpo.
 3  → VAD fecha por silêncio                        [existe]
 4  → whisper transcreve no aparelho                [existe]
 5  → DeterministicIntentRouter                     [existe]
-      → Intent.ConsultarPlaca(placa = null)
+      → extrairPlaca: literal, e só então a ditada [LIGADO 22/08 — PlacaDitada
+        tinha 0 chamadores; 2/40 → 40/40 no banco]
+      → Intent.ConsultarPlaca(placa = null)          ← só quando NÃO houve ditada
 6  → placa nula ⇒ subfluxo de captura              [FEITO 21/08 — CapturaDePlaca]
 7  → fala "Aponte para a placa." (4 palavras)      [FEITO — teste de laconicidade]
 8  → GlassesFacade.withCamera                      [LIGADO 21/08 — tinha 0 chamadores]
@@ -243,8 +278,12 @@ da placa.
   **AND SHALL NOT** falar a restrição.
 - **IF** a base estiver indisponível, **THEN THE SYSTEM SHALL** dizer que não
   conseguiu consultar **AND SHALL NOT** responder "sem restrição".
+- **WHEN** o agente dita a placa em alfabeto fonético dentro do pedido de consulta,
+  **THE SYSTEM SHALL** consultar a placa ditada **AND SHALL NOT** abrir a câmera.
 - **THE SYSTEM SHALL NOT** produzir `Intent` a partir de saída de modelo de
-  linguagem — o LLM só normaliza a placa ditada, e o formato é conferido depois.
+  linguagem. A normalização da placa ditada é **determinística** (`PlacaDitada`), e
+  o formato é conferido depois dela, no portão único do executor — o que valeria
+  igualmente se um modelo viesse a preencher esse campo um dia.
 
 ## Esforço estimado, e o que ele depende
 
@@ -254,7 +293,7 @@ da placa.
 | subfluxo de captura + descarte de frames | 1 sessão | acima |
 | ligar `PlacaOcr` com validação de formato | 0,5 sessão | acima |
 | base de demonstração no servidor + RLS | 0,5 sessão | nada |
-| normalização de placa ditada pelo LLM | 0,5 sessão | Etapa B |
+| ~~normalização de placa ditada pelo LLM~~ | ✅ **FEITO 22/08**, e sem LLM: `PlacaDitada` + porta no roteador | nada |
 | detalhe na tela + `Detalhar` falando | 0,5 sessão | nada |
 
 **Nada disto cabe antes de 18/09 junto com o que já está aberto.** O bloco que
@@ -265,6 +304,10 @@ dependendo da parte mais vistosa funcionar.
 
 ## O que decidir
 
+0. **Placa ditada, duas pendências abertas em 22/08:** (a) a palavra **"unido"** do
+   exemplo de aceite não tem fonte — troca para *"uniforme"*? (b) na **correção
+   falada**, quem vence: a primeira placa (literal, como está) ou a última menção
+   (ditada)?
 1. **Gatilho:** confirma "Claryon" no lugar de "Hey Meta"?
 2. **Resultado falado:** earcon como hoje (recomendado) — ou fala atrás de flag, com
    o custo de segurança declarado?

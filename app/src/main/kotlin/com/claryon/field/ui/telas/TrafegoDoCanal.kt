@@ -75,8 +75,16 @@ data class ItemDeTrafego(
     val forma: FormaDoRegistro,
     val calha: TokenDeCalha,
     val tintaDoTexto: TokenDeTinta,
-    /** `"14:00"` quando abre faixa nova; `null` quando continua na mesma. */
-    val faixaHoraria: String?,
+    /**
+     * `"27 min sem tráfego"` quando o canal ficou calado o bastante para separar
+     * dois momentos; `null` no caso comum, que é a conversa seguindo.
+     *
+     * Era `faixaHoraria` e valia `"14:00"` — ver [separadorDeLacuna] para a razão
+     * de a régua ter mudado de hora cheia para lacuna. O nome mudou junto porque
+     * campo que continua chamado `faixaHoraria` guardando outra coisa é a próxima
+     * mentira silenciosa.
+     */
+    val separadorDeTempo: String?,
     val mostraIndicativo: Boolean,
     val rotuloDeEntrega: RotuloDeEntrega?,
     val procedencia: Procedencia,
@@ -144,7 +152,7 @@ fun rotuloDePrioridade(prioridade: Int): String = when (prioridade) {
  * (alinhamento e margem reservada), não da decoração.
  */
 fun montarTrafego(falas: List<FalaNoGrupo>): List<ItemDeTrafego> {
-    var faixaAnterior: String? = null
+    var horaAnterior: String? = null
     var indicativoAnterior: String? = null
     var formaAnterior: FormaDoRegistro? = null
 
@@ -155,9 +163,12 @@ fun montarTrafego(falas: List<FalaNoGrupo>): List<ItemDeTrafego> {
             else -> FormaDoRegistro.RECEBIDO
         }
 
-        val faixa = faixaDe(fala.hora)
-        val abreFaixa = faixa != null && faixa != faixaAnterior
-        if (faixa != null) faixaAnterior = faixa
+        val separador = separadorDeLacuna(horaAnterior, fala.hora)
+        // Guarda a hora **crua**, e só quando ela é legível: com `"--:--:--"` no
+        // meio, medir a lacuna contra ele produziria um número inventado. Manter a
+        // última hora conhecida faz a próxima medida atravessar o buraco, que é o
+        // comportamento certo — a lacuna continua sendo tempo real de silêncio.
+        if (fala.hora != HORA_DESCONHECIDA) horaAnterior = fala.hora
 
         // **Autoria conferida, ou não.** O servidor devolve o indicativo por um
         // `join` com `agents` pela chave de autoria (`HistoricoDoCanal.falas`);
@@ -199,9 +210,9 @@ fun montarTrafego(falas: List<FalaNoGrupo>): List<ItemDeTrafego> {
                 indicativoAnterior == fala.indicativo)
         }
 
-        // Começa turno de fala novo quando muda o autor, muda a forma, ou abre
-        // faixa horária. É o que separa dois turnos e adensa um só.
-        val abre = abreFaixa ||
+        // Começa turno de fala novo quando muda o autor, muda a forma, ou o canal
+        // ficou calado. É o que separa dois turnos e adensa um só.
+        val abre = separador != null ||
             formaAnterior == null ||
             formaAnterior != forma ||
             indicativoAnterior != fala.indicativo ||
@@ -229,7 +240,7 @@ fun montarTrafego(falas: List<FalaNoGrupo>): List<ItemDeTrafego> {
             } else {
                 TokenDeTinta.TINTA
             },
-            faixaHoraria = faixa.takeIf { abreFaixa },
+            separadorDeTempo = separador,
             mostraIndicativo = mostra,
             rotuloDeEntrega = when {
                 // Recebida nunca tem rótulo: dizer "enviada" sob a fala de outro
@@ -244,18 +255,125 @@ fun montarTrafego(falas: List<FalaNoGrupo>): List<ItemDeTrafego> {
 }
 
 /**
- * Faixa horária de um carimbo `HH:mm:ss`.
+ * **O separador mede LACUNA, não hora cheia.**
  *
- * `null` quando a hora é desconhecida. O `RadioViewModel` usa `"--:--:--"` como
- * fallback, e inventar faixa a partir dele seria a interface afirmando o que o dado
- * não sustenta — o mesmo erro que o esmaecimento do mapa existe para evitar.
+ * A régua anterior abria faixa a cada virada de hora (`14:00`, `15:00`), e a hora
+ * cheia não significa nada num canal de guarnição: duas falas a 14:59 e 15:01 são
+ * a mesma conversa e ganhavam um corte no meio, enquanto quarenta minutos de
+ * silêncio dentro da mesma hora passavam sem marca nenhuma. O separador ficava
+ * exatamente onde a informação não estava.
+ *
+ * O WhatsApp separa por **dia** — é o que o produto dele precisa, porque uma
+ * conversa pessoal atravessa semanas. Aqui o dia é grosso demais: um turno inteiro
+ * cabe num só, e um histórico de oito horas sairia sem uma única marca. O que a
+ * régua do rádio tem de responder é a pergunta que o carimbo por linha não
+ * responde — *quanto tempo se passou* —, e a resposta é a lacuna.
+ *
+ * ---
+ * ### O limiar: 15 minutos, e o que sustenta o número
+ *
+ * **Não é medido, e isso está escrito de propósito.** Não existe tráfego real de
+ * guarnição neste projeto para medir; o que existe é o roteiro sintético da
+ * vitrine. O número é escolhido por dois limites do uso, e é falseável:
+ *
+ *  - **Piso — o deslocamento.** Uma guarnição despachada leva minutos até o local
+ *    e reporta na chegada. "Em deslocamento" e "no local" são a MESMA ocorrência
+ *    separadas por vários minutos de estrada; um limiar de 5 min cortaria a
+ *    ocorrência ao meio, que é o defeito que este conserto veio remover.
+ *  - **Teto — o turno.** A 15 min, um turno de 6 h tem no máximo 24 separadores,
+ *    e na prática muito menos. A 60 min teria no máximo 6, e um turno com seis
+ *    marcas volta a ser o problema da hora cheia: régua que não acompanha o
+ *    conteúdo.
+ *
+ * **A medição que resolve isto** é uma só, e é uma linha de SQL: a distribuição
+ * dos intervalos entre transmissões consecutivas de um mesmo `talk_group_id` em
+ * `transmissions.criada_em`, por um turno real. Espera-se duas modas — dentro da
+ * ocorrência e entre ocorrências —; o limiar é o vale entre elas. Enquanto não
+ * houver canal real gravado, [LACUNA_QUE_SEPARA_S] é uma hipótese com o porquê ao
+ * lado, e não um número achado.
+ *
+ * ---
+ * ### O que a função recusa fazer
+ *
+ *  - **Hora desconhecida não vira lacuna.** `"--:--:--"` é o fallback do
+ *    `RadioViewModel`; medir contra ele daria um número inventado.
+ *  - **A virada da meia-noite é somada, não negada.** Turno da madrugada existe, e
+ *    23:58 → 00:03 são 5 minutos, não menos 23 horas.
+ *  - **Acima de [LACUNA_ABSURDA_S] devolve `null`.** `RadioViewModel` acrescenta
+ *    as falas locais pendentes **no fim** da lista (`+ locaisPendentes`), então um
+ *    balão local antigo pode cair depois de um do servidor mais novo. Com a soma
+ *    da meia-noite, essa inversão viraria *"23 h sem tráfego"* — a interface
+ *    afirmando um silêncio que não houve. Dentro de um único carregamento de
+ *    histórico, lacuna dessa ordem é desordem, não silêncio, e o honesto é não
+ *    desenhar marca nenhuma.
+ *
+ * @param anterior carimbo `HH:mm:ss` da fala de cima, ou `null` no primeiro item.
+ * @return o rótulo pronto, ou `null` quando não há lacuna a declarar.
  */
-private fun faixaDe(hora: String): String? {
-    if (hora == HORA_DESCONHECIDA || hora.length < 2) return null
-    val h = hora.take(2)
-    if (h.any { !it.isDigit() }) return null
-    return "$h:00"
+fun separadorDeLacuna(anterior: String?, atual: String): String? {
+    // Primeiro item da lista NUNCA abre separador, e a recusa é a mesma dos
+    // outros: antes dele não há intervalo medido. A lista é uma janela sobre o
+    // canal, não o começo dele — marcar o topo afirmaria que o histórico começa
+    // ali.
+    val de = segundosDoDia(anterior ?: return null) ?: return null
+    val para = segundosDoDia(atual) ?: return null
+
+    val bruta = para - de
+    // Meia-noite: o turno da madrugada atravessa o zero, e o carimbo não carrega
+    // data. Somar o dia é a única leitura possível — e é a certa enquanto a
+    // lista couber em menos de 24 h, que é o caso de um histórico de 50 falas.
+    val lacuna = if (bruta < 0) bruta + DIA_EM_SEGUNDOS else bruta
+
+    if (lacuna < LACUNA_QUE_SEPARA_S || lacuna >= LACUNA_ABSURDA_S) return null
+    return "${duracaoLegivel(lacuna)} sem tráfego"
 }
+
+/** `HH:mm:ss` em segundos desde a meia-noite. `null` quando não é hora. */
+private fun segundosDoDia(hora: String): Int? {
+    if (hora == HORA_DESCONHECIDA) return null
+    val partes = hora.split(':')
+    if (partes.size < 2) return null
+    val h = partes[0].toIntOrNull() ?: return null
+    val m = partes[1].toIntOrNull() ?: return null
+    val s = partes.getOrNull(2)?.toIntOrNull() ?: 0
+    if (h !in 0..23 || m !in 0..59 || s !in 0..59) return null
+    return h * 3600 + m * 60 + s
+}
+
+/**
+ * `"27 min"`, `"1 h"`, `"2 h 40 min"`.
+ *
+ * Trunca para baixo em minutos: o separador afirma o silêncio que **houve**, e
+ * arredondar para cima o faria afirmar silêncio que não houve. É a mesma direção
+ * de erro que a idade da posição escolheu em `0020` — errar para o lado que não
+ * inventa.
+ */
+private fun duracaoLegivel(segundos: Int): String {
+    val minutos = segundos / 60
+    if (minutos < 60) return "$minutos min"
+    val horas = minutos / 60
+    val resto = minutos % 60
+    return if (resto == 0) "$horas h" else "$horas h $resto min"
+}
+
+/**
+ * **15 minutos.** O silêncio que, num canal de guarnição, significa outro momento.
+ *
+ * O porquê — e a medição que o substituiria por um número achado — está no KDoc de
+ * [separadorDeLacuna]. Público porque é o teste que trava o valor: mudá-lo sem
+ * mexer no teste não compila o critério embutido lá.
+ */
+const val LACUNA_QUE_SEPARA_S = 15 * 60
+
+/**
+ * Acima disto a lacuna é tratada como desordem da lista, não como silêncio.
+ *
+ * 12 h: metade do dia. Um histórico carregado de uma vez não atravessa isso; o que
+ * atravessa é a soma da meia-noite aplicada a duas falas fora de ordem.
+ */
+const val LACUNA_ABSURDA_S = 12 * 3600
+
+private const val DIA_EM_SEGUNDOS = 24 * 3600
 
 /**
  * Rolar para o fim, ou não.

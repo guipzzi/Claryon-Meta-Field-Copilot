@@ -183,12 +183,24 @@ fun CabecalhoTatico(
  * Cantos retos porque o resto do painel é feito de fios retos, e um botão
  * arredondado no meio disso denuncia componente de biblioteca em vez de decisão.
  *
- * **Esta frase deixou de valer para a tela inteira em 21/08**, e fica registrado
- * aqui para não virar mentira silenciosa: os balões da guarnição passaram a ter
- * raio, por decisão humana. O que a regra ainda sustenta é o **controle**: fio,
- * botão e barra continuam retos, e o canto é vocabulário de **conteúdo** — o que
- * tem começo e fim é o balão, não a ação. Se um dia o botão arredondar, arredonda
- * por diff de spec, não por contágio.
+ * ---
+ * ### O que esta regra cobre hoje, depois de duas revisões no mesmo dia
+ *
+ * **21/08, manhã:** os balões da guarnição ganharam raio, por decisão humana. A
+ * regra recuou para o controle: *"fio, botão e barra continuam retos, e o canto é
+ * vocabulário de conteúdo — o que tem começo e fim é o balão, não a ação"*.
+ *
+ * **21/08, tarde:** a barra de composição também ganhou raio, por decisão humana
+ * — a pílula de consulta ao copiloto e o bloco de fala do PTT, na leitura de que a
+ * faixa de entrada é a peça que um agente reconhece de outro aplicativo e que ela
+ * não estava parecendo campo de entrada nenhum.
+ *
+ * O escopo que sobrou é este, e ele é o texto, não a lembrança dele: **`BotaoTatico`
+ * é reto.** Ele é o botão de ação de tela cheia — "Encerrar turno", "Permitir" —, e
+ * é o único controle que continua com canto zero. `Fio` e a barra de navegação
+ * também. Não há regra geral de "controle é reto" para citar; há estes três.
+ *
+ * Se um dia `BotaoTatico` arredondar, arredonda por diff de spec, não por contágio.
  */
 @Composable
 fun BotaoTatico(

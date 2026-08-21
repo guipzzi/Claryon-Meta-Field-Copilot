@@ -8,7 +8,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -111,10 +113,17 @@ fun TelaDeLogin(
         }
     }
 
+    // Mesmo defeito da tela de permissões, mesma causa: o portão de abertura é
+    // composto FORA de `CascoTatico`, e é o casco que devolve o espaço das barras
+    // do sistema. Aqui o conteúdo é centrado verticalmente, então só aparecia com
+    // o teclado aberto ou em aparelho baixo — o que o torna pior, não melhor: um
+    // defeito que só aparece às vezes é um defeito que ninguém corrige.
     Column(
         modifier
             .fillMaxSize()
             .background(Cores.Vazio)
+            .statusBarsPadding()
+            .navigationBarsPadding()
             .imePadding()
             .padding(horizontal = Espaco.Largo),
         verticalArrangement = Arrangement.Center,

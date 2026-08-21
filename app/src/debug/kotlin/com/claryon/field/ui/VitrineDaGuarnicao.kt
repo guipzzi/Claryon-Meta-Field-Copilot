@@ -3,6 +3,7 @@ package com.claryon.field.ui
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.ui.Modifier
 import com.claryon.field.ui.componentes.EstadoDoPtt
@@ -57,11 +58,17 @@ class VitrineDaGuarnicao : ComponentActivity() {
         }
         setContent {
             TemaClaryon {
-                // `statusBarsPadding` reproduz o que `CascoTatico` aplica em
-                // produção; sem isto a captura sai com a barra de status por cima
-                // do cabeçalho e parece defeito da tela.
+                // Reproduz o que `CascoTatico` aplica em produção; sem isto a
+                // captura sai com a barra de status por cima do cabeçalho e parece
+                // defeito da tela.
+                //
+                // `navigationBarsPadding` entrou junto em 21/08: em produção quem
+                // consome a barra de baixo é a `BarraDeNavegacao` do casco, que a
+                // vitrine não tem. Sem ele o bloco de fala encostava na barra de
+                // gestos **só na captura**, e a comparação antes/depois julgava um
+                // defeito que o produto não tem.
                 TelaDeGuarnicao(
-                    modifier = Modifier.statusBarsPadding(),
+                    modifier = Modifier.statusBarsPadding().navigationBarsPadding(),
                     canal = "GTA-3 Alfa",
                     pares = listOf(
                         ParPresente("BRAVO UM", online = true, falando = false),
@@ -116,6 +123,24 @@ private val FALAS = listOf(
         "7", "CHARLIE 4", "15:04:10",
         "Estou a dois quarteirões, chegando pelo lado oposto.",
         propria = false, prioridade = 3, entrega = FalaNoGrupo.Entrega.RECEBIDA,
+    ),
+    // **O silêncio.** 41 minutos depois da última fala — a ocorrência fechou e o
+    // canal voltou noutro momento.
+    //
+    // Entra no roteiro BASE, e não atrás da chave `-e duros`, contra a regra que o
+    // KDoc desta classe estabelece. A razão é que a régua de tempo mudou de
+    // critério em 21/08 — de hora cheia para lacuna — e sem um par de falas
+    // separadas por mais de 15 min o roteiro **não desenha separador nenhum**: as
+    // sete falas acima cabem em 6 minutos. Um roteiro que não exercita a régua não
+    // é régua de captura para ela, e a comparação antes/depois ficaria cega
+    // exatamente no item que mudou.
+    //
+    // Isto muda a régua de comparação com as capturas anteriores a 21/08, e a
+    // mudança está escrita aqui para não ser descoberta como divergência.
+    FalaNoGrupo(
+        "10", "BRAVO UM", "15:45:22",
+        "Ocorrência encerrada, guarnição liberada. Retomando patrulhamento.",
+        propria = false, prioridade = null, entrega = FalaNoGrupo.Entrega.RECEBIDA,
     ),
 )
 

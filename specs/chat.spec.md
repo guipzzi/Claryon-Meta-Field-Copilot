@@ -78,12 +78,13 @@ data class ItemDeTrafego(
     val forma: FormaDoRegistro,
     val calha: TokenDeCalha,
     val tintaDoTexto: TokenDeTinta,
-    val faixaHoraria: String?,
+    val separadorDeTempo: String?,   // era `faixaHoraria: String?` — ver critério 11
     val mostraIndicativo: Boolean,
     val rotuloDeEntrega: RotuloDeEntrega?,
 )
 
 fun montarTrafego(falas: List<FalaNoGrupo>): List<ItemDeTrafego>
+fun separadorDeLacuna(anterior: String?, atual: String): String?
 fun deveRolarParaOFim(ultimoVisivel: Int, ultimoIndice: Int, folga: Int): Boolean
 fun leituraEmVoz(item: ItemDeTrafego): String
 fun rotuloDePrioridade(prioridade: Int): String
@@ -125,12 +126,39 @@ ele volta a exigir aparelho no próximo refactor.
 10. `Enquanto` um registro estiver na tela, `o sistema deverá` exibir o carimbo de
     hora, **inclusive** em continuação de sequência. O horário é o que faz o
     histórico servir de log.
-11. `Quando` a hora de uma fala cair numa faixa horária diferente da fala anterior,
-    `o sistema deverá` emitir um separador com o rótulo `HH:00` acima dela.
+11. `Quando` o intervalo entre uma fala e a imediatamente anterior for **maior ou
+    igual a `LACUNA_QUE_SEPARA_S` (15 min)**, `o sistema deverá` emitir acima dela
+    um separador com a **duração do silêncio** — `"41 min sem tráfego"`. `Enquanto`
+    o intervalo for menor, `o sistema deverá` devolver `separadorDeTempo == null`.
+
+    > **Revisado em 21/08.** O critério dizia *"faixa horária diferente ⇒ separador
+    > `HH:00`"*, e a hora cheia não é um limite do canal: separava 14:58 de 15:01,
+    > que é a mesma conversa, e não separava 15:01 de 15:41, que são dois momentos.
+    > O separador ficava exatamente onde a informação não estava.
+    >
+    > **O limiar não é medido**, e a spec o declara como hipótese. Piso: o
+    > deslocamento — "em deslocamento" e "no local" são a mesma ocorrência a vários
+    > minutos de distância, e um limiar curto a cortaria ao meio. Teto: o turno — a
+    > 15 min, 6 h de turno dão no máximo 24 marcas. **A medição que resolve** é a
+    > distribuição dos intervalos entre transmissões consecutivas do mesmo
+    > `talk_group_id` em `transmissions.criada_em`, num turno real; o limiar é o
+    > vale entre as duas modas. Não há canal real gravado para isso ainda.
+
 12. `Se` a hora chegar como `"--:--:--"` (fallback de `RadioViewModel.kt:225`),
-    `então o sistema deverá` devolver `faixaHoraria == null` e **não** desenhar
-    separador. Inventar faixa para horário desconhecido é a interface afirmando o
-    que o dado não sustenta.
+    `então o sistema deverá` devolver `separadorDeTempo == null` para aquela fala
+    **e** medir a fala seguinte a partir da última hora legível. Inventar lacuna
+    para horário desconhecido é a interface afirmando o que o dado não sustenta;
+    apagar a régua por causa de um buraco perderia silêncio que houve de verdade.
+
+12a. `Se` o intervalo calculado for negativo (fala fora de ordem — `RadioViewModel`
+    acrescenta as locais pendentes **no fim** da lista) `ou` maior que
+    `LACUNA_ABSURDA_S` (12 h), `então o sistema deverá` devolver
+    `separadorDeTempo == null`. Com a soma da virada da meia-noite, uma inversão
+    de ordem viraria *"23 h sem tráfego"* — silêncio que não houve, logo abaixo de
+    uma fala que o desmente.
+
+12b. `Quando` o turno atravessar a meia-noite, `o sistema deverá` somar o dia:
+    23:58 → 00:03 são 5 minutos, não menos 23 horas.
 13. `Se` a recarga de 10 s (`RadioViewModel.kt:361`) devolver lista estruturalmente
     igual à anterior, `então o sistema deverá` reaproveitar o resultado de
     `montarTrafego` sem remontar.
@@ -227,10 +255,15 @@ ele volta a exigir aparelho no próximo refactor.
   rótulo de entrega vale só dentro da guarnição. Fora dela, P2 segue como "atenção
   genérica" onde não há faixa de prioridade por perto: `TelaDoMapa.kt:136,328,463`,
   `TelaDeLogin.kt:99`, `BarraDePtt.kt:296`. É dívida declarada, e alguém vai tropeçar.
-- **A faixa horária faz cirurgia de string sobre `hora`**, porque `FalaNoGrupo` guarda
+- **O separador faz aritmética de string sobre `hora`**, porque `FalaNoGrupo` guarda
   o horário já formatado. Se `RadioViewModel.HORA` (`:365`) deixar de ser `HH:mm:ss`,
-  o separador some em silêncio. A correção certa é `FalaNoGrupo` carregar o instante
-  além do texto — fora deste escopo porque mexe em `RadioViewModel`.
+  o separador some em silêncio. **A régua por lacuna piorou esta armadilha**, não a
+  criou: a faixa horária lia só os dois primeiros dígitos, e a lacuna precisa dos
+  seis — e da ausência de data, que é o que obriga a somar a meia-noite e a inventar
+  um teto de 12 h (critérios 12a e 12b) para não afirmar silêncio que não houve.
+  A correção certa continua sendo `FalaNoGrupo` carregar o **instante** além do
+  texto, e aí os dois remendos caem juntos. Fora deste escopo porque mexe em
+  `RadioViewModel`.
 - **`FaixaDePrioridade` (`Comuns.kt:128-135`) fica sem chamador.** Ou é apagada nesta
   entrega, ou volta a ser usada. Componente vivo sem uso é como o mapa de cores volta
   a divergir no próximo refactor.
@@ -256,7 +289,10 @@ determinísticos e ficam na JVM, porque a decisão é função pura.
 
 | Critérios | Teste | Onde |
 |---|---|---|
-| 1-3, 9-13 | `TrafegoDoCanalTest` — classificação, agrupamento, faixa horária, fallback `--:--:--`, reaproveitamento | `app/src/test/kotlin/com/claryon/field/ui/` |
+| 1-3, 9-13 | `TrafegoDoCanalTest` — classificação, agrupamento, separador por lacuna, fallback `--:--:--`, reaproveitamento | `app/src/test/kotlin/com/claryon/field/ui/` |
+| 11 (contra-teste) | `falasSeguidasNaoSaoCortadas_mesmoVirandoAHora` **e** `silencioLongoSepara_mesmoDentroDaMesmaHora` — o par falha junto se a régua de hora cheia voltar, que é o único jeito de o critério travar o defeito e não só o conserto | JVM |
+| 11 (fronteira) | `oLimiarEhDeQuinzeMinutos_eOSegundoAbaixoDeleNaoSepara` — sem o lado de baixo, qualquer limiar menor passaria, inclusive zero | JVM |
+| 12a-12b | `aViradaDaMeiaNoiteNaoInventaSilencio`, `aViradaDaMeiaNoiteAindaMedeOSilencioVerdadeiro`, `falaForaDeOrdemNaoAfirmaVinteETresHorasDeSilencio` | JVM |
 | 6-7 | `TrafegoDoCanalTest#tokensDeSuperficie` | JVM |
 | 14-16 | `RolagemDoTrafegoTest` — tabela sobre `deveRolarParaOFim` | JVM |
 | 17-19 | `EstadoDeEntregaTest` — `aoSoltar` com transporte conectado e desconectado, transporte falso | JVM |
@@ -318,6 +354,36 @@ existe mais é como a próxima mentira nasce (§6, pergunta 4). Estado: **propos
    este aparelho não sabe o que o agente leu.
 6. **A barra de composição junta copiloto e PTT** numa superfície só, com fio entre eles.
    Alvo do copiloto sobe para 48 dp.
+
+**Revisão de 21/08 — o que o cabeçalho e a barra tomaram emprestado do mensageiro:**
+
+7. **Cabeçalho de grupo, não livro-razão.** O nome do canal em corpo grande e **caixa
+   normal**, sem a etiqueta `TALK GROUP` acima; a lista de integrantes em cinza logo
+   abaixo. A contagem desceu da coluna da direita para o fim da linha dos integrantes
+   e **escreve a palavra**: `"2 de 3 com posição"`, nunca um `2/3` cru, porque o
+   denominador é quem publica posição e não o tamanho da guarnição
+   (`posicoes_do_grupo` faz `join` com `agent_positions`). A contagem fica **ancorada**
+   e os nomes é que rolam — se ela rolasse junto, sairia de vista exatamente quando há
+   mais gente para contar.
+8. **Pílula de entrada e disco de microfone.** A consulta ao copiloto vira pílula
+   arredondada; o bloco de fala do PTT ganha o mesmo raio dos balões e um microfone
+   desenhado num disco à direita — cortado por uma diagonal quando o rádio recusa.
+   **O disco não é o alvo:** o alvo continua sendo a barra inteira, 136 dp de altura e
+   largura cheia. Num mensageiro o círculo de 48 dp é o botão; aqui quem aperta está de
+   luva, dirigindo ou em pé numa abordagem, e mirar num círculo é o que ele não vai
+   fazer. O disco é a **marca**, não o botão.
+9. **O bloco de origem não confirmada diz que não há nome.** Uma linha em prosa abaixo
+   do rótulo: *"Nenhum agente do cadastro do grupo assinou esta transmissão. Não há
+   indicativo a mostrar."* Sem ela o bloco ficava ambíguo entre "a tela escondeu o
+   nome" e "não há nome", que levam a decisões diferentes.
+
+**O que foi recusado nesta revisão:** **mostrar o indicativo reivindicado** pelo emissor.
+Ele existe — `AnuncioDeFala.autorIndicativo`, string livre e não verificada (migração
+`0013`) —, mas `RadioTatico` o descarta na chegada por decisão escrita: *"exibir o rótulo
+que o próprio forjador digitou é pior que não exibir nada, porque dá autoridade à
+mentira"*. Trazê-lo à tela, ainda que marcado como alegação, é sobrepor regra dura numa
+via de segurança — decisão humana, e **esta spec é onde ela entra como proposta**, não o
+diff de código.
 
 **O que foi recusado, e por quê:** citação de resposta. A gramática do mensageiro pede, e
 não há relação de réplica no tráfego de rádio nem coluna em `transmissions` que a guarde.

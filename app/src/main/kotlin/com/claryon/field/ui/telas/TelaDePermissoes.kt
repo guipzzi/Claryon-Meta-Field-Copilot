@@ -8,16 +8,19 @@ import android.net.Uri
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.MaterialTheme
+
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -35,6 +38,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.claryon.field.ui.tema.Cores
 import com.claryon.field.permissoes.EstadoDePermissoes
 import com.claryon.field.permissoes.PermissoesEssenciais
 import com.claryon.field.permissoes.Recuperacao
@@ -145,18 +149,61 @@ fun TelaDePermissoes(aoConcluir: () -> Unit) {
     // na main thread dentro do corpo do composable rodava a cada quadro.
     val podePedir = remember(estado) { podePedirDeNovo(context) }
 
+    // **As barras do sistema, e por que a conta é desta tela.**
+    //
+    // `MainActivity.onCreate` chama `enableEdgeToEdge`, então a janela vai até as
+    // bordas físicas — é o que a moldura de "no ar" exige. Quem devolve o espaço
+    // das barras é `CascoTatico`, e o casco só embrulha a OPERAÇÃO: esta tela é
+    // portão de abertura e é composta fora dele. O título saía por baixo do
+    // relógio e dos ícones de privacidade, e o último botão por baixo da barra de
+    // gestos.
+    //
+    // Ficou visível agora porque a barra passou a pedir ícones CLAROS
+    // (`SystemBarStyle.dark`, necessário porque o app não segue o modo do
+    // sistema). Antes eram ícones escuros sobre fundo escuro: o defeito era o
+    // mesmo, e nada era legível o bastante para denunciá-lo.
+    //
+    // Os dois lados são necessários e nenhum é duplicado: nada aqui passa pelo
+    // casco. Quem mexer nesta tela e a mover para dentro do casco tem de tirar o
+    // `statusBarsPadding` daqui, senão o título desce duas vezes.
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            // **Fundo próprio, e não o do hospedeiro.** Mesma correção que
+            // `TelaDeGuarnicao` já traz por escrito: tela que depende de quem a
+            // compõe para ter fundo mostra o cinza do tema do sistema no primeiro
+            // lugar em que for composta fora dele. Aqui não havia hospedeiro
+            // nenhum — o preto vinha do `windowBackground`, por acidente.
+            .background(Cores.Vazio)
+            .statusBarsPadding()
+            .navigationBarsPadding()
             .verticalScroll(rememberScrollState())
             .padding(20.dp),
     ) {
-        Text("Antes de começar", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        // **A cor é explícita, e sem ela o título era PRETO.**
+        //
+        // Estes dois `Text` estão fora de qualquer `Card`, e portanto fora de
+        // qualquer `Surface`: `LocalContentColor` cai no padrão do Material, que é
+        // `Color.Black`. Sobre o fundo da aplicação isso dá **1,1:1** — abaixo de
+        // qualquer piso, e invisível na prática. Os textos dentro dos cartões
+        // escapavam por acidente, porque `Card` fornece `onSurfaceVariant`.
+        //
+        // O defeito convivia com o da barra de status e cada um escondia o outro:
+        // o título ilegível não denunciava a sobreposição, e a sobreposição
+        // explicava o título sumido. Consertar só a posição entregaria um título
+        // bem colocado que continua sem dar para ler.
+        Text(
+            "Antes de começar",
+            fontSize = 22.sp,
+            fontWeight = FontWeight.Bold,
+            color = Cores.Tinta,
+        )
         Spacer(Modifier.height(4.dp))
         Text(
             "O Claryon trabalha com a tela apagada. Estas permissões são o que " +
                 "ele usa — e o que deixa de funcionar sem cada uma.",
             fontSize = 14.sp,
+            color = Cores.TintaMedia,
         )
         Spacer(Modifier.height(16.dp))
 
@@ -177,18 +224,18 @@ fun TelaDePermissoes(aoConcluir: () -> Unit) {
                         if (concedida) "Liberado" else p.semEla,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Medium,
-                        color = if (concedida) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.error
-                        },
+                        color = if (concedida) Cores.Tinta else Cores.FalhaTexto,
                     )
                     if (!concedida && p.bloqueante) {
                         Spacer(Modifier.height(2.dp))
+                        // `FalhaTexto` e não `error`: `Cores.Falha` rende 4,20:1 e
+                        // é token de MARCA, não de palavra. Aqui o estado precisa
+                        // mesmo ser lido, e este é o token que existe para isso —
+                        // 6,76:1.
                         Text(
                             "Sem esta, o app não abre o ciclo de voz.",
                             fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.error,
+                            color = Cores.FalhaTexto,
                         )
                     }
                 }
@@ -224,11 +271,7 @@ fun TelaDePermissoes(aoConcluir: () -> Unit) {
                     texto,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
-                    color = if (boa) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.error
-                    },
+                    color = if (boa) Cores.Tinta else Cores.FalhaTexto,
                 )
                 if (oculos !is RespostaDePermissao.Concedida) {
                     Spacer(Modifier.height(8.dp))

@@ -12,6 +12,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.height
@@ -121,7 +122,7 @@ fun Modifier.contornoTracejado(cor: Color, canto: Dp, largura: Dp = 1.dp): Modif
     }
 
 /**
- * **Procedência — a linha acima da fala.**
+ * **Procedência — o topo do balão cuja autoria não fechou.**
  *
  * Estruturalmente é o lugar que um aplicativo de mensagens usa para a citação da
  * resposta. Aqui não há resposta a citar — tráfego de rádio não tem relação de
@@ -130,29 +131,51 @@ fun Modifier.contornoTracejado(cor: Color, canto: Dp, largura: Dp = 1.dp): Modif
  * confiar nisso.**
  *
  * Era `FaixaDeProcedencia` e desenhava uma faixa cheia de ponta a ponta do balão.
- * Agora é **linha**, e o nome mudou junto: mora dentro do preenchimento do balão,
- * sem fundo próprio, e o cerco fica por conta de [contornoTracejado]. Tinta média e
- * nenhuma cor de sinal — o aviso é sobre a atribuição, não sobre urgência. Quem lê
- * precisa saber que o **nome** é duvidoso; o conteúdo pode ser um pedido de apoio
- * real e continua legível em tinta cheia.
+ * Agora mora dentro do preenchimento, sem fundo próprio, e o cerco fica por conta
+ * de [contornoTracejado]. Tinta média e nenhuma cor de sinal — o aviso é sobre a
+ * atribuição, não sobre urgência. Quem lê precisa saber que o **nome** é duvidoso;
+ * o conteúdo pode ser um pedido de apoio real e continua legível em tinta cheia.
  *
- * Caixa-alta fica: é um dos poucos casos genuinamente excepcionais da tela, e o
- * critério para gritar é esse.
+ * Caixa-alta fica no rótulo: é um dos poucos casos genuinamente excepcionais da
+ * tela, e o critério para gritar é esse.
+ *
+ * ---
+ * ### A segunda linha: responder "quem", quando a resposta é "ninguém"
+ *
+ * O bloco mostrava só o aviso, e quem olhava ficava sem saber se o nome tinha sido
+ * omitido pela tela ou se ele não existia. São coisas diferentes e levam a
+ * decisões diferentes.
+ *
+ * A resposta que este produto tem é a segunda, e ela é literal: `HistoricoDoCanal`
+ * lê `agents.indicativo` pelo `join` de autoria, e quando o vínculo não fecha o
+ * campo chega **vazio**. Não há nome a esconder — há nome que não existe. É isso
+ * que [explicacao] escreve, e o bloco deixa de fingir que guarda um segredo.
+ *
+ * Prosa e não etiqueta: é frase, e a `Etiqueta` de 0,16 em já está gasta na linha
+ * de cima. Tinta média, 7,01:1 sobre o pior fundo.
  */
 @Composable
-fun LinhaDeProcedencia(rotulo: String, modifier: Modifier = Modifier) {
-    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
-        // Barra curta tracejada, o mesmo vocabulário da calha e do contorno: três
-        // lugares dizendo a mesma coisa pelo mesmo meio, que é como um sinal vira
-        // hábito.
-        Box(
-            Modifier
-                .width(10.dp)
-                .height(2.dp)
-                .calha(Cores.TintaMedia, largura = 10.dp, tracejada = true),
-        )
-        Box(Modifier.width(Espaco.Curto))
-        Etiqueta(rotulo, cor = Cores.TintaMedia)
+fun BlocoDeProcedencia(
+    rotulo: String,
+    explicacao: String,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            // Barra curta tracejada, o mesmo vocabulário da calha e do contorno:
+            // três lugares dizendo a mesma coisa pelo mesmo meio, que é como um
+            // sinal vira hábito.
+            Box(
+                Modifier
+                    .width(10.dp)
+                    .height(2.dp)
+                    .calha(Cores.TintaMedia, largura = 10.dp, tracejada = true),
+            )
+            Box(Modifier.width(Espaco.Curto))
+            Etiqueta(rotulo, cor = Cores.TintaMedia)
+        }
+        Box(Modifier.height(Espaco.Micro))
+        TextoCorpoMenor(explicacao, cor = Cores.TintaMedia)
     }
 }
 
