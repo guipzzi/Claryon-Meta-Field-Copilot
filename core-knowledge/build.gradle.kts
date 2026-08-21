@@ -25,6 +25,28 @@ dependencies {
     testImplementation(libs.junit)
 }
 
+// O corpus de lei entra no artefato do módulo como RECURSO, copiado do único
+// lugar onde ele mora — `corpus/trechos.jsonl`, na raiz, que é o arquivo que o
+// conferidor de procedência valida. Copiar em vez de versionar uma segunda cópia
+// evita a falha clássica: duas cópias que divergem, e o teste medindo a que não
+// vai para o aparelho.
+//
+// Recurso, e não `assets/`, por dois motivos concretos: este módulo é JVM puro e
+// não tem `assets`; e recurso de módulo viaja para dentro do APK de quem
+// declarar a dependência, sem o chamador precisar abrir nada nem saber o caminho.
+// Custo medido: 1 173 KB crus, 267 KB deflacionados — 0,07% dos 378 MB do APK.
+//
+// ATENÇÃO: nenhuma linha aqui pode declarar dependência de projeto nova. A lista
+// acima é a fronteira, e `FronteiraDoConhecimentoTest` derruba o build se crescer.
+val corpusEmbarcado by tasks.registering(Copy::class) {
+    from(rootProject.file("corpus/trechos.jsonl"))
+    into(layout.buildDirectory.dir("recursos-do-corpus/corpus"))
+}
+
+sourceSets["main"].resources.srcDir(layout.buildDirectory.dir("recursos-do-corpus"))
+
+tasks.named("processResources") { dependsOn(corpusEmbarcado) }
+
 java {
     sourceCompatibility = JavaVersion.VERSION_17
     targetCompatibility = JavaVersion.VERSION_17
