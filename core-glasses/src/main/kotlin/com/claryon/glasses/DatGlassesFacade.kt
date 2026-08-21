@@ -531,6 +531,20 @@ class DatGlassesFacade(private val scope: CoroutineScope) : GlassesFacade {
         }
     }
 
+    /**
+     * Captura pontual, **com o payload de verdade**.
+     *
+     * Até 21/08 esta função devolvia
+     * `Result.success(PhotoData(ByteArray(0), photo.toString()))` — sucesso com zero
+     * bytes, e o `mimeType` recebendo o `toString()` do objeto do SDK. O comentário
+     * que estava aqui admitia ("no M2 não decodificamos a foto"), o que só torna a
+     * mentira documentada: é o mesmo defeito de classe de [startSession] antes da
+     * correção — um `Result.Success` que não significa sucesso. Era inofensivo
+     * enquanto ninguém chamava; o primeiro chamador acreditaria.
+     *
+     * A tradução dos dois ramos de `PhotoData`, o que o `javap` mediu sobre eles e
+     * o que só se sabe com óculos reais estão em [traduzirFotoDoDat].
+     */
     override suspend fun capturePhoto(): Result<PhotoData> {
         val stream = activeStream
             ?: return Result.failure(ClaryonError.Glasses("glasses.no_stream", "Sem stream ativo."))
@@ -546,8 +560,10 @@ class DatGlassesFacade(private val scope: CoroutineScope) : GlassesFacade {
         val deferred = CompletableDeferred<Result<PhotoData>>()
         stream.capturePhoto()
             .onSuccess { photo ->
-                // No M2 não decodificamos a foto; o M6 trata HEIC/Bitmap + rotação.
-                deferred.complete(Result.success(PhotoData(ByteArray(0), photo.toString())))
+                // Sucesso do SDK ≠ sucesso nosso: a tradução ainda pode recusar
+                // (payload vazio, formato irreconhecível, ramo novo do SDK), e
+                // recusar é o certo — sucesso vazio é o que estamos consertando.
+                deferred.complete(traduzirFotoDoDat(photo))
             }
             .onFailure { error, _ ->
                 deferred.complete(

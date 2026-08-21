@@ -147,13 +147,36 @@ data class FrameInfo(
     val count: Long,
 )
 
-/** Foto capturada sob comando (HEIC/Bitmap na implementação real). */
+/**
+ * Foto capturada sob comando.
+ *
+ * [bytes] é o payload **de verdade** — a versão anterior deste tipo era preenchida
+ * com `ByteArray(0)` e um `mimeType` que era o `toString()` do objeto do SDK. A
+ * tradução dos dois ramos de `PhotoData` do DAT vive em [traduzirFotoDoDat], e o
+ * porquê de cada decisão está lá.
+ *
+ * [orientacaoGraus] são os graus **horários que o consumidor precisa aplicar** para
+ * ver a foto de pé, quando o payload declara isso em EXIF. `null` quer dizer *não
+ * declarado* — e **não** é sinônimo de zero: o SDK não expõe orientação em campo
+ * nenhum (confirmado por `javap`), não endireita a imagem antes de entregar, e nós
+ * não giramos pixel por palpite. Quem for exibir ou reconhecer precisa tratar `null`
+ * como "orientação desconhecida", nunca como "retrato, igual ao stream".
+ *
+ * Como [Frame], vive em RAM: nada aqui é persistido, indexado ou enviado.
+ */
 data class PhotoData(
     val bytes: ByteArray,
     val mimeType: String,
+    val orientacaoGraus: Int? = null,
 ) {
     override fun equals(other: Any?): Boolean =
-        this === other || (other is PhotoData && bytes.contentEquals(other.bytes))
+        this === other || (
+            other is PhotoData &&
+                bytes.contentEquals(other.bytes) &&
+                mimeType == other.mimeType &&
+                orientacaoGraus == other.orientacaoGraus
+            )
 
-    override fun hashCode(): Int = bytes.contentHashCode()
+    override fun hashCode(): Int =
+        (bytes.contentHashCode() * 31 + mimeType.hashCode()) * 31 + (orientacaoGraus ?: -1)
 }
