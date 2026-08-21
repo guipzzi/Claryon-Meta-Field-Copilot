@@ -172,6 +172,46 @@ enum class FalhaOperacional(val causaCurta: String) {
     SEM_GRAVACAO_ATIVA("Nada gravando."),
     PLACA_NAO_LIDA("Placa ilegível."),
     CONSULTA_INDISPONIVEL("Consulta indisponível."),
+
+    // ── Falhas de CÂMERA, agrupadas por RECUPERAÇÃO ─────────────────────────────
+    //
+    // `ErroDeStream` (core-glasses) distingue oito causas com frases prontas, e até
+    // 21/08 as oito chegavam ao agente como "Consulta indisponível." — a causa
+    // tipada morria num `Log.w` um passo antes do alto-falante.
+    //
+    // **O critério aqui é a AÇÃO do agente, não o código do SDK.** Oito causas não
+    // precisam de oito falas; precisam de tantas quantas forem as recuperações
+    // distintas. Duas causas que levam ao mesmo gesto compartilham a fala; duas que
+    // levam a gestos diferentes NÃO podem compartilhar — e era exatamente isso que
+    // estava acontecendo.
+    //
+    // Por que valores de enum e não um `String?` em `Falhou`: `utteranceFor` aceitar
+    // SÓ `ActionOutcome` é o que torna impossível o app falar o que não aconteceu.
+    // Um texto livre que vira fala é porta por onde conteúdo arbitrário alcança o
+    // alto-falante — e em 21/08 foi medido que 2 de 3 saídas do LLM, entregues ao
+    // roteador, viram ação. Ver `specs/falha-de-camera-falada.spec.md`.
+
+    /** Hastes fechadas. Dois segundos e o agente resolve sozinho. */
+    CAMERA_OCULOS_DOBRADOS("Óculos dobrados. Abra as hastes."),
+
+    /** Consentimento não concedido. Exige parar e mexer no celular. */
+    CAMERA_SEM_PERMISSAO("Libere a câmera no Meta AI."),
+
+    /** Freio térmico. **Insistir piora** — por isso não compartilha fala com falha genérica. */
+    CAMERA_QUENTE("Óculos quentes. Câmera pausada."),
+
+    /**
+     * Energia dos óculos no fim. Recobre `BATTERY_LOW` e `PEAK_POWER_LIMIT`: a frase
+     * do SDK difere ("sem energia para transmitir"), mas o gesto é o mesmo — pôr no
+     * estojo. Colapso deliberado, registrado na spec.
+     */
+    CAMERA_SEM_BATERIA("Bateria dos óculos acabando."),
+
+    /**
+     * Falha de stream sem recuperação específica: tentar de novo é o que há.
+     * Recobre `STREAM_ERROR`, `CRITICAL_STREAM_ERROR`, `TIMEOUT` e `DESCONHECIDO`.
+     */
+    CAMERA_INDISPONIVEL("Câmera falhou. Tente de novo."),
     SEM_REDE("Sem rede."),
 
     /**

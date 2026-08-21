@@ -28,6 +28,7 @@ import com.claryon.field.audio.SaidaUnica
 import com.claryon.field.auth.SessaoDoAgente
 import com.claryon.field.local.ProvedorDeLocal
 import com.claryon.field.permissoes.PermissoesEssenciais
+import com.claryon.field.oculos.FalhaDaCamera
 import com.claryon.field.oculos.LeituraDePlaca
 import com.claryon.field.oculos.PlacaPelaCamera
 import com.claryon.field.radio.CanaisDoAgente
@@ -263,12 +264,14 @@ class CerebroDoCopiloto(private val app: Context) {
                 is LeituraDePlaca.Ilegivel ->
                     ClaryonIntentExecutor.LeituraDePlaca.Ilegivel
                 is LeituraDePlaca.SemCamera -> {
-                    // A causa tipada do stream ("Óculos dobrados", "Libere a câmera
-                    // no Meta AI") existe e **não cabe na fala**: `FalhaOperacional`
-                    // é enum fechado em `core-agent` e não tem valor para câmera. O
-                    // agente ouve "Consulta indisponível."; o log tem o porquê.
-                    Log.w(TAG, "captura sem câmera: ${leitura.codigo} — ${leitura.frase}")
-                    ClaryonIntentExecutor.LeituraDePlaca.SemCamera
+                    // **A causa tipada agora chega ao ouvido.** Até 21/08 ela parava
+                    // nesta linha: as oito de `ErroDeStream` viravam "Consulta
+                    // indisponível.", e as recuperações são fisicamente diferentes —
+                    // abrir as hastes, mexer no Meta AI, esperar esfriar, carregar.
+                    // Com a câmera quente, "tente de novo" é o pior conselho possível.
+                    val falha = FalhaDaCamera.deCodigo(leitura.codigo)
+                    Log.w(TAG, "captura sem câmera: ${leitura.codigo} → ${falha.causaCurta}")
+                    ClaryonIntentExecutor.LeituraDePlaca.SemCamera(falha)
                 }
             }
         },

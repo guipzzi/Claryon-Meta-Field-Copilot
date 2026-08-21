@@ -173,7 +173,7 @@ class ClaryonIntentExecutor(
      * construído sem esta dependência **não pode parecer capaz de ver**.
      */
     private val lerPlacaPelaCamera: suspend () -> LeituraDePlaca =
-        { LeituraDePlaca.SemCamera },
+        { LeituraDePlaca.SemCamera(FalhaOperacional.CAMERA_INDISPONIVEL) },
     /**
      * **Consulta a base veicular.** Placa entra, situação sai — ou nada.
      *
@@ -203,7 +203,16 @@ class ClaryonIntentExecutor(
         data object Ilegivel : LeituraDePlaca
 
         /** A câmera não abriu, ou não entregou imagem. */
-        data object SemCamera : LeituraDePlaca
+        /**
+         * A câmera não abriu, e [falha] diz **por quê** em termos do que o agente faz
+         * a seguir — não em termos do código do SDK.
+         *
+         * Era `data object` até 21/08, e por isso as oito causas distintas de
+         * `ErroDeStream` chegavam ao ouvido como uma só. A tradução vive em
+         * `oculos/FalhaDaCamera`, porque `core-agent` não conhece `core-glasses` e
+         * não deve conhecer.
+         */
+        data class SemCamera(val falha: FalhaOperacional) : LeituraDePlaca
     }
 
     /**
@@ -397,8 +406,9 @@ class ClaryonIntentExecutor(
                 return ActionOutcome.Falhou(FalhaOperacional.PLACA_NAO_LIDA)
             // A câmera não abriu. Dizer "placa ilegível" aqui mandaria o agente
             // aproximar-se de um veículo que o aparelho nunca viu.
-            LeituraDePlaca.SemCamera ->
-                return ActionOutcome.Falhou(FalhaOperacional.CONSULTA_INDISPONIVEL)
+            is LeituraDePlaca.SemCamera ->
+                // A causa tipada chega até aqui e VIRA FALA. Antes morria num Log.w.
+                return ActionOutcome.Falhou(leitura.falha)
         }
 
         val placa = PlacaValidator.normalizar(bruta)
