@@ -1660,3 +1660,41 @@ recusa recebe. A recusa audível existe e é uma só: *"Não conheço essa guarn
 sem marcador. É o que estava acontecendo. Um roadmap onde pendência e decisão
 revertida têm a mesma aparência faz a próxima sessão implementar a regressão
 achando que paga dívida — e com o cuidado de quem está fazendo a coisa certa.
+
+## 2026-08-20 — A colisão do ggml: renomear os alvos do llama.cpp
+
+**Decisão:** quando o llama.cpp entrar (Etapa B da Fase 4), seus alvos são
+renomeados — `libggml-llama.so`, `libggml-base-llama.so`, `libggml-cpu-llama.so` —
+via `OUTPUT_NAME` no CMake. O whisper.cpp não é tocado.
+
+**Verificado por inspeção, não por leitura** (Regra Zero):
+
+- As três `.so` estão no APK: `libggml.so` (128 872 B), `libggml-base.so`
+  (1 220 384 B), `libggml-cpu.so` (833 624 B), em `lib/arm64-v8a/`.
+- `libwhisper.so` importa **98 símbolos** delas (`nm -D | grep -c " U ggml"`).
+- Os `SONAME` são **planos**: `libggml.so`, sem sufixo de versão.
+- `libggml-base.so` exporta **977** símbolos em `T`.
+
+O `lib/arm64-v8a/` do APK é um diretório único. llama.cpp compilado pelo mesmo
+CMake produz os mesmos três nomes de arquivo; o segundo a entrar é descartado pelo
+merge ou sobrescreve o primeiro. Um whisper linkado contra o ggml do llama quebra
+**em runtime**, não no build — e o STT hoje mede WER 3,4%.
+
+**Alternativas descartadas, e por quê:**
+
+*Unificar a revisão do ggml.* Mais limpo no papel e arrisca o único componente do
+produto cuja qualidade já está medida. Whisper e llama.cpp evoluem em cadências
+diferentes; casar as revisões vira dívida permanente, paga toda vez que um dos dois
+subir de versão.
+
+*Linkar o llama estático (`BUILD_SHARED_LIBS=OFF`).* Resolve a colisão de arquivo
+e é a segunda melhor. Fica como plano B: custa tamanho de APK e perde a
+possibilidade de compartilhar o ggml um dia, mas não toca no whisper.
+
+*Renomear os alvos do WHISPER em vez dos do llama.* Simétrico e errado: mexe no que
+funciona para acomodar o que ainda não existe.
+
+**O que isto NÃO decide:** o motor. A licença do Llama restringe aplicações
+militares e de armamento de forma ampla, e este é um produto de segurança pública —
+é leitura jurídica e foi adiada por decisão humana em 20/08. A Etapa A (RAG
+extrativo, sem LLM) não depende disso e segue na frente.
