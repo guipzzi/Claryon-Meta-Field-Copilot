@@ -1,6 +1,5 @@
 package com.claryon.agent
 
-import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -163,68 +162,10 @@ class PlacaEmCorpusRealTest {
     // ── leitura do corpus ─────────────────────────────────────────────────────
 
     /**
-     * Os textos do corpus, por varredura e **não por regex**.
-     *
-     * `FronteiraDoConhecimentoEmAppTest` registra que a versão com
-     * `"((?:[^"\\]|\\.)*)"` morreu de `StackOverflowError` dentro do
-     * `java.util.regex.Pattern`: backtracking catastrófico sobre artigo de lei longo.
-     * O defeito estava no INSTRUMENTO de medida, que é o pior lugar. Aqui a varredura
-     * é linear e sem pilha, pelo mesmo motivo.
+     * O leitor mora em [CorpusDeLei] desde que `PlacaDitadaNoRoteadorTest` passou a
+     * precisar do mesmo texto: duas cópias de um leitor divergem no primeiro conserto
+     * aplicado a uma só delas — e este leitor já foi consertado uma vez, de regex
+     * catastrófica para varredura linear.
      */
-    private fun textosDoCorpus(): List<String> {
-        val jsonl = raizDoRepositorio().resolve("corpus/trechos.jsonl")
-        assertTrue(
-            "corpus/trechos.jsonl não existe. Sem corpus este teste não prova nada, " +
-                "então ele FALHA em vez de passar vazio.",
-            jsonl.isFile,
-        )
-        return jsonl.readLines().mapNotNull { campo(it, "texto") }
-    }
-
-    private fun raizDoRepositorio(): File {
-        var dir: File? = File(".").canonicalFile
-        while (dir != null) {
-            if (File(dir, "settings.gradle.kts").isFile) return dir
-            dir = dir.parentFile
-        }
-        throw AssertionError(
-            "Não achei a raiz do repositório a partir de ${File(".").canonicalPath}. " +
-                "Teste que não acha o que precisa conferir tem de falhar, não passar.",
-        )
-    }
-
-    /** Valor de um campo string do JSON, tolerando espaço depois dos dois-pontos. */
-    private fun campo(linha: String, nome: String): String? {
-        val chave = "\"$nome\""
-        var i = linha.indexOf(chave).takeIf { it >= 0 }?.plus(chave.length) ?: return null
-        while (i < linha.length && linha[i].isWhitespace()) i++
-        if (i >= linha.length || linha[i] != ':') return null
-        i++
-        while (i < linha.length && linha[i].isWhitespace()) i++
-        if (i >= linha.length || linha[i] != '"') return null
-        i++
-        val sb = StringBuilder()
-        while (i < linha.length) {
-            when (val c = linha[i]) {
-                '\\' -> {
-                    if (i + 1 >= linha.length) return sb.toString()
-                    when (val e = linha[i + 1]) {
-                        'n' -> sb.append('\n')
-                        't' -> sb.append('\t')
-                        'u' -> {
-                            if (i + 5 < linha.length) {
-                                sb.append(linha.substring(i + 2, i + 6).toInt(16).toChar())
-                                i += 4
-                            }
-                        }
-                        else -> sb.append(e)
-                    }
-                    i += 2
-                }
-                '"' -> return sb.toString()
-                else -> { sb.append(c); i++ }
-            }
-        }
-        return sb.toString()
-    }
+    private fun textosDoCorpus(): List<String> = CorpusDeLei.textos()
 }

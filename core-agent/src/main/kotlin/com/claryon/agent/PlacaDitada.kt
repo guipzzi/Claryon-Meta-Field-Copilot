@@ -7,6 +7,20 @@ import java.text.Normalizer
  *
  * *"tango bravo unido três delta sete zero"* → `TBU3D70`.
  *
+ * ## Quem chama isto, e por que a pergunta está escrita no KDoc
+ *
+ * [DeterministicIntentRouter.extrairPlaca], **depois** de `PlacaValidator.extrair` e
+ * só quando ele desiste — o literal é o caso barato e inequívoco, esta classe é
+ * interpretação, e o KDoc de lá mede o que a inversão custaria.
+ *
+ * A linha está aqui porque a resposta foi **zero** entre 21/08 e 22/08: este arquivo
+ * nasceu medido (recall 40/40, zero falso positivo em 44 negativos, zero placa
+ * fabricada sobre 1817 trechos de lei) e sem um único chamador em `src/main`, de modo
+ * que *"tango bravo unido três delta sete zero"* virava `ConsultarPlaca(placa =
+ * null)` e o app **abria a câmera** para ler a placa que o agente acabara de falar.
+ * Pelo caminho de produção, ligar a porta levou o banco de **2/40 para 40/40** sem
+ * mexer em nenhuma linha deste arquivo — `PlacaDitadaNoRoteadorTest`.
+ *
  * ## Por que isto não é trabalho de LLM
  *
  * A `specs/consulta-de-placa-por-camera.spec.md` propôs que o modelo normalizasse a

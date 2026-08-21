@@ -41,7 +41,7 @@ class DeterministicIntentRouter : IntentRouter {
             // senão "narrar ocorrência: veículo de placa ABC1234" viraria
             // consulta e a narração do agente seria perdida.
             matches(texto, CONSULTAR_PLACA_EXPLICITO) ->
-                Intent.ConsultarPlaca(placa = extrairPlaca(texto))
+                Intent.ConsultarPlaca(placa = extrairPlaca(texto, transcricao))
 
             // Comandos explícitos ANTES do léxico de ocorrências. "Modo
             // abordagem" contém "abordagem", que é tipo de ocorrência — sem esta
@@ -104,7 +104,7 @@ class DeterministicIntentRouter : IntentRouter {
                 Intent.PedirApoio(prioridade = prioridadeDe(texto), resumo = null)
 
             matches(texto, CONSULTAR_PLACA_SOLTO) ->
-                Intent.ConsultarPlaca(placa = extrairPlaca(texto))
+                Intent.ConsultarPlaca(placa = extrairPlaca(texto, transcricao))
 
             else -> Intent.NaoReconhecida(transcricao)
         }
@@ -122,8 +122,71 @@ class DeterministicIntentRouter : IntentRouter {
     private fun prioridadeDe(texto: String): Prioridade =
         LexicoDeOcorrencias.escalarPrioridade(Prioridade.NORMAL, texto)
 
-    /** Extrai placa Mercosul (ABC1D23) ou padrão antigo (ABC1234), se houver. */
-    private fun extrairPlaca(texto: String): String? = PlacaValidator.extrair(texto)
+    /**
+     * Placa Mercosul (ABC1D23) ou padrão antigo (ABC1234) — **o escrito primeiro, o
+     * ditado depois.**
+     *
+     * ## Os dois são necessários — e isso, sim, está medido
+     *
+     * [PlacaValidator.extrair] é casamento literal: os sete caracteres já estão na
+     * transcrição, e ou casam com a gramática ou não. [PlacaDitada] é
+     * **interpretação** — monta a placa palavra a palavra do alfabeto fonético, de
+     * ordinal e de repetidor. Sem a segunda, *"tango bravo unido três delta sete
+     * zero"* devolvia `null` e o app abria a câmera para ler a placa que o agente
+     * acabara de falar; pelo caminho de produção, ligá-la levou o banco de
+     * elocuções de **2/40 para 40/40**, com falso positivo intacto em 0/44.
+     *
+     * Sem a primeira, perde-se a placa **escrita**: em *"consultar placa ABC 1D23 e o
+     * carro é um Gol"* o montador não para na placa — "e" e "o" valem a si mesmas
+     * como letras por regra de [AlfabetoFonetico.letra] —, a corrida chega a
+     * `ABC1D23EO` e é descartada **inteira**, que é o desenho que impede fabricar
+     * placa dentro de corrida longa.
+     *
+     * ## A ORDEM entre eles não tem prova própria, e o registro é honesto
+     *
+     * O argumento com que ela foi escolhida — *"invertida, a ditada reinterpretaria
+     * uma placa que já estava escrita"* — **não se sustenta**: a segunda tentativa só
+     * roda quando a primeira devolve `null`, então as duas ordens só divergem se as
+     * duas devolverem placa e as placas diferirem. Medido sobre 84 elocuções e 1817
+     * trechos de lei: **zero divergências**.
+     *
+     * O literal fica primeiro por custo — regex contra montar corrida palavra a
+     * palavra — e porque, entre duas leituras discordantes, a que o whisper escreveu
+     * em caracteres é a menos interpretada. **E a escolha tem custo conhecido:** na
+     * correção falada (*"consultar placa ABC1234, não — placa XYZ5678"*) o literal lê
+     * a **primeira** placa e a ditada lê depois da **última** menção; com o literal
+     * primeiro, consulta-se a placa que o agente acabou de corrigir. Está asserido em
+     * `PlacaDitadaNoRoteadorTest`, não consertado: trocar quem vence é decisão de
+     * spec (`CLAUDE.md` §7).
+     *
+     * ## Por que a ditada recebe [transcricao] crua, e não [texto]
+     *
+     * [texto] chega minúsculo — `normalizar` aqui e `PalavraDeAtivacaoNaFala.conferir`
+     * antes dele baixam a caixa. E **a caixa alta é evidência** no montador de
+     * corridas: é a única coisa que separa "ABC" de "do" em *"a placa do carro"* (ver
+     * o KDoc de `PlacaDitada.simbolo`). Passar o texto normalizado mataria em
+     * silêncio toda a família de ditadas soletradas — *"placa ABC mil duzentos e
+     * trinta e quatro"* — e o sintoma seria recall baixo sem erro nenhum no caminho.
+     *
+     * A [transcricao] crua carrega o gatilho ("Claryon, …"), e isso é inofensivo: a
+     * âncora de [PlacaDitada] só lê **depois** da palavra "placa", então tudo que vem
+     * antes é descartado antes de virar corrida.
+     *
+     * ## O que se perde ao devolver `String?`
+     *
+     * [PlacaDitada.Leitura.Recusada] distingue três motivos, e aqui os três viram
+     * `null` — que é o que abre o subfluxo da câmera. Para `NADA_DITADO` é o
+     * comportamento certo e é o de hoje. Para `FORA_DA_GRAMATICA` e `AMBIGUA` o certo
+     * seria pedir repetição citando o que se ouviu, e isso exige campo novo em
+     * [Intent.ConsultarPlaca] — mudança de contrato, que pelo `CLAUDE.md` §7 começa
+     * por diff de spec e não por diff de código. Enquanto não começa, o `null`
+     * **não regride nada**: era exatamente o que o roteador devolvia antes desta
+     * ligação, e mandar o agente apontar a câmera para o carro é recuperação honesta
+     * para uma ditada que não fechou.
+     */
+    private fun extrairPlaca(texto: String, transcricao: String): String? =
+        (PlacaDitada.ler(transcricao) as? PlacaDitada.Leitura.Reconhecida)?.placa
+            ?: PlacaValidator.extrair(texto)
 
     /**
      * Indicativo militar após o gatilho: "onde está **Alfa Dois**".
