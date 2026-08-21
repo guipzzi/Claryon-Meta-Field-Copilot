@@ -562,22 +562,38 @@ na Fase 0.
 instrumento, estrutura feita de fios de 1 px e não de caixas, âmbar com um significado só.
 Está tudo escrito em `ui/tema/Cores.kt` — a fase é fazer o app obedecer o próprio sistema.
 **Três coisas foram rejeitadas três vezes e não voltam:** colchetes decorativos, alvos
-circulares e âncoras assimétricas. `TelaDoMapa.kt:245-255` desenha exatamente um alvo
-circular com `drawCircle` e uma linha de rumo — é o primeiro a sair.
+circulares e âncoras assimétricas.
+
+> ⚠️ **Auditoria de 21/08 — esta frase estava errada sobre o código, e agir por ela
+> teria destruído uma affordance real.** O texto dizia: *"`TelaDoMapa.kt:245-255`
+> desenha exatamente um alvo circular com `drawCircle` e uma linha de rumo — é o
+> primeiro a sair."*
+>
+> O único `drawCircle` do arquivo está em `:251-252`, e ele é o **ícone do botão de
+> recentrar** (`BotaoRecentrar`) — a mira de "centralizar em mim" que Uber e Waze
+> usam, com quatro riscos cardeais. Não é marcador de mapa, não tem linha de rumo, e
+> não é ornamento: é o controle que devolve o mapa ao agente. Os marcadores de par
+> são desenhados em `MapaDeRuas.kt`, pelo MapLibre, e é lá que a proibição de "alvo
+> circular" precisa ser conferida — se é que se aplica.
+>
+> A proibição em si continua valendo. O que caiu foi o alvo apontado.
 
 **Itens**
 
 - [UX] Auditoria do sistema atual com a skill `audit-design-system`, produzindo a lista de
   divergências entre `Cores.kt`/`Tema.kt` e o que as sete telas de fato usam — esforço: 0,5
   sessão — depende: nada.
-- [UX] Remover o alvo circular do mapa (`TelaDoMapa.kt:245-255`) e substituir por marca de
-  rumo em fio, coerente com o resto — esforço: 0,5 sessão — depende: auditoria.
+- [UX] ~~Remover o alvo circular do mapa (`TelaDoMapa.kt:245-255`)~~ **REVISADO em 21/08:
+  o alvo apontado não existe.** Aquelas linhas são o ícone do botão de recentrar. Se houver
+  alvo circular a remover, ele está em `MapaDeRuas.kt` — e a auditoria precisa começar por
+  achá-lo antes de escrever o item — esforço: 0,5 sessão — depende: auditoria.
 - [UX] Tela de guarnição como painel: canal ativo nomeado pelo `rotulo_falado` real (não
   mais `"GTA-3 Alfa"` fixo), estado do piso, estado da rota de áudio, e quem está falando —
   esforço: 1 sessão — depende: Fase 2 e Fase 3.
-- [UX] Estados de falha visíveis e honestos: hoje a UI mostra `ENFILEIRADA` sem fila alguma.
-  Todo estado exibido tem de corresponder a estado que existe — esforço: 1 sessão — depende:
-  auditoria.
+- [UX] ~~Estados de falha visíveis e honestos: hoje a UI mostra `ENFILEIRADA` sem fila~~
+  **FEITO antes desta fase.** `ENFILEIRADA` virou `NAO_SAIU` e a tela escreve "não saiu";
+  o KDoc de `TelaDeGuarnicao.kt:78-81` registra o porquê. O princípio — todo estado exibido
+  corresponde a estado que existe — segue valendo para estado novo.
 - [UX] Escala tipográfica de dado tabular: indicativo, distância, rumo e idade alinhados por
   coluna, com tabular figures. É o que faz a tela ler como instrumento e não como app de
   mensagem — esforço: 0,5 sessão — depende: auditoria.
@@ -597,9 +613,11 @@ circular com `drawCircle` e uma linha de rumo — é o primeiro a sair.
   sobre o hash corrente — esforço: 1 sessão — depende: cofre instanciado.
 - [REFAT] Limpar ramos mortos e documentação que afirma capacidade inexistente — lista
   completa na seção seguinte — esforço: 1 sessão — depende: fases anteriores.
-- [TRANSVERSAL] Criar `docs/INDICE.md`, que `CLAUDE.md` e `AGENTS.md` citam e **não existe
-  no repositório** — esforço: 0,3 sessão — depende: nada. O gatilho de leitura de
-  `AGENTS.md` aponta hoje para um arquivo ausente.
+- [TRANSVERSAL] ~~Criar `docs/INDICE.md`, que `CLAUDE.md` e `AGENTS.md` citam~~
+  **OBSOLETO — conferido em 21/08: nenhum dos dois cita `INDICE.md`.** `grep -n INDICE
+  CLAUDE.md AGENTS.md` não devolve nada. O `CLAUDE.md` §8 hoje É o índice, com a tabela
+  "o que existe e quando abrir". Criar o arquivo agora seria criar um segundo índice para
+  divergir do primeiro — que é a falha que este item existia para evitar.
 - [TRANSVERSAL] Ensaio cronometrado dos dois checkpoints obrigatórios, cada um em ≤ 10 min,
   com roteiro escrito e aparelho já pareado — esforço: 1 sessão — depende: tudo.
 - [TRANSVERSAL] Ensaio do pitch, reescrita final de `ESTADO.md`, `git push origin master` —
