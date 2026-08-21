@@ -633,5 +633,9 @@ private fun com.meta.wearable.dat.camera.types.VideoFrame.toFrame(): Frame {
         height = height,
         timestampNanos = presentationTimeUs * 1_000,
         bytes = bytes,
+        // Era descartado. `isCompressed` é o que separa pixels de bitstream, e sem
+        // ele o consumidor de OCR não teria como recusar um frame comprimido —
+        // leria NAL units como luminância, sem erro nenhum aparecendo.
+        comprimido = isCompressed,
     )
 }

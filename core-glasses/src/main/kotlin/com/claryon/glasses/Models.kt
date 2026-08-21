@@ -112,12 +112,27 @@ data class CameraProfile(
     }
 }
 
-/** Um frame de vídeo entregue pelo stream (payload preenchido na implementação). */
+/**
+ * Um frame de vídeo entregue pelo stream (payload preenchido na implementação).
+ *
+ * [comprimido] espelha `VideoFrame.isCompressed` do DAT, e **não é adorno**: quem
+ * consome o payload precisa saber se está olhando para pixels ou para NAL units de
+ * H.265. A informação existia no SDK e era descartada na tradução — quem lesse
+ * `bytes` como imagem receberia bitstream sem nenhum erro aparecendo.
+ *
+ * Hoje ela é sempre `false` no nosso caminho, e isso foi **confirmado por `javap`**,
+ * não presumido: `StreamConfiguration(VideoQuality, frameRate, compressVideo)` tem
+ * o terceiro parâmetro com padrão `false` — no construtor sintético,
+ * `iconst_0/istore_3` para o bit 4 da máscara —, e `toStreamConfiguration` só passa
+ * os dois primeiros. Se alguém acrescentar o terceiro um dia, o consumidor de OCR
+ * recusa o frame em vez de alimentar o reconhecedor com bitstream.
+ */
 data class Frame(
     val width: Int,
     val height: Int,
     val timestampNanos: Long,
     val bytes: ByteArray,
+    val comprimido: Boolean = false,
 ) {
     override fun equals(other: Any?): Boolean =
         this === other || (other is Frame && timestampNanos == other.timestampNanos)

@@ -185,6 +185,27 @@ erro de stream ou derrubar o stream mantendo a sessão viva.
 | Com os óculos pareados, `createSession` → `STARTED` leva quanto tempo, a frio? | `PRAZO_DE_SESSAO_MS` é 12 s, escolhido por folga e não por medida. É esse número que decide se a sessão pode ser aberta sob demanda ou tem de ficar de pé o turno inteiro |
 | A sessão sobrevive a 30 min ociosa, ou o SDK a derruba sozinho? | O vigia de `SessaoDosOculos` só reage a `state`; se o SDK derrubar **sem** mudar o `StateFlow`, a sessão fica morta-viva e a primeira consulta de placa do turno falha sem causa |
 
+### O frame que chega ao OCR — três perguntas que o simulador não responde
+
+O caminho de leitura de placa está ligado desde 21/08 (`oculos/CapturaDePlaca.kt` →
+`vision/OcrDeFrame.kt` → `PlacaOcr`), e o que ele consome é o payload de
+`VideoFrame`. O que o SDK **pede** está medido por `javap` em `mwdat-camera-0.9.0`
+(`VideoFormat.Companion.getDefaultFormat()` → `H265, 504x896, 30 fps, 750000 bps,
+colorFormat 19` = `COLOR_FormatYUV420Planar`). O que o `MediaCodec` de cada aparelho
+**entrega** é outra coisa, e o `VideoFrame` não diz qual.
+
+| O que verificar no aparelho real | Por que importa |
+|---|---|
+| **`bytes.size / (width × height)` é exatamente 1,500?** | É a razão de 4:2:0 sem padding de linha. `FrameParaBitmap` publica a razão medida no log (`ClaryonField`) sempre que ela difere. Se vier maior, o codec alinha as linhas (`rowStride > width`) e a leitura row-major produz imagem **cisalhada** — que não lê placa nenhuma, e nunca lê a errada, mas mata a capacidade em silêncio |
+| **O frame chega girado?** | 504×896 é retrato e a placa é horizontal. `InputImage.fromBitmap(bmp, 0)` assume texto na horizontal. Se o sensor entregar girado, o ML Kit não lê nada e o sintoma é idêntico ao de "placa longe demais" |
+| **Qual é a resolução efetiva com `VideoQuality.LOW`?** | O perfil de OCR pede LOW; o `getDefaultFormat` é MEDIUM. Resolução menor melhora a compressão por frame mas pode deixar os caracteres abaixo do que o ML Kit resolve. O número de 504×896 é o **padrão do SDK**, não o do nosso perfil |
+
+**O que já foi medido, e não depende do layout de croma:** a conversão usa **só o
+plano Y**, que é o primeiro e ocupa `largura × altura` bytes em I420, YV12, NV12 e
+NV21 — os quatro layouts que um `MediaCodec` pode devolver. `FramesEfemerosTest.i420ENv12_produzemAMesmaLeitura`
+alimenta o mesmo Y com cromas diferentes e exige a mesma placa. Ou seja: das três
+perguntas acima, **nenhuma é sobre cor** — o risco real é padding e rotação.
+
 **O que já foi medido, e não precisa de hardware:** com o Meta AI ausente, o
 deeplink `fb-viewapp://device/permissions/request` estoura
 `ActivityNotFoundException`, e o app converte isso em "Instale o app Meta AI." na

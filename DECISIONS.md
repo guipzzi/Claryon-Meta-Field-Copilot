@@ -1904,3 +1904,115 @@ tem chamador em `src/main` e roda a cada boot é a decisão de degradação
 
 E o llama.cpp **não é submódulo**: está ignorado no `.gitignore` como trava, com o
 custo medido (203 MB contra 43 MB do whisper) para decisão humana.
+
+---
+
+## 2026-08-21 · A câmera ligada: o OCR de placa lê só o plano Y, e o ciclo de voz precisou de mais 6 s
+
+**Contexto.** `GlassesFacade.withCamera` e `PlacaOcr.lerPlaca` existiam, estavam
+testados e tinham **zero chamadores em `app/src/main`**. `Intent.ConsultarPlaca` já
+carregava `placa: String?`, e o ramo nulo — *"Claryon, verifica a placa desse
+carro"* — respondia `CONSULTA_INDISPONIVEL` sem nunca abrir a câmera. Blocos 2, 3 e
+4 da Fase 6, sobre `specs/consulta-de-placa-por-camera.spec.md`.
+
+### O frame vem em YUV, e o SDK não diz em qual
+
+`javap -p -c` em `mwdat-camera-0.9.0`:
+
+```
+VideoFormat.Companion.getDefaultFormat()
+  → H265, 504x896, 30 fps, iFrameInterval 3, 750000 bps, colorFormat 19
+StreamConfiguration(VideoQuality, frameRate, compressVideo)
+  → padrões MEDIUM, 24, false        (iconst_0/istore_3 no construtor sintético)
+VideoFrame(ByteBuffer, width, height, presentationTimeUs, isCompressed, isCodecConfig)
+```
+
+`19` é `COLOR_FormatYUV420Planar` (I420) — mas isso é o que o SDK **pede** ao
+`MediaCodec`, não o que cada aparelho **entrega**, e `VideoFrame` não tem campo de
+formato. As alternativas eram adivinhar o layout de croma (e errar em silêncio no
+aparelho que devolvesse NV12) ou usar `capturePhoto()`, que devolve
+`PhotoData.Bitmap` já decodificado.
+
+**Decisão: ler apenas o plano Y.** Ele é o primeiro e ocupa exatamente
+`largura × altura` bytes em I420, YV12, NV12 e NV21 — os quatro layouts possíveis.
+O que muda entre eles é croma, e croma é a única coisa que reconhecimento de texto
+não usa. A conversão fica **independente de uma informação que o SDK não expõe**, e
+`FramesEfemerosTest.i420ENv12_produzemAMesmaLeitura` alimenta o mesmo Y com cromas
+diferentes exigindo a mesma placa.
+
+**Descartado:** `capturePhoto()`. Exige stream ativo (não elimina o `withCamera`), é
+uma foto por vez, e a nossa implementação **devolve `ByteArray(0)`** — o payload é
+jogado fora desde o M2 ("o M6 trata HEIC/Bitmap"). Continua com zero chamadores.
+
+`Frame` ganhou `comprimido`, espelhando `isCompressed`, que era descartado na
+tradução: sem ele o consumidor leria NAL units de H.265 como luminância, sem erro
+nenhum aparecendo. Hoje é sempre `false` no nosso caminho — mas ruído que passasse
+por `PlacaValidator` seria uma placa **fabricada**, e essa é a falha que este fluxo
+inteiro existe para impedir.
+
+### O teto do ciclo de voz não cabia na janela de 5 s
+
+`CopilotoDoAgente` envolvia `cycle.runOnce()` em `withTimeoutOrNull(8_000)`, e esse
+prazo cobre **tudo**: a janela do VAD (o tempo da fala), o whisper, o roteador e a
+ação. Enquanto toda ação era despacho ou consulta de rede, 8 s sobravam — o ciclo em
+regime custa 945 ms depois que o VAD fecha.
+
+A captura tem 5 s por aceite. Frase de 2,5 s + ~1 s de whisper + 5 s de câmera passa
+de 8, e o ciclo seria cancelado **exatamente quando a captura estava funcionando**: o
+agente ouviria "Não entendi, repita." depois de apontar corretamente para a placa.
+Teto para **14 s**. Alternativa descartada: encurtar a janela do OCR, que é aceite
+escrito em spec e portanto decisão humana (§7).
+
+**E os dois aceites continuam inconsistentes, o que é achado e não conserto:** no
+caminho em que a placa **não** aparece, gasta-se a janela inteira — 945 ms + 5 000 ms
+≈ 5,9 s contra os ≤4 s da Fase 4. Qual dos dois cede é decisão de gente.
+
+### Números medidos (emulador arm64, ML Kit Latin embarcado, 504×896)
+
+Quatro execuções em processos separados, cada uma com **conteúdo diferente por
+repetição**:
+
+```
+leitura completa ......  2 frames, 67 / 85 / 93 / 180 ms   (1º sem placa, 2º com)
+custo COM placa .......  medianas 31 / 56 / 63 / 83 ms      (extremos 7–113)
+custo SEM placa .......  medianas 8 / 9 / 9 / 9 ms          (extremos 8–35)
+```
+
+**O conteúdo distinto não é capricho de teste.** Medindo o **mesmo** frame cinco
+vezes, a mediana caía para 6–8 ms — número que não sobrevive a nenhuma leitura
+honesta, porque em campo dois frames nunca são idênticos. O frame "sem placa" também
+tem texto de verdade ("RUA DAS FLORES / 1234 CENTRO"), e há
+`assertTrue(lidoNoLetreiro.isNotBlank())` exigindo isso: com um retângulo cinza liso
+o detector desiste em milissegundos, e o custo medido seria o de um caso que nunca
+acontece.
+
+**A conclusão que muda o desenho: o OCR não é o gargalo — a taxa da câmera é.**
+`CameraProfile.OCR` pede 7 fps, um frame a cada ~143 ms. O pior frame medido custa
+113 ms, então a inferência **acompanha praticamente todo frame entregue**, e o
+`conflate` da fachada quase não descarta. A janela de 5 s comporta ~35 frames, e o
+teto é a câmera, não o reconhecedor. Aumentar o FPS renderia mais tentativas; baixar
+o custo do OCR, não.
+
+**E ainda assim, não use isto como orçamento:** o emulador é arm64 em Apple Silicon,
+e as cenas são sintéticas e muito mais simples que uma rua. Padding de linha
+(`rowStride > width`) e rotação do sensor continuam sem medida — os dois entraram em
+`docs/VERIFICACOES_COM_HARDWARE.md`, e falham para o lado seguro: imagem cisalhada ou
+girada não lê placa nenhuma, e nunca lê a errada.
+
+### O portão único, e por que a validação se repete
+
+`PlacaValidator` já filtra dentro de `PlacaOcr` e dentro do roteador. A conferência
+foi repetida em `ClaryonIntentExecutor.consultarPlacaDe` de propósito: é o **único
+ponto por onde uma placa entra na consulta**, venha do reconhecedor de texto, do
+roteador, ou — quando a Etapa B ligar `PlacaDitada` — de um modelo de linguagem
+normalizando alfabeto fonético. A regra dura diz que o LLM só preenche campo de
+intenção já definida; o que a torna verificável é o formato ser conferido **depois**,
+num ponto que nenhuma dessas fontes contorna.
+
+### O que não coube, e por quê
+
+`FalhaOperacional` é enum fechado em `core-agent` e **não tem valor para câmera**.
+"Óculos dobrados. Abra as hastes." existe como `ErroDeStream.frase`, chega até
+`CopilotoDoAgente` e **morre no log**: o agente ouve "Consulta indisponível.". A
+distinção que sobreviveu é a que mais importa — `PLACA_NAO_LIDA` ("aproxime-se") só
+sai quando frames chegaram e nenhum tinha placa.

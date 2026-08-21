@@ -7,7 +7,9 @@ import com.claryon.agent.IntentExecutor
 import com.claryon.agent.ModoOperacao
 import com.claryon.agent.BuscaDePar
 import com.claryon.agent.Ocorrencia
+import com.claryon.agent.PlacaValidator
 import com.claryon.agent.Prioridade
+import com.claryon.agent.Restricao
 import com.claryon.common.Result
 import com.claryon.evidence.EvidenceVault
 import com.claryon.evidence.OccurrenceContext
@@ -84,9 +86,15 @@ data class Identidade(
  *     concorrentes ("gravar" repetido sob estresse) abririam duas ocorrências e
  *     a segunda sobregravaria a primeira — a auditoria já pegou essa classe de
  *     defeito dentro do cofre, e ela reaparece aqui se o executor não serializar.
- *  3. **Não inventa.** Onde a capacidade não existe (consulta a base oficial
- *     está fora do escopo), devolve [FalhaOperacional.CONSULTA_INDISPONIVEL] em
+ *  3. **Não inventa.** Onde a dependência não foi injetada, ou onde a base não
+ *     autoriza afirmar nada, devolve [FalhaOperacional.CONSULTA_INDISPONIVEL] em
  *     vez de um resultado plausível.
+ *
+ *     A frase aqui era *"consulta a base oficial está fora do escopo"*, e ela
+ *     deixou de valer em 21/08: a base existe (`core-net/BaseVeicular.kt`,
+ *     migração `0023`), e o que continua **não** existindo é convênio com Detran ou
+ *     Sinesp — por isso toda resposta carrega procedência, e só a oficial pode
+ *     virar *"sem restrição"*. Ver [consultarPlacaDe].
  */
 class ClaryonIntentExecutor(
     private val cofre: EvidenceVault,
@@ -152,7 +160,66 @@ class ClaryonIntentExecutor(
      * Recusar é audível; parecer capaz e não abrir é o agente falando para ninguém.
      */
     private val abrirTransmissao: suspend (String) -> Boolean = { false },
+    /**
+     * **Lê a placa pela câmera dos óculos**, para quando o agente não a ditou.
+     *
+     * Repare no tipo: nenhum parâmetro, e o retorno não é `String?`. Sem parâmetro
+     * porque não há o que escolher — quem sabe o perfil de câmera, a janela de 5 s e
+     * a frase de instrução é o lado do app, e o executor decide *o quê*, não *como*.
+     * Sem `String?` porque "não consegui ler" e "a câmera nem abriu" pedem coisas
+     * diferentes do agente, e um nulo as colapsaria.
+     *
+     * Padrão que recusa, como [trocarDeGrupo] e [abrirTransmissao]: um executor
+     * construído sem esta dependência **não pode parecer capaz de ver**.
+     */
+    private val lerPlacaPelaCamera: suspend () -> LeituraDePlaca =
+        { LeituraDePlaca.SemCamera },
+    /**
+     * **Consulta a base veicular.** Placa entra, situação sai — ou nada.
+     *
+     * Mesmo padrão de [consultarNorma]: o executor não nomeia `core-net` em lugar
+     * nenhum, e quem costura `ConsultaVeicular → ConsultaDePlaca` é a raiz de
+     * composição. A tradução é onde mora a regra que o produto não pode perder — que
+     * "não sei" nunca vire "está limpo" —, e ela fica num lugar só, auditável de
+     * olho, em vez de espalhada por ramos de `when` aqui dentro.
+     *
+     * O padrão `NaoRespondeu` não é adiamento: enquanto não houver base, a resposta
+     * honesta é que não deu. Um "sem restrição" inventado numa abordagem é o pior
+     * desfecho possível deste fluxo.
+     */
+    private val consultarPlaca: suspend (String) -> ConsultaDePlaca =
+        { ConsultaDePlaca.NaoRespondeu },
 ) : IntentExecutor {
+
+    /**
+     * O que a câmera conseguiu ler. Espelha `oculos.LeituraDePlaca` reduzido ao que
+     * muda a resposta — o executor não precisa saber quantos frames custou.
+     */
+    sealed interface LeituraDePlaca {
+        /** Sete caracteres. **Nunca** uma imagem: o que sai do fluxo é string. */
+        data class Lida(val placa: String) : LeituraDePlaca
+
+        /** A câmera funcionou e nenhum frame tinha placa legível. */
+        data object Ilegivel : LeituraDePlaca
+
+        /** A câmera não abriu, ou não entregou imagem. */
+        data object SemCamera : LeituraDePlaca
+    }
+
+    /**
+     * O que a base respondeu, reduzido ao que a fala precisa.
+     *
+     * **Dois estados, e não `Restricao?`.** Um nulo teria "desconhecido" como valor
+     * de repouso, e valor de repouso é exatamente por onde "não sei" vira "está
+     * limpo" — o defeito que `core-net/BaseVeicular.kt` inteiro existe para impedir.
+     */
+    sealed interface ConsultaDePlaca {
+        /** A base declarou a situação, e ela pode ser dita ao agente. */
+        data class Respondeu(val placa: String, val restricao: Restricao) : ConsultaDePlaca
+
+        /** Base ausente, base de demonstração sem restrição, transporte caído. */
+        data object NaoRespondeu : ConsultaDePlaca
+    }
 
     /**
      * O que o app devolve ao executor depois de tentar a troca.
@@ -205,12 +272,7 @@ class ClaryonIntentExecutor(
 
         is Intent.NarrarOcorrencia -> registrarOcorrencia(intent.texto)
 
-        is Intent.ConsultarPlaca ->
-            // Consulta a bases oficiais (Detran/Sinesp) está fora do escopo por
-            // dependência externa inviável no prazo. Sem base, a resposta honesta
-            // é dizer que não dá — jamais um "sem restrição" inventado, que num
-            // contexto de abordagem seria uma informação de segurança falsa.
-            ActionOutcome.Falhou(FalhaOperacional.CONSULTA_INDISPONIVEL)
+        is Intent.ConsultarPlaca -> consultarPlacaDe(intent.placa)
 
         // C2 — consulta de posição. Devolve distância, rumo e estado; a coordenada
         // bruta do par **nunca** chega ao aparelho de outro agente.
@@ -298,6 +360,58 @@ class ClaryonIntentExecutor(
         return when (despachante.despachar(msg)) {
             is Despacho.Enviada, Despacho.Enfileirada ->
                 ActionOutcome.OcorrenciaRegistrada(identidade.agentId + "@" + agora())
+        }
+    }
+
+    // ── C2: consulta de placa ─────────────────────────────────────────────────
+
+    /**
+     * **Placa ditada ou lida pela câmera — e um único portão de formato para as duas.**
+     *
+     * @param ditada o que o roteador extraiu da fala, ou `null` quando o agente
+     *   disse só *"verifica a placa desse carro"*. Nulo **não** é falha: é o pedido
+     *   de captura, e era o ramo que não existia — `withCamera` e `PlacaOcr` tinham
+     *   zero chamadores em `src/main`.
+     *
+     * ## Por que a validação se repete aqui
+     *
+     * `PlacaOcr` já filtra por `PlacaValidator`, e o roteador também. A conferência
+     * neste ponto é de propósito, e não é redundância defensiva: este é o **único
+     * lugar por onde uma placa entra na consulta**, venha do reconhecedor de texto,
+     * do roteador determinístico ou — quando a Etapa B ligar `PlacaDitada` — de um
+     * modelo de linguagem normalizando alfabeto fonético. A regra dura do
+     * `CLAUDE.md` §2 diz que o LLM só preenche campo de intenção já definida; o que
+     * torna essa regra verificável é o formato ser conferido **depois**, num ponto
+     * que nenhuma dessas fontes pode contornar.
+     *
+     * Saída que não case com Mercosul (`LLLNLNN`) ou com o padrão antigo
+     * (`LLLNNNN`) é **erro de leitura, não consulta**. É o que impede o pior modo de
+     * falha deste fluxo: consultar — e liberar — um veículo que o OCR fabricou.
+     */
+    private suspend fun consultarPlacaDe(ditada: String?): ActionOutcome {
+        val bruta = ditada ?: when (val leitura = lerPlacaPelaCamera()) {
+            is LeituraDePlaca.Lida -> leitura.placa
+            // Apontou e não deu. "Placa ilegível." manda o agente aproximar-se,
+            // que é a recuperação certa para este caso e só para este.
+            LeituraDePlaca.Ilegivel ->
+                return ActionOutcome.Falhou(FalhaOperacional.PLACA_NAO_LIDA)
+            // A câmera não abriu. Dizer "placa ilegível" aqui mandaria o agente
+            // aproximar-se de um veículo que o aparelho nunca viu.
+            LeituraDePlaca.SemCamera ->
+                return ActionOutcome.Falhou(FalhaOperacional.CONSULTA_INDISPONIVEL)
+        }
+
+        val placa = PlacaValidator.normalizar(bruta)
+        if (!PlacaValidator.isValida(placa)) {
+            return ActionOutcome.Falhou(FalhaOperacional.PLACA_NAO_LIDA)
+        }
+
+        return when (val r = consultarPlaca(placa)) {
+            is ConsultaDePlaca.Respondeu -> ActionOutcome.PlacaConsultada(r.placa, r.restricao)
+            // Sem base, com base de demonstração que não autoriza, ou com o
+            // transporte caído: a resposta é que não deu. Jamais "sem restrição".
+            ConsultaDePlaca.NaoRespondeu ->
+                ActionOutcome.Falhou(FalhaOperacional.CONSULTA_INDISPONIVEL)
         }
     }
 

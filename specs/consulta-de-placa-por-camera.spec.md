@@ -30,12 +30,12 @@ ou com capacidade inexistente, e é sobre esses quatro que este documento existe
 | transcrição local | ✅ whisper.cpp, **WER 3,4%** |
 | roteamento determinístico | ✅ `Intent.ConsultarPlaca(placa: String?)` **já existe** |
 | earcon de recebido | ✅ fila de saída com prioridade |
-| OCR no aparelho | ⚠️ `PlacaOcr` existe; ML Kit já está no APK; **zero chamadores** |
+| OCR no aparelho | ✅ **ligado em 21/08** — `CapturaDePlaca` → `OcrDeFrame` → `PlacaOcr`. Antes: existia, ML Kit no APK, **zero chamadores** |
 | resultado como earcon | ✅ três earcons distintos por tipo de restrição |
 | **"Hey Meta" como gatilho** | ❌ **não é nosso** |
 | **IA interpretando o pedido** | ❌ colide com regra dura, e foi **medido** |
-| **base de placas** | ❌ **não existe** |
-| **resultado falado** | ❌ decisão contrária, por segurança do agente |
+| **base de placas** | ✅ **existe desde 21/08** — `core-net/BaseVeicular.kt` + migração `0023`, com procedência em toda resposta. O que não existe é **convênio** com Detran/Sinesp |
+| **resultado falado** | ⚠️ **a decisão mudou em 21/08**: earcon **e** fala curta (`SinalizarEFalar`), por decisão humana. Ver `Utterance.kt`; o vazamento do *open-ear* virou item medível da Fase 5 |
 
 ---
 
@@ -158,17 +158,38 @@ o agente libera um veículo roubado porque o aparelho disse que estava limpo.
 4  → whisper transcreve no aparelho                [existe]
 5  → DeterministicIntentRouter                     [existe]
       → Intent.ConsultarPlaca(placa = null)
-6  → placa nula ⇒ subfluxo de captura              [NOVO]
-7  → fala "Aponte para a placa." (3 palavras)      [cabe no teto de 7]
-8  → GlassesFacade.withCamera                      [existe, ZERO chamadores]
-9  → N frames em ≤5 s, descartados após o OCR      [NOVO]
-10 → PlacaOcr (ML Kit, já no APK)                  [existe, ZERO chamadores]
-11 → valida formato Mercosul/antigo                [NOVO — é o contra-teste]
-12 → consulta a base                               [NOVO — base não existe]
+6  → placa nula ⇒ subfluxo de captura              [FEITO 21/08 — CapturaDePlaca]
+7  → fala "Aponte para a placa." (4 palavras)      [FEITO — teste de laconicidade]
+8  → GlassesFacade.withCamera                      [LIGADO 21/08 — tinha 0 chamadores]
+9  → N frames em ≤5 s, descartados após o OCR      [FEITO — FramesEfemerosTest]
+10 → PlacaOcr (ML Kit, já no APK)                  [LIGADO 21/08 — tinha 0 chamadores]
+11 → valida formato Mercosul/antigo                [FEITO — no executor, portão único]
+12 → consulta a base                               [LIGADO — ConsultaNaBaseVeicular]
 13 → ActionOutcome.PlacaConsultada(placa, restricao)
-14 → EARCON codificado, não fala                   [existe]
-15 → detalhe na tela; voz só se o agente pedir     [NOVO]
+14 → earcon codificado + fala curta                [existe; a decisão mudou em 21/08]
+15 → detalhe na tela                               [ABERTO — só `Detalhar` por voz]
 ```
+
+### O que 21/08 mediu, e que este documento não previa
+
+- **O plano Y basta, e a croma não importa.** `VideoFrame` não diz qual layout o
+  `MediaCodec` devolveu, e adivinhar seria errar em silêncio. A conversão lê **só o
+  plano Y** — idêntico em I420, YV12, NV12 e NV21 —, o que torna o passo 10
+  independente de uma informação que o SDK não expõe.
+- **O OCR não é o gargalo — a taxa da câmera é.** Medido em quatro processos
+  separados (504×896, emulador arm64, conteúdo distinto a cada repetição): frame sem
+  placa ~9 ms, frame com placa 31–83 ms de mediana, pior caso **113 ms**. O perfil de
+  OCR pede 7 fps, ou seja um frame a cada ~143 ms: a inferência acompanha
+  praticamente tudo o que a câmera entrega. Leitura completa de uma placa nítida:
+  **2 frames, 67–180 ms**.
+- **O passo 9 não cabia no teto do ciclo de voz.** `CopilotoDoAgente` envolvia
+  `runOnce()` em 8 s, e esse prazo cobre a fala + o whisper + **a ação**. Uma frase
+  de 2,5 s mais 5 s de captura estoura, e o agente ouviria "Não entendi, repita."
+  depois de apontar corretamente para a placa. O teto subiu para 14 s.
+- **Aceite ⇒ aceite: o caminho de falha da captura não cabe nos 4 s da Fase 4.**
+  Quando a placa **não** é encontrada, gasta-se a janela inteira: 945 ms de ciclo +
+  5 000 ms de captura ≈ 5,9 s. Os dois critérios são inconsistentes por construção,
+  e é decisão humana qual deles cede.
 
 ### O que precisa ser construído antes do passo 8
 

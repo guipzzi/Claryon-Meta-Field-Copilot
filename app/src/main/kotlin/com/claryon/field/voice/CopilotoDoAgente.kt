@@ -28,8 +28,14 @@ import com.claryon.field.audio.SaidaUnica
 import com.claryon.field.auth.SessaoDoAgente
 import com.claryon.field.local.ProvedorDeLocal
 import com.claryon.field.permissoes.PermissoesEssenciais
+import com.claryon.field.oculos.LeituraDePlaca
+import com.claryon.field.oculos.PlacaPelaCamera
 import com.claryon.field.radio.CanaisDoAgente
 import com.claryon.field.service.CopilotService
+import com.claryon.field.veicular.ConsultaNaBaseVeicular
+import com.claryon.net.BaseVeicular
+import com.claryon.net.BaseVeicularIndisponivel
+import com.claryon.net.BaseVeicularSupabase
 import com.claryon.field.voice.EscutaDoAgente
 import com.claryon.field.voice.Modelos
 import com.claryon.field.voice.SileroVoiceActivityDetector
@@ -112,6 +118,26 @@ class CerebroDoCopiloto(private val app: Context) {
         // Lê o cache já validado; quem renova é `SessaoDoAgente.tokenValido`.
         tokenDeSessao = { SessaoDoAgente.tokenCorrente },
     )
+
+    /**
+     * A base veicular do turno.
+     *
+     * `BaseVeicularIndisponivel` sem rede configurada, e **não** um cliente que
+     * falharia em toda chamada: os dois responderiam "não deu", mas só o objeto
+     * honesto diz isso sem uma requisição HTTP no caminho crítico de 5 s.
+     */
+    private val baseVeicular: BaseVeicular by lazy {
+        if (redeConfigurada) {
+            BaseVeicularSupabase(
+                config = SessaoDoAgente.config,
+                tokenDeSessao = { SessaoDoAgente.tokenValido(app) },
+            )
+        } else {
+            BaseVeicularIndisponivel
+        }
+    }
+
+    private val consultaVeicular by lazy { ConsultaNaBaseVeicular(baseVeicular) }
 
     val router = DeterministicIntentRouter()
 
@@ -220,6 +246,35 @@ class CerebroDoCopiloto(private val app: Context) {
         // agente ouve "Consulta indisponível." em vez de "Alfa Dois não
         // localizado", que afirmaria que o companheiro sumiu.
         localizarPar = { indicativo -> localizar(indicativo) },
+
+        // **A câmera ligada.** Sem esta linha `withCamera` e `PlacaOcr.lerPlaca`
+        // continuariam com zero chamadores em `src/main` — declaração,
+        // implementação e KDoc, sem nenhuma chamada vinda do app. É o padrão que o
+        // §6 do CLAUDE.md conta seis vezes, e a diferença entre escrito e
+        // construído. Ver `specs/consulta-de-placa-por-camera.spec.md`, passos 6–11.
+        //
+        // A instrução falada sai por `saida`, a mesma fila de tudo o mais: quem
+        // sabe FALAR é a saída única, quem sabe LER é `PlacaPelaCamera`, e nenhum
+        // dos dois precisa conhecer o outro.
+        lerPlacaPelaCamera = {
+            when (val leitura = PlacaPelaCamera.ler { u -> saida.emitir(u) }) {
+                is LeituraDePlaca.Lida ->
+                    ClaryonIntentExecutor.LeituraDePlaca.Lida(leitura.placa)
+                is LeituraDePlaca.Ilegivel ->
+                    ClaryonIntentExecutor.LeituraDePlaca.Ilegivel
+                is LeituraDePlaca.SemCamera -> {
+                    // A causa tipada do stream ("Óculos dobrados", "Libere a câmera
+                    // no Meta AI") existe e **não cabe na fala**: `FalhaOperacional`
+                    // é enum fechado em `core-agent` e não tem valor para câmera. O
+                    // agente ouve "Consulta indisponível."; o log tem o porquê.
+                    Log.w(TAG, "captura sem câmera: ${leitura.codigo} — ${leitura.frase}")
+                    ClaryonIntentExecutor.LeituraDePlaca.SemCamera
+                }
+            }
+        },
+
+        // A base, com a régua de "não sei nunca vira está limpo" num lugar só.
+        consultarPlaca = { placa -> consultaVeicular.consultar(placa) },
         )
     }
 
@@ -443,7 +498,7 @@ class CerebroDoCopiloto(private val app: Context) {
             // RECORD_AUDIO negada). CancellationException tem de propagar —
             // engoli-la faria o corpo seguir depois do escopo morto.
             val resultado = try {
-                Resultado.Ok(withTimeoutOrNull(8_000) { cycle.runOnce() })
+                Resultado.Ok(withTimeoutOrNull(TETO_DO_CICLO_MS) { cycle.runOnce() })
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -475,7 +530,7 @@ class CerebroDoCopiloto(private val app: Context) {
                     // Timeout sem fala não é erro, mas também não pode ser mudo:
                     // o agente que apertou e falou precisa saber que não pegou.
                     saida.emitir(utteranceFor(ActionOutcome.NaoEntendi))
-                    "ciclo: sem fala detectada (8 s)"
+                    "ciclo: sem fala detectada (${TETO_DO_CICLO_MS / 1000} s)"
                 }
             }
             } finally {
@@ -596,5 +651,28 @@ class CerebroDoCopiloto(private val app: Context) {
 
     private companion object {
         const val TAG = "ClaryonField"
+
+        /**
+         * **Teto do ciclo inteiro — e ele subiu de 8 s por medição, não por gosto.**
+         *
+         * O prazo cobre tudo: a janela do VAD (que dura o tempo da fala do agente),
+         * o whisper, o roteador e **a ação**. Enquanto toda ação era despacho ou
+         * consulta de rede, 8 s sobravam — o ciclo em regime custa 945 ms depois que
+         * o VAD fecha.
+         *
+         * O caminho de câmera muda a conta, e a mudança é aritmética, não opinião: o
+         * aceite de `specs/consulta-de-placa-por-camera.spec.md` dá **5 s** à coleta
+         * de frames. Uma frase de 2,5 s + ~1 s de transcrição + 5 s de captura passa
+         * de 8. O ciclo seria cancelado exatamente quando a captura estava
+         * funcionando, e o agente ouviria "Não entendi, repita." depois de apontar
+         * para a placa — o pior desfecho possível, porque descreve o defeito ao
+         * contrário e manda o agente repetir o que já tinha feito certo.
+         *
+         * 14 s = 5 s de captura + a folga que os 8 s davam. O custo é que um ciclo
+         * travado por outro motivo demora mais para desistir; o benefício é que a
+         * única capacidade com prazo longo deixa de ser abortada por um teto que foi
+         * dimensionado antes de ela existir.
+         */
+        const val TETO_DO_CICLO_MS = 14_000L
     }
 }

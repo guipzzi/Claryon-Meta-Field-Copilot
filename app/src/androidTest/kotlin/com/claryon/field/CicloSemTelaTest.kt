@@ -25,10 +25,16 @@ import org.junit.runner.RunWith
  *
  * ### O que ele afirma, e por que a afirmação é honesta
  *
- * O emulador não tem microfone com voz, então o ciclo vai até o teto de 8 s e
- * termina em "sem fala detectada". **É esse o ponto**: um ciclo que roda até o fim e
- * relata a ausência de fala é um ciclo VIVO. Se o cérebro dependesse de tela, ele
- * não chegaria nem ao timeout — pararia antes, sem status nenhum.
+ * O emulador não tem microfone com voz, então o ciclo vai até o **teto de
+ * `TETO_DO_CICLO_MS`** e termina em "sem fala detectada". **É esse o ponto**: um
+ * ciclo que roda até o fim e relata a ausência de fala é um ciclo VIVO. Se o cérebro
+ * dependesse de tela, ele não chegaria nem ao timeout — pararia antes, sem status
+ * nenhum.
+ *
+ * O teto era 8 s e virou 14 s em 21/08, quando a consulta de placa passou a abrir a
+ * câmera: o prazo cobre a fala, o whisper e **a ação**, e a captura tem 5 s de
+ * janela por aceite. O número aparece aqui só como espera — o teste não o afirma, e
+ * de propósito: quem afirma o teto é quem o define.
  *
  * O teste NÃO afirma que a transcrição funciona; isso é do `CicloDeVozNoAparelhoTest`,
  * que injeta áudio. Aqui a pergunta é só uma: existe cérebro sem tela?
@@ -58,7 +64,9 @@ class CicloSemTelaTest {
         // E depois solta: o `finally` do ciclo tem de destravar mesmo nos caminhos
         // de recusa. Já houve regressão em que o botão ficava preso em "OUVINDO…"
         // para sempre no primeiro caminho de falha.
-        val soltou = withTimeoutOrNull(20_000) {
+        // Margem sobre o teto do ciclo (14 s), e não um número solto: com 20 s
+        // sobravam 6 s, e um emulador carregado por outro teste comeria isso.
+        val soltou = withTimeoutOrNull(25_000) {
             cerebro.ocupado.first { !it }
         }
         assertNotNull("o ciclo não destravou — o agente ficaria preso em OUVINDO", soltou)
