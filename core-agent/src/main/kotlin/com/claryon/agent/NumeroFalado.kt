@@ -41,6 +41,12 @@ internal object NumeroFalado {
     private val DIGITO: Map<String, Char> = mapOf(
         "zero" to '0',
         "um" to '1', "uma" to '1', "hum" to '1',
+        // **`uno` é o 1 obrigatório do Exército e da aviação.** C 24-9 §2-3:
+        // "Os algarismos fonéticos utilizados na exploração radiofônica são
+        // específicos de nosso País e seu uso é obrigatório para a Força Terrestre,
+        // como também para a Aviação Civil e Militar". Idem MCA 100-16 §2.6 do
+        // DECEA, e o material da PMERJ/CCI.
+        "uno" to '1',
         "dois" to '2', "duas" to '2',
         "tres" to '3',
         "quatro" to '4',
@@ -51,7 +57,71 @@ internal object NumeroFalado {
         "sete" to '7',
         "oito" to '8',
         "nove" to '9',
-    )
+    ) + ORDINAL
+
+    /**
+     * **O sistema ORDINAL — e ele não é curiosidade, é o que a PM manda usar.**
+     *
+     * A pesquisa de 21/08 achou **dois sistemas de algarismo em uso oficial no
+     * Brasil, contraditórios entre si**, e este é o que aparece em ato normativo de
+     * polícia. A Portaria n.º 071-CG/15 da PM da Bahia traz, no corpo do artigo, a
+     * ditada de uma sequência alfanumérica exatamente como um policial a fala:
+     *
+     * > *"JNO – 5448 - Juliet; November; Oscar. Quinto; Quarto Dobrado; Oitavo."*
+     *
+     * Ou seja: `5448` é dito **"quinto, quarto dobrado, oitavo"**. Um extrator que
+     * só entendesse "cinco quatro quatro oito" perderia a ditada de um estado
+     * inteiro — e perderia calado, porque a corrida simplesmente não se formaria.
+     *
+     * Mesmo sistema em CBMSC (DtzPOP 12), SAMU Campo Grande (IT/SAMU 12), Escola de
+     * Governo do DF, PM-PI e no manual do MJ/SENASP.
+     *
+     * ### O conflito é real, e está na fala dos dois lados
+     *
+     * A PMERJ **proíbe** este sistema — *"empregando a designação ordinal de cada
+     * algarismo para indicá-los como 'primeiro', 'segundo', 'terceiro'… ficando em
+     * desacordo com as normas previstas para a Corporação"* — e manda usar o
+     * cardinal com `uno` e `meia`. Os dois estão aqui porque o produto não escolhe a
+     * corporação do agente.
+     *
+     * ### `negativo` = 0, e é o pior nome possível
+     *
+     * A própria PMBA usa "negativo" como palavra de serviço ("não") no Anexo I e
+     * como o algarismo zero no Anexo II. A ambiguidade é da norma, não desta tabela.
+     * Aqui ela é resolvida do único jeito honesto: "negativo" só vira `0` se a
+     * corrida inteira fechar em sete caracteres com forma de placa — senão não vira
+     * nada.
+     */
+    private val ORDINAL: Map<String, Char>
+        get() = mapOf(
+            "negativo" to '0', "nulo" to '0',
+            "primeiro" to '1', "segundo" to '2', "terceiro" to '3', "quarto" to '4',
+            "quinto" to '5', "sexto" to '6', "setimo" to '7', "oitavo" to '8',
+            "nono" to '9',
+        )
+
+    /**
+     * Repetidores. **`dobrado` vem DEPOIS do algarismo; `duplo`/`triplo`, ANTES.**
+     *
+     * Não é escolha de projeto — é o que as duas normas fazem, e elas discordam:
+     *
+     * - PMBA: *"5448 - Quinto; **Quarto Dobrado**; Oitavo"* → o `4` dobra para `44`.
+     * - PMERJ: *"100 = **Uno DUPLO zero**"*, *"33348 = **TRIPLO três** quatro
+     *   oito"*, *"2222 = Dois **TRIPLO dois**"* → o multiplicador precede.
+     *
+     * Suportar só um dos dois corromperia a placa em silêncio, que é o modo de falha
+     * que este arquivo inteiro existe para evitar.
+     */
+    private val REPETIDOR_ANTES: Map<String, Int> =
+        mapOf("duplo" to 2, "dupla" to 2, "triplo" to 3, "tripla" to 3, "quadruplo" to 4)
+
+    private const val REPETIDOR_DEPOIS = "dobrado"
+
+    /** Multiplicador que precede o algarismo ("duplo zero"), ou `null`. */
+    fun repetidorAntes(palavra: String): Int? = REPETIDOR_ANTES[palavra]
+
+    /** `true` para "dobrado", que repete o algarismo JÁ dito. */
+    fun repeteAnterior(palavra: String): Boolean = palavra == REPETIDOR_DEPOIS
 
     /** Unidades dentro de uma quantidade (aqui "um" vale 1, não o caractere '1'). */
     private val UNIDADE: Map<String, Int> = mapOf(
@@ -85,8 +155,15 @@ internal object NumeroFalado {
     /** `true` se a palavra vale um único dígito. */
     fun digitoSolto(palavra: String): Char? = DIGITO[palavra]
 
-    /** `true` se a palavra só pode ser quantidade — abre um grupo. */
-    fun abreGrupo(palavra: String): Boolean = palavra == MIL || palavra in ESCALA
+    /**
+     * `true` se a palavra **não pode ser um dígito** — e por isso abre um grupo.
+     *
+     * O critério é esse e nenhum outro: "dez" a "dezenove" entram junto com as
+     * dezenas e centenas porque valem dois caracteres, e ninguém dita `19` como um
+     * caractere só. "nove" não entra, porque vale exatamente um.
+     */
+    fun abreGrupo(palavra: String): Boolean =
+        palavra == MIL || palavra in ESCALA || (UNIDADE[palavra] ?: 0) >= 10
 
     /** Palavra que pode continuar um grupo já aberto. */
     private fun continuaGrupo(palavra: String): Boolean =
