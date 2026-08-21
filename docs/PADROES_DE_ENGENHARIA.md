@@ -81,6 +81,7 @@ core-glasses/   DAT: registro, sessão, câmera, MDK  ← único ponto que toca 
 core-audio/     Roteamento HFP, AudioRecord, AudioTrack
 core-voice/     WakeWord, VAD, STT, TTS (interfaces + impls)
 core-agent/     IntentRouter determinístico, políticas de ação
+core-knowledge/ Trecho de norma + limiar de recusa (RAG extrativo)  ← contrato; sem chamador
 core-sound/     Earcons, fila de prioridade, protocolo de laconicidade
 core-evidence/  Cofre cifrado, hash chain, cadeia de custódia
 core-sync/      Fila offline durável, Supabase, WorkManager

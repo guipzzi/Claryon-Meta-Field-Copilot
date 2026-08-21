@@ -76,6 +76,7 @@ claryon-field/
 ├── app/            UI Compose (onboarding, diagnóstico, demo) + orquestração
 ├── core-common/    Result, Logger, FeatureFlags, Telemetry        [Kotlin/JVM]
 ├── core-agent/     Modelo de intenções + IntentRouter (determinístico) [JVM]
+├── core-knowledge/ Trecho de norma + limiar de recusa (RAG extrativo)  [JVM]
 ├── core-glasses/   Fachada única sobre o DAT (registro, sessão, câmera) [Android]
 ├── core-audio/     Roteamento HFP/SCO, AudioRecord/AudioTrack      [Android]
 ├── core-voice/     WakeWord · VAD · STT · TTS (interfaces)         [Android]
