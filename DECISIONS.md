@@ -1698,3 +1698,88 @@ funciona para acomodar o que ainda não existe.
 militares e de armamento de forma ampla, e este é um produto de segurança pública —
 é leitura jurídica e foi adiada por decisão humana em 20/08. A Etapa A (RAG
 extrativo, sem LLM) não depende disso e segue na frente.
+
+---
+
+## 2026-08-21 — A colisão do ggml se resolve no NOSSO lado, e o APK encolhe
+
+Isto **reverte** a decisão de 20/08 acima, que escolhia renomear os alvos do
+llama.cpp e classificava `BUILD_SHARED_LIBS=OFF` como "plano B, a segunda melhor,
+custa tamanho de APK". Duas coisas mudaram, e as duas por medição.
+
+### A primeira: a Regra Zero foi cumprida, e a pergunta estava errada
+
+O roadmap listava "coordenadas Maven do motor de LLM **não confirmadas**" como
+bloqueio. Confirmado hoje no repositório oficial `ggml-org/llama.cpp`: **não há
+artefato Maven a confirmar.** O caminho Android oficial é build de FONTE —
+`examples/llama.android/lib/src/main/cpp/CMakeLists.txt:34` faz
+`add_subdirectory(${LLAMA_SRC} build-llama)`, e o módulo declara
+`externalNativeBuild { cmake { path("src/main/cpp/CMakeLists.txt") } }`. É a mesma
+forma que o whisper.cpp já tem aqui.
+
+Duas correções de memória aconteceram no caminho, e ambas teriam virado código
+errado: o módulo chama-se `lib`, não `llama`, e o caminho que escrevi de cabeça deu
+404. Foi a Regra Zero funcionando.
+
+### A segunda: onde a colisão realmente nasce
+
+`whisper/ggml/CMakeLists.txt:74` — fora de Emscripten e MinGW,
+`BUILD_SHARED_LIBS_DEFAULT` é ON, e a `option()` da linha 85 só herda esse default.
+**Ninguém escolheu publicar três `.so` de ggml; é o padrão do CMake fora do
+Windows.** E o exemplo oficial do llama.cpp passa `-DBUILD_SHARED_LIBS=ON`
+(`lib/build.gradle.kts:27`) mais `-DGGML_BACKEND_DL=ON` (`:33`), então ele produz
+`libggml.so` e `libggml-base.so` com os mesmos nomes, num `lib/arm64-v8a/` que é
+diretório plano.
+
+Desligar do nosso lado corta a colisão na raiz em vez de administrá-la: o whisper
+deixa de exportar `.so` de ggml, e o llama.cpp fica livre para usar **a configuração
+oficial dele**, que é a suportada. Renomear alvo de terceiro seria remendo em
+CMake vendorizado, pago a cada subida de versão.
+
+### A armadilha de política que quase produziu falso sucesso
+
+`CMP0077` — o que faz `option()` respeitar variável normal já existente — entrou no
+CMake 3.13. Os escopos aqui declaram `3.10` (nosso), `3.5` (whisper) e `3.14...3.28`
+(ggml). Sob **OLD**, `option()` APAGA a variável normal e cria a de cache: um
+`set(BUILD_SHARED_LIBS OFF)` no nosso CMakeLists seria descartado em silêncio, o
+build continuaria produzindo os três `.so`, e o relatório diria "resolvido".
+
+Por isso a opção entra como argumento do Gradle, que vira entrada de CACHE e é
+respeitada sob as duas políticas — que é também como o exemplo oficial do llama.cpp
+faz.
+
+### O custo, medido em vez de estimado
+
+A decisão de ontem supunha que estático "custa tamanho de APK". Medido:
+
+```
+                        antes        depois        Δ
+arm64-v8a    ggml+whisper  3 355 648   3 383 984   +28 336   (+0,8%)
+x86_64       ggml+whisper  2 918 424   2 006 000  −912 424   (−31%)
+total                      6 274 072   5 389 984  −884 088   (−14%)
+```
+
+**Encolheu 884 KB.** A causa é `--gc-sections` + `-flto`: cada `libwhisper` puxa só
+o ggml que de fato chama, enquanto o `.so` compartilhado tinha de exportar tudo. Em
+arm64 a economia é quase anulada pela duplicação nos dois alvos de whisper; em
+x86_64, que só tem um alvo, ela aparece inteira.
+
+### A prova no artefato e no aparelho
+
+`libwhisper.so` não-stripado: **456 símbolos `ggml_*` definidos**, `ggml_init`
+presente, e **zero `DT_NEEDED` em libggml** (`llvm-readelf -d` lista apenas liblog,
+libandroid, libdl, libm, libomp, libc). `unzip -l` nos dois APKs: **zero libggml**.
+
+E funciona: `DetectorDeAtivacaoTest` + `VerificadorDoGatilhoTest`, 6 testes, 18,4 s,
+com `whisper_full` rodando de verdade sobre `ggml-small-q5_1.bin` no logcat. Isso
+importa porque `DetectorDeAtivacao.kt:219` faz `System.loadLibrary("whisper")`
+enquanto `LibWhisper.kt:230` carrega `whisper_v8fp16_va`: **os dois `.so` convivem
+no mesmo processo**, e agora cada um leva a própria cópia do ggml. Era o risco real
+da mudança, e ele foi medido, não presumido.
+
+### Achado de passagem
+
+`WhisperCppSttTest` procura `models/ggml-tiny.bin`; o projeto embarca
+`ggml-small-q5_1.bin`. Os dois testes da classe estão **permanentemente pulados** e
+reportam verde — a mesma família de defeito que o §6 do CLAUDE.md persegue. Fica
+registrado; não foi consertado aqui para não misturar com a mudança de build.
