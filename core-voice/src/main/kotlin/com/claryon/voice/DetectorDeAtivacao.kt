@@ -162,8 +162,23 @@ class DetectorDeAtivacao(
         return disparou
     }
 
+    /**
+     * **A janela desenrolada, alocada UMA vez.**
+     *
+     * Antes era um `FloatArray(AMOSTRAS)` novo a cada avaliação. Medido no aparelho
+     * em 21/08: **781 KB/s de lixo** — 16 000 floats × 4 bytes × 12,5 avaliações/s
+     * —, gerados o turno inteiro, num aparelho que também roda mapa, rádio e cofre.
+     *
+     * O buffer é seguro de reusar porque `avaliar()` roda numa thread só (o laço de
+     * captura) e o conteúdo é sobrescrito por completo antes de ser lido: as
+     * `AMOSTRAS` posições são preenchidas no `for` abaixo, sem depender do que havia
+     * antes. Se um dia a avaliação sair para outra thread, isto **tem** de voltar a
+     * ser local — e é por isso que o motivo está escrito aqui e não só no commit.
+     */
+    private val janelaDesenrolada = FloatArray(AMOSTRAS)
+
     private fun avaliar(): Boolean {
-        val janela = FloatArray(AMOSTRAS)
+        val janela = janelaDesenrolada
         // O anel é circular; o extrator quer a ordem cronológica.
         for (i in 0 until AMOSTRAS) janela[i] = anel[(desde + i) % AMOSTRAS]
         if (nativeEmbutir(ptr, janela, saida) == 0) return false

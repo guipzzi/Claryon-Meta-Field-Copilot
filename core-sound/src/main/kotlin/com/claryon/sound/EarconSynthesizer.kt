@@ -15,7 +15,40 @@ object EarconSynthesizer {
 
     const val SAMPLE_RATE_HZ = 16_000
 
-    fun render(earcon: Earcon): ShortArray = when (earcon) {
+    /**
+     * **Cada earcon é sintetizado UMA vez por processo.**
+     *
+     * Medido no aparelho em 21/08: [render] estava sendo chamado a cada reprodução,
+     * na Main, e o custo por earcon ia de 220 µs (`CONSULTA_SEM_RESTRICAO`) a
+     * 3494 µs (`CONSULTA_FURTO_ROUBO`), somando **14,5 ms** para os oito.
+     *
+     * São **tons estáticos**: a mesma senóide, com a mesma frequência e a mesma
+     * duração, recalculada amostra por amostra toda vez que o agente ouve um bipe.
+     * `OUVI_VOCE` é o do ciclo de voz — o som mais frequente do produto — e o
+     * `GRAVANDO` são 32 000 amostras de tom contínuo.
+     *
+     * O custo total é modesto, e é justamente por isso que passou despercebido: 3 ms
+     * na Main não fazem ANR, só entram na conta de tudo o mais que disputa aquela
+     * thread. Guardar é trivial e o cache é seguro por construção — o mapa é
+     * preenchido na primeira leitura de cada chave e o `ShortArray` nunca é mutado
+     * depois, porque quem consome copia para o `AudioTrack`.
+     *
+     * **Memória:** os oito somam ~61 000 amostras = **122 KB**. Uma vez, para
+     * sempre, contra 14,5 ms de CPU por rodada de reprodução.
+     */
+    private val cache = HashMap<Earcon, ShortArray>(Earcon.entries.size)
+
+    /**
+     * O PCM do [earcon], sintetizado na primeira chamada e guardado depois.
+     *
+     * `@Synchronized` porque a fila de saída e o ciclo de voz podem pedir earcons de
+     * threads diferentes, e duas sínteses simultâneas da mesma chave desperdiçariam
+     * exatamente o trabalho que este cache existe para eliminar.
+     */
+    @Synchronized
+    fun render(earcon: Earcon): ShortArray = cache.getOrPut(earcon) { sintetizar(earcon) }
+
+    private fun sintetizar(earcon: Earcon): ShortArray = when (earcon) {
         Earcon.OUVI_VOCE -> sweep(600.0, 1000.0, 180)              // bipe curto ascendente
         Earcon.ACAO_EXECUTADA -> beeps(880.0, 2, 90, 60)          // duplo bipe curto
         Earcon.FALHA -> sweep(520.0, 300.0, 220)                  // bipe grave descendente

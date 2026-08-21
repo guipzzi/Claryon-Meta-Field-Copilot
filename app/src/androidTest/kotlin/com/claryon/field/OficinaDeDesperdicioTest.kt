@@ -287,8 +287,12 @@ class OficinaDeDesperdicioTest {
             |  parede total ................ %.0f ms para %.0f s de áudio
             |  CPU da thread ............... %.0f ms  →  %.1f%% de UM núcleo
             |  extrapolado ................. %.0f s de CPU por HORA de escuta
-            |  lixo do desenrolar do anel .. %.0f KB/s (FloatArray(%d) por avaliação,
-            |                                %.1f avaliações/s) — analítico
+            |  lixo do desenrolar do anel .. 0 KB/s — CONSERTADO em 21/08.
+            |    O buffer da janela virou campo (`janelaDesenrolada`), alocado uma vez.
+            |    Antes: %.0f KB/s analíticos — FloatArray(%d) por avaliação, %.1f/s.
+            |    Este número era CALCULADO da forma do código, não medido: quando a
+            |    alocação saiu, a linha continuou imprimindo o valor antigo. Fica como
+            |    registro do que foi removido, e não como medida do que existe.
             |═════════════════════════════════════════════════════
             """.trimMargin().format(
                 segundosDeAudio,
@@ -336,7 +340,12 @@ class OficinaDeDesperdicioTest {
             |
             |════════ ÍNDICE LEXICAL (Etapa A) ════════
             |  trechos indexados ........... ${ConsultaDeNorma.trechosIndexados}
-            |  1ª consulta (com montagem) .. ${primeira / 1000.0} ms
+            |  1ª consulta desta bancada ... ${primeira / 1000.0} ms
+            |    ⚠️ NÃO é mais "com montagem": desde 21/08 `ClaryonApp.onCreate` chama
+            |    `ConsultaDeNorma.aquecerNoBoot`, e o índice já está quente quando esta
+            |    bancada roda. Para ver o custo real da montagem, é preciso um processo
+            |    sem o aquecimento. Medido antes do conserto: 4855 ms, contra 16,4 ms
+            |    das consultas seguintes — razão de 296×.
             |  consultas 2..201 ............ p50 ${us(seguintes.mediana() * 1000)}  p90 ${us(seguintes.p90() * 1000)}
             |  razão 1ª / p50 .............. ${"%.0f".format(primeira.toDouble() / seguintes.mediana().coerceAtLeast(1))}×
             |═════════════════════════════════════════

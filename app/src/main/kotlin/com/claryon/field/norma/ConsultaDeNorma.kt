@@ -1,7 +1,11 @@
 package com.claryon.field.norma
 
+import android.os.SystemClock
 import android.util.Log
 import com.claryon.knowledge.BaseDeConhecimentoLexical
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 /**
  * **A costura da Etapa A: o único lugar de `app` que conhece o conhecimento.**
@@ -38,12 +42,20 @@ import com.claryon.knowledge.BaseDeConhecimentoLexical
  * teste varrendo todos os ramos de `utteranceFor`. Ler o artigo inteiro está
  * proposto em `specs/leitura-de-norma.spec.md`, esperando decisão humana (§7).
  *
- * ## O índice é preguiçoso, e isso importa no boot
+ * ## O índice é preguiçoso, e no aparelho isso custava a primeira pergunta
  *
- * `BaseDeConhecimentoLexical` monta o índice na primeira busca: **112 ms** para
- * 1744 trechos, depois **913 µs** por consulta. Construir aqui como `by lazy`
- * significa que o agente que nunca pergunta nada não paga nada — e quem pergunta
- * paga uma vez só.
+ * `BaseDeConhecimentoLexical` monta o índice na primeira busca. Os números de JVM
+ * — 112 ms para montar, 913 µs por consulta — **não descrevem este produto**, e a
+ * medição no aparelho em 21/08 mostrou por quê:
+ *
+ * ```
+ * 1ª consulta (com montagem) ..  4855 ms
+ * consultas 2..201 ............    16,4 ms   (p50)   ← 18× o número de JVM
+ * ```
+ *
+ * `by lazy` continua certo: quem nunca pergunta não paga, e quem pergunta paga uma
+ * vez só. O que estava errado era **quando** essa vez acontecia — na primeira
+ * pergunta do turno, estourando sozinha o aceite de 4 s. Ver [aquecerNoBoot].
  */
 object ConsultaDeNorma {
 
@@ -72,6 +84,41 @@ object ConsultaDeNorma {
                 (trecho?.let { "${it.citacao} (${it.norma})" } ?: "recusada (abaixo do limiar)"),
         )
         return trecho?.let { it.citacao to it.norma }
+    }
+
+    /**
+     * **Paga a montagem do índice no boot, fora da Main, para o agente não pagá-la
+     * na primeira pergunta.**
+     *
+     * Medido no aparelho em 21/08, e o número é brutal:
+     *
+     * ```
+     * 1ª consulta (com montagem) ..  4855 ms
+     * consultas 2..201 ............    16,4 ms  (p50)
+     * razão .......................     296×
+     * ```
+     *
+     * O aceite da Fase 4 é **4 s do fim da fala até a resposta falada**. A primeira
+     * pergunta do turno estourava esse teto **sozinha**, e o razão do ciclo de voz
+     * não enxergava isso porque mede com o índice já quente — o defeito mais
+     * traiçoeiro que existe, porque a bancada mostra 873 ms e o agente em campo
+     * espera cinco segundos.
+     *
+     * Vale registrar a divergência de plataforma junto: em JVM a busca custa
+     * **913 µs**, no aparelho **16,4 ms** — 18× mais. Número de JVM não descreve
+     * este produto.
+     *
+     * `Dispatchers.Default` e não `IO`: a montagem é CPU (tokenizar 1744 trechos e
+     * construir o índice invertido), não espera de disco. E o `try` é o mesmo
+     * contrato de `buscar`: aquecimento que falha vira recusa depois, nunca exceção
+     * subindo num aparelho sem display.
+     */
+    fun aquecerNoBoot(escopo: CoroutineScope) {
+        escopo.launch(Dispatchers.Default) {
+            val t0 = SystemClock.elapsedRealtime()
+            val n = try { base.trechosIndexados } catch (_: Exception) { 0 }
+            Log.i(TAG, "NORMA | índice quente: $n trechos em ${SystemClock.elapsedRealtime() - t0} ms")
+        }
     }
 
     /**

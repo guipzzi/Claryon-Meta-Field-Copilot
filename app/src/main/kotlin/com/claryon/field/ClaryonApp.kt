@@ -6,6 +6,7 @@ import android.util.Log
 import com.claryon.agent.LexicoDeOcorrencias
 import com.claryon.common.Result
 import com.claryon.field.auth.SessaoDoAgente
+import com.claryon.field.norma.ConsultaDeNorma
 import com.claryon.field.norma.RedacaoDoCopiloto
 import com.claryon.field.voice.EscutaDoAgente
 import kotlinx.coroutines.CoroutineScope
@@ -53,6 +54,14 @@ class ClaryonApp : Application() {
         // novo: quem decide é a troca da implementação de `Redator`, não um `if`
         // espalhado por quem fala. Ver `RedacaoDoCopiloto`.
         RedacaoDoCopiloto.decidirNoBoot(this)
+
+        // **O índice do conhecimento aquece aqui, e o motivo é um número.**
+        //
+        // Medido em 21/08: a 1ª consulta custa 4855 ms com a montagem; da 2ª em
+        // diante, 16,4 ms. A primeira pergunta do turno estourava sozinha o aceite
+        // de 4 s — e o razão do ciclo de voz não via, porque mede com o índice
+        // quente. Aquecer no boot move o custo para onde ninguém espera resposta.
+        ConsultaDeNorma.aquecerNoBoot(escopoDeManutencao)
 
         val result = GlassesRuntime.initialize(this)
         if (result is Result.Failure) {
