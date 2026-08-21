@@ -584,36 +584,25 @@ Está tudo escrito em `ui/tema/Cores.kt` — a fase é fazer o app obedecer o pr
 **Três coisas foram rejeitadas três vezes e não voltam:** colchetes decorativos, alvos
 circulares e âncoras assimétricas.
 
-> ⚠️ **Auditoria de 21/08 — esta frase estava errada sobre o código, e agir por ela
-> teria destruído uma affordance real.** O texto dizia: *"`TelaDoMapa.kt:245-255`
-> desenha exatamente um alvo circular com `drawCircle` e uma linha de rumo — é o
-> primeiro a sair."*
->
-> O único `drawCircle` do arquivo está em `:251-252`, e ele é o **ícone do botão de
-> recentrar** (`BotaoRecentrar`) — a mira de "centralizar em mim" que Uber e Waze
-> usam, com quatro riscos cardeais. Não é marcador de mapa, não tem linha de rumo, e
-> não é ornamento: é o controle que devolve o mapa ao agente. Os marcadores de par
-> são desenhados em `MapaDeRuas.kt`, pelo MapLibre, e é lá que a proibição de "alvo
-> circular" precisa ser conferida — se é que se aplica.
->
-> A proibição em si continua valendo. O que caiu foi o alvo apontado.
+O que a auditoria de 21/08 corrigiu sobre isso está no item do botão de recentrar,
+abaixo.
 
 **Itens**
 
 - [UX] Auditoria do sistema atual com a skill `audit-design-system`, produzindo a lista de
   divergências entre `Cores.kt`/`Tema.kt` e o que as sete telas de fato usam — esforço: 0,5
   sessão — depende: nada.
-- [UX] ~~Remover o alvo circular do mapa (`TelaDoMapa.kt:245-255`)~~ **REVISADO em 21/08:
-  o alvo apontado não existe.** Aquelas linhas são o ícone do botão de recentrar. Se houver
-  alvo circular a remover, ele está em `MapaDeRuas.kt` — e a auditoria precisa começar por
-  achá-lo antes de escrever o item — esforço: 0,5 sessão — depende: auditoria.
+- [UX] **Botão de recentrar no estilo Uber Driver.** O item anterior mandava *remover* o
+  alvo circular de `TelaDoMapa.kt:245-255` sob a regra de que alvos circulares foram
+  rejeitados três vezes. A auditoria de 21/08 mostrou que aquilo **não é alvo**: é o ícone
+  do `BotaoRecentrar` — a mira de "centralizar em mim", com quatro riscos cardeais.
+  **Decisão humana de 21/08: fica, como botão de recentrar.** A proibição de alvo circular
+  continua valendo para MARCADOR de mapa (que é desenhado em `MapaDeRuas.kt`, não aqui); um
+  controle de recentrar é affordance, não ornamento, e o agente já a lê sem aprender —
+  esforço: 0,3 sessão — depende: nada.
 - [UX] Tela de guarnição como painel: canal ativo nomeado pelo `rotulo_falado` real (não
   mais `"GTA-3 Alfa"` fixo), estado do piso, estado da rota de áudio, e quem está falando —
   esforço: 1 sessão — depende: Fase 2 e Fase 3.
-- [UX] ~~Estados de falha visíveis e honestos: hoje a UI mostra `ENFILEIRADA` sem fila~~
-  **FEITO antes desta fase.** `ENFILEIRADA` virou `NAO_SAIU` e a tela escreve "não saiu";
-  o KDoc de `TelaDeGuarnicao.kt:78-81` registra o porquê. O princípio — todo estado exibido
-  corresponde a estado que existe — segue valendo para estado novo.
 - [UX] Escala tipográfica de dado tabular: indicativo, distância, rumo e idade alinhados por
   coluna, com tabular figures. É o que faz a tela ler como instrumento e não como app de
   mensagem — esforço: 0,5 sessão — depende: auditoria.
@@ -622,24 +611,108 @@ circulares e âncoras assimétricas.
   decorativo — esforço: 1 sessão — depende: itens acima.
 - [UX] Teste de captura por tela para não regredir depois — esforço: 0,5 sessão — depende:
   itens acima.
-- [SEG] Permissão de câmera do DAT pedida em produção (item 8 do `ESTADO.md`): hoje nunca é
-  pedida, e em hardware real a leitura de placa quebra no primeiro uso — exatamente no
-  onboarding, que é a única janela — esforço: 0,5 sessão — depende: nada. **Prioridade
-  absoluta dentro da fase.**
-- [SEG] Coletar `Stream.errorStream` e tratar `STOPPED` como terminal (item 7 do
-  `ESTADO.md`): sem `camera.stop()` o próximo `addCamera` falha, e sem os erros tipados não
-  se sabe por que a demonstração parou — esforço: 1 sessão — depende: nada.
+- [SEG] ~~Permissão de câmera do DAT pedida em produção~~ **FEITA em 21/08.**
+  `PermissaoDaCameraDoDat` (core-glasses) pelo contrato oficial, chamador em
+  `TelaDePermissoes`, composta pela `MainActivity` em toda instalação nova. Rodou no
+  emulador: resolve honestamente para "Óculos não encontrados." e o portão nunca bloqueia.
+  **Achado junto:** o DAT NÃO exige a permissão `CAMERA` do Android — só `BLUETOOTH` e
+  `BLUETOOTH_CONNECT`. O texto de `PermissoesEssenciais.CAMERA.porQue` engana e é decisão
+  de spec (§7).
+- [SEG] ~~Coletar `Stream.errorStream` e tratar `STOPPED` como terminal~~ **FEITO em
+  21/08, com uma ressalva.** O coletor entra ANTES do `start()` (obrigatório:
+  `replay=0`, erro anterior à assinatura some), e `STOPPED` só é terminal depois de
+  `STARTED`/`STREAMING` — porque o stream NASCE em `STOPPED` e o SDK retenta. **A
+  ressalva:** `DatGlassesFacade` é construída com `viewModelScope` e morre com a
+  Activity. Dono de processo é bloco da Fase 6.
 - [SEG] Assinatura do manifesto de custódia com chave no Keystore, assinatura incremental
   sobre o hash corrente — esforço: 1 sessão — depende: cofre instanciado.
-- [REFAT] Limpar ramos mortos e documentação que afirma capacidade inexistente — lista
-  completa na seção seguinte — esforço: 1 sessão — depende: fases anteriores.
-- [TRANSVERSAL] ~~Criar `docs/INDICE.md`, que `CLAUDE.md` e `AGENTS.md` citam~~
-  **OBSOLETO — conferido em 21/08: nenhum dos dois cita `INDICE.md`.** `grep -n INDICE
-  CLAUDE.md AGENTS.md` não devolve nada. O `CLAUDE.md` §8 hoje É o índice, com a tabela
-  "o que existe e quando abrir". Criar o arquivo agora seria criar um segundo índice para
-  divergir do primeiro — que é a falha que este item existia para evitar.
+- [REFAT] **Trava contra teste que fica verde sem rodar** — esforço: 0,5 sessão —
+  depende: nada. Substitui a varredura única, porque **varredura única apodrece**: em UM
+  dia (21/08) achamos quatro casos — `WhisperCppSttTest` sempre pulado reportando `OK` em
+  0,008 s; `caos_mdk.sh` imprimindo "N/N verdes" com `tests="0"`; `CaosDoAparelhoTest`
+  com `@Ignore` no nível da CLASSE; e `UtteranceTest.todos` dizendo "todos os resultados"
+  com quatro faltando. A superfície é **110 `assumeTrue` e 14 `@Ignore`** — 124 lugares
+  onde um teste pode passar sem executar. A trava: o build declara o número de pulados e
+  quebra quando ele sobe sem justificativa escrita, e nenhum script pode reportar verde
+  sobre `tests="0"`. Trocar faxina por trava.
+- [REFAT] Limpar os ramos mortos que a trava acima expuser — esforço: 0,5 sessão —
+  depende: a trava.
+- [PERF] **Razão de latência ponta a ponta, instrumentado** — esforço: 0,5 sessão —
+  depende: nada. **É o primeiro item de desempenho, e ele vem antes de otimizar qualquer
+  coisa.** Existe `Telemetry` com estágios em `VoiceCycle.kt`, mas não há número ponta a
+  ponta registrado em lugar nenhum. O razão precisa imprimir, por ciclo real:
+  `fim da fala → VAD fecha → STT → roteador → recuperação → síntese Piper → 1ª amostra`.
+  Mediana e p90 sobre ≥10 ciclos, nunca uma amostra. **Sem isso, escolheríamos entre cinco
+  estágios no chute** — e este projeto já otimizou no escuro duas vezes: os "14,9 s do STT"
+  eram build debug sem `-O`, e os 965 ms do `SyncManager` continuaram depois do conserto
+  porque a E/S era de outro lugar.
+- [PERF] **Piper medido isolado** — esforço: 0,3 sessão — depende: nada.
+  `PiperTts.synthesize()` devolve `PcmAudio` **completo**: nenhuma amostra sai antes da
+  última ser gerada. Preciso do custo de "Art. 306, Lei 9.503" (4 palavras, a resposta real
+  da Etapa A) e de uma frase de 7 (o teto). **A pergunta é se o custo é de PARTIDA ou
+  PROPORCIONAL**: se for de partida, streaming não ajuda e a conclusão é essa; se for
+  proporcional, streaming do primeiro bloco corta o tempo **percebido**, que é o que o
+  agente sente.
+- [PERF] **Caça a desperdício no laço quente** — esforço: 0,5 sessão — depende: o razão.
+  Isto roda no bolso de um agente em serviço, o turno inteiro. Alvos, com número antes e
+  depois: alocação por quadro de 20 ms, PCM convertido de ida e volta entre `Short` e
+  `Float`, reamostragem feita duas vezes, trabalho pesado na Main (o projeto já pegou o
+  Opus e o `SyncManager` ali), e o custo por hora do detector de ativação, que roda **50
+  quadros/s o turno inteiro**. Regra: otimização que muda a saída **não é otimização**, é
+  outra feature — e para no diff de spec.
+- [PERF] **Orçamento da demonstração, decidido por MEDIÇÃO** — esforço: 0,3 sessão —
+  depende: o razão. O aceite da Fase 4 é ≤4 s do fim da fala até a resposta falada. Medido
+  em 21/08: recuperação **913 µs**, redação pelo LLM **4 680 ms de mediana** com p90 de
+  8 532 ms. São cinco mil vezes de diferença, e **nenhum ajuste de prompt ou quantização
+  chega perto de simplesmente não chamar o LLM**. Recomendação registrada: **Etapa A
+  sozinha no palco**. Ressalva honesta: os 4 680 ms são de EMULADOR, e emulador arm64 no
+  Mac não é celular de campo — o número precisa de medição no aparelho alvo antes de
+  fundamentar decisão.
+- [P3] **Saber dizer que não sabe — e a assimetria já está medida** — esforço: 1 sessão —
+  depende: nada. Este é requisito de produto, não de qualidade: um copiloto de segurança
+  pública que responde com confiança o que não sabe é pior que um que cala. As 100
+  perguntas de abordagem de 21/08 mediram os dois lados:
+  **a RECUPERAÇÃO sabe recusar** — as 14 perguntas de gramatura pura foram todas
+  recusadas, e *"quantos gramas de maconha configura tráfico"* fica em 0,130 contra limiar
+  0,30, porque a Lei de Drogas **não fixa gramatura** (4 ocorrências de palavra de peso em
+  1817 trechos, nenhuma nela);
+  **a GERAÇÃO não sabe** — 25 de 268 gerações inventam número que a lei não tem, e o
+  guarda aprovou 23. O que falta construir é a régua do guarda: ela hoje reprova texto cujo
+  `\d+` não esteja na fonte, e **reprovou zero de 268**, porque dígito comum já está na
+  fonte ("1,5" vira `1` e `5`, presentes em "§ 1º" e "§ 5º"), número por extenso não tem
+  dígito, e reatribuição usa cifras da fonte trocadas de grandeza. Some-se a cegueira a
+  negação, já registrada. **Dois buracos independentes, e modelo maior só reduz frequência.**
+- [PERF] **A prosa também é latência.** — esforço: 0,3 sessão — depende: o razão. Se a
+  Etapa B entrar algum dia, ela deve **escrever enquanto o Piper fala a citação**, não
+  depois: a citação existe <1 ms após o STT e o earcon já sai em 305 ms. Pipelinar
+  transforma 4,7 s de silêncio em resposta imediata seguida de detalhe — e degrada bem,
+  porque um P1 que preempta a prosa não apaga a resposta que o agente já recebeu.
+- [UX] **A câmera: ligar ou tirar da narrativa** — esforço: 0,3 sessão (decisão) —
+  depende: nada. Os dois [SEG] acima foram fechados e no caminho se descobriu que
+  `PlacaOcr.lerPlaca` e `startCameraStream` têm **zero chamadores**: a leitura de placa não
+  quebra em campo porque **nunca acontece**. A fase escolhe **uma**: ligar o caminho
+  (é a Fase 6) ou tirar leitura de placa do roteiro. Prometer no palco o que o `grep` diz
+  que não existe é a pior forma de descobrir isso.
+- [SEG] **Medir o vazamento do alto-falante open-ear** — esforço: 0,3 sessão — depende:
+  óculos reais. Decisão humana de 21/08: o resultado de consulta de placa **pode** ser
+  falado, com a premissa de que o vazamento exige silêncio e volume alto. A premissa é
+  razoável e **barata de confirmar**: volume operacional, 1 m e 2 m, ambiente silencioso →
+  um número em `docs/VERIFICACOES_COM_HARDWARE.md`. Não é para reabrir a decisão; é para
+  ela parar de depender de premissa.
+- [UX] **A tela consegue exibir alerta que nunca foi despachado?** — esforço: 0,3 sessão —
+  depende: nada. `AlertarOcorrencia` respondeu por **188 dos 252** artigos de lei que viram
+  ação pelo roteador, e por **49 das 61** gerações do LLM. É o gatilho mais sensível do
+  produto. A regra do "app não pode mentir" aplicada ao caminho que mais dispara.
+- [TRANSVERSAL] **Ensaio SECO no primeiro dia da fase, com o que existir.** — esforço:
+  0,5 sessão — depende: nada. **Este item foi movido para a frente em 21/08, e o motivo é
+  aritmético:** a fase vai de 15/09 a 17/09 e o hackathon é 18/09. Um ensaio que roda no
+  dia 17 não deixa tempo para consertar o que ele achar. A saída dele **é a lista de
+  conserto da fase**, não um selo. E ensaio acha coisa grande: a mediana de 4 680 ms da
+  Etapa B, medida em 21/08, mata uma demonstração ao vivo sozinha — ninguém fica nove
+  segundos em silêncio no palco.
 - [TRANSVERSAL] Ensaio cronometrado dos dois checkpoints obrigatórios, cada um em ≤ 10 min,
-  com roteiro escrito e aparelho já pareado — esforço: 1 sessão — depende: tudo.
+  com roteiro escrito e aparelho já pareado — esforço: 1 sessão — depende: o ensaio seco e
+  o que ele achar. Agora é **confirmação**, não descoberta.
 - [TRANSVERSAL] Ensaio do pitch, reescrita final de `ESTADO.md`, `git push origin master` —
   esforço: 1 sessão — depende: tudo.
 
@@ -647,8 +720,7 @@ circulares e âncoras assimétricas.
 em ≤ 10 min cada, cronometrado, com a permissão de câmera do DAT pedida e concedida no
 primeiro uso. `grep -rn "Cores.NoAr" app/src/main` só devolve código de transmissão.
 Nenhum `drawCircle` decorativo permanece. Nenhum estado exibido na UI corresponde a
-capacidade inexistente — verificável por grep dos termos removidos. `docs/INDICE.md` existe
-e cada linha aponta para arquivo que existe.
+capacidade inexistente — verificável por grep dos termos removidos.
 
 **Destrava.** O dia 18/09. A janela real de código no evento é de ~5h30 com dois cortes
 obrigatórios e almoço: nada novo se constrói lá. Quem chega construindo, perde.
@@ -710,9 +782,6 @@ falham lá.
   contra os `30_000L` de `SessaoPtt.kt:234`; `specs/gatilho-por-voz.spec.md:255` proíbe
   endereçar talk group, que agora é requisito. Documentação que mente é pior que ausente: o
   próximo agente confia nela e constrói em cima.
-- **`docs/INDICE.md` não existe**, e é citado por `CLAUDE.md` e por `AGENTS.md` como o
-  índice de onde buscar o trecho antes de tocar em áudio, posição ou fala. O gatilho de
-  leitura aponta para o vazio.
 - **Ramos mortos nos dois lados.** `transmissao.nova` difundido pelo servidor e não
   interpretado pelo cliente; `SupabaseSyncGateway` mirando `tactical_messages`, tabela que
   nenhuma das dez migrações cria; `CanalDePosicoes` completo, testado e sem instanciação;
