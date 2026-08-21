@@ -65,3 +65,4 @@ audios/
 ferramentas/ativacao/humano/
 ferramentas/ativacao/*.f32
 ferramentas/ativacao/*.onnx
+corpus/bruto/*.html
