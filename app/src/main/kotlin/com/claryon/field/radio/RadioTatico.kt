@@ -27,6 +27,10 @@ import com.claryon.net.SessaoPtt
 import com.claryon.net.SupressorDeSaidaPropria
 import com.claryon.net.TelemetriaDoRadio
 import com.claryon.net.TransporteAoVivo
+// A frase que a tela escreve quando a autoria não fecha mora na UI, que é quem
+// decide como um dado ausente aparece. Havia uma cópia idêntica aqui; dois
+// literais iguais em arquivos diferentes é como o texto de um deles muda sozinho.
+import com.claryon.field.ui.telas.AUTOR_NAO_CONFIRMADO
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
@@ -720,15 +724,6 @@ class RadioTatico(
     }
 
     private companion object {
-        /**
-         * O que a tela mostra quando o autor não resolve no cadastro do grupo.
-         *
-         * Frase e não vazio: espaço em branco no lugar do indicativo pareceria
-         * defeito de renderização, e o agente precisa saber que a origem é que é
-         * duvidosa — não a tela.
-         */
-        const val AUTOR_NAO_CONFIRMADO = "Origem não confirmada"
-
         /**
          * Quanto o encerramento espera pela transcrição antes de largar o canal.
          *

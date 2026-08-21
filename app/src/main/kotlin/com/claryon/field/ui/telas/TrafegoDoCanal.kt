@@ -39,6 +39,36 @@ enum class TokenDeTinta { TINTA, TINTA_MEDIA, TINTA_FRACA }
 /** O que se escreve sob a fala própria. Recebida não tem. */
 enum class RotuloDeEntrega { ENVIADA, NAO_SAIU }
 
+/**
+ * **De quem a fala é, e se o servidor sustenta isso.**
+ *
+ * Ortogonal à prioridade de propósito: um P1 também pode chegar sem autoria
+ * conferida, e é justamente esse o caso que mais importa. Por isso é campo
+ * próprio e não mais um valor de [TokenDeCalha] — os dois se somam no mesmo
+ * registro.
+ *
+ * O ataque real deste produto é **personificação**, não escuta. Quem forja um
+ * anúncio escreve o indicativo que quiser; o que o servidor confirma é o vínculo
+ * entre a transmissão e um agente do cadastro do grupo. Quando o vínculo não
+ * fecha, a tela precisa dizer — exibir o rótulo que o próprio forjador digitou é
+ * pior que não exibir nada, porque dá autoridade à mentira.
+ */
+enum class Procedencia { CONFIRMADA, NAO_CONFIRMADA }
+
+/**
+ * O que a tela escreve no lugar do indicativo quando a autoria não resolve.
+ *
+ * Frase e não vazio: espaço em branco no lugar do nome pareceria defeito de
+ * renderização, e o agente precisa saber que a **origem** é que é duvidosa — não
+ * a tela.
+ *
+ * Mora aqui, e não no `RadioTatico`, porque é decisão de exibição: quem escolhe
+ * como um dado ausente aparece é a interface. O rádio importa esta constante em
+ * vez de manter a gêmea que tinha — dois literais iguais em arquivos diferentes é
+ * como o texto de um deles muda sozinho no próximo refactor.
+ */
+const val AUTOR_NAO_CONFIRMADO = "Origem não confirmada"
+
 /** Um registro pronto para desenhar. */
 data class ItemDeTrafego(
     val fala: FalaNoGrupo,
@@ -49,7 +79,27 @@ data class ItemDeTrafego(
     val faixaHoraria: String?,
     val mostraIndicativo: Boolean,
     val rotuloDeEntrega: RotuloDeEntrega?,
+    val procedencia: Procedencia,
+    /**
+     * `true` quando este registro **começa** uma sequência — outro autor, outra
+     * forma, ou abertura de faixa horária.
+     *
+     * É o que dá o respiro entre falas de pessoas diferentes e a densidade dentro
+     * da fala de uma só. Proximidade é o único agrupador disponível numa lista
+     * sem caixa: itens próximos leem como um turno de fala, itens afastados como
+     * dois.
+     */
+    val abreSequencia: Boolean,
 ) {
+    /**
+     * O nome que vai no cabeçalho do bloco.
+     *
+     * Vazio nunca chega à tela: ou é o indicativo conferido, ou é a frase que diz
+     * que ele não foi conferido.
+     */
+    val autorExibido: String
+        get() = if (procedencia == Procedencia.NAO_CONFIRMADA) AUTOR_NAO_CONFIRMADO else fala.indicativo
+
     /**
      * O que o leitor de tela anuncia, como **um** nó.
      *
@@ -57,11 +107,15 @@ data class ItemDeTrafego(
      * de que lado o bloco está. Por isso a fala própria se anuncia como "Você" —
      * é a única forma de a informação que o alinhamento carrega chegar a quem não
      * vê o alinhamento.
+     *
+     * A procedência entra pelo mesmo motivo, e **antes do texto**: o tracejado da
+     * calha e a faixa acima da fala são sinais visuais, e quem ouve a tela receberia
+     * a frase de um desconhecido com a mesma autoridade da de um colega.
      */
     val leituraEmVoz: String
         get() = buildString {
             fala.prioridade?.let { append(rotuloDePrioridade(it)).append(". ") }
-            append(if (fala.propria) "Você" else fala.indicativo)
+            append(if (fala.propria) "Você" else autorExibido)
             if (fala.hora != HORA_DESCONHECIDA) append(", ").append(fala.hora)
             append(". ").append(fala.texto)
             if (rotuloDeEntrega == RotuloDeEntrega.NAO_SAIU) append(". Não saiu")
@@ -105,14 +159,53 @@ fun montarTrafego(falas: List<FalaNoGrupo>): List<ItemDeTrafego> {
         val abreFaixa = faixa != null && faixa != faixaAnterior
         if (faixa != null) faixaAnterior = faixa
 
+        // **Autoria conferida, ou não.** O servidor devolve o indicativo por um
+        // `join` com `agents` pela chave de autoria (`HistoricoDoCanal.falas`);
+        // quando o vínculo não fecha — porque o autor não está no cadastro que o
+        // RLS deixa este agente ver — o campo chega VAZIO. Vazio não é "sem nome",
+        // é "não consegui atribuir", e a tela até aqui desenhava um cabeçalho em
+        // branco: exatamente o "defeito de renderização" que o rádio já tinha
+        // escrito querer evitar.
+        //
+        // Própria nunca é não confirmada: o balão local nasce neste aparelho, com
+        // o indicativo desta sessão.
+        val procedencia = if (!fala.propria && fala.indicativo.isBlank()) {
+            Procedencia.NAO_CONFIRMADA
+        } else {
+            Procedencia.CONFIRMADA
+        }
+
         // Indicativo some em sequência do mesmo autor — mas só entre falas
         // recebidas. Num REGISTRO_DE_CANAL ele fica sempre, porque a largura
         // inteira apaga a lateralidade justamente no registro mais importante:
         // sem o indicativo, um P1 próprio fica indistinguível de um P1 recebido.
-        val mostra = forma == FormaDoRegistro.REGISTRO_DE_CANAL ||
-            !(forma == FormaDoRegistro.RECEBIDO &&
-                formaAnterior == FormaDoRegistro.RECEBIDO &&
+        //
+        // Na fala PRÓPRIA ele não aparece nunca, e a mudança é deliberada: quem
+        // rola este histórico sabe o que disse, o lado já diz de quem é, e um
+        // "VOCÊ" repetido em cada bloco gasta a linha do cabeçalho sem informar.
+        // O leitor de tela continua ouvindo "Você" — ver `leituraEmVoz`, que é
+        // onde a lateralidade sobrevive ao áudio.
+        //
+        // Origem não confirmada também não mostra — mas por outro motivo: **não
+        // há indicativo para mostrar.** Quem diz de onde a fala veio é a faixa de
+        // procedência, acima do texto, e escrever a mesma frase duas vezes no
+        // mesmo bloco gasta duas linhas para informar uma. O que ela NÃO perde é
+        // o agrupamento: ver `abreSequencia` logo abaixo.
+        val mostra = when {
+            forma == FormaDoRegistro.REGISTRO_DE_CANAL -> procedencia == Procedencia.CONFIRMADA
+            forma == FormaDoRegistro.PROPRIO -> false
+            procedencia == Procedencia.NAO_CONFIRMADA -> false
+            else -> !(formaAnterior == FormaDoRegistro.RECEBIDO &&
                 indicativoAnterior == fala.indicativo)
+        }
+
+        // Começa turno de fala novo quando muda o autor, muda a forma, ou abre
+        // faixa horária. É o que separa dois turnos e adensa um só.
+        val abre = abreFaixa ||
+            formaAnterior == null ||
+            formaAnterior != forma ||
+            indicativoAnterior != fala.indicativo ||
+            procedencia == Procedencia.NAO_CONFIRMADA
 
         indicativoAnterior = fala.indicativo
         formaAnterior = forma
@@ -127,6 +220,8 @@ fun montarTrafego(falas: List<FalaNoGrupo>): List<ItemDeTrafego> {
                 forma == FormaDoRegistro.PROPRIO -> TokenDeCalha.TRACO
                 else -> TokenDeCalha.TRACO_FORTE
             },
+            procedencia = procedencia,
+            abreSequencia = abre,
             // Própria em tinta média; recebida em tinta cheia. É a inversão do
             // parágrafo acima, aplicada onde ela se paga.
             tintaDoTexto = if (forma == FormaDoRegistro.PROPRIO) {
@@ -172,6 +267,28 @@ private fun faixaDe(hora: String): String? {
  */
 fun deveRolarParaOFim(ultimoVisivel: Int, ultimoIndice: Int, folga: Int = FOLGA_DE_ROLAGEM): Boolean =
     ultimoIndice >= 0 && ultimoVisivel >= ultimoIndice - folga
+
+/**
+ * Quantos registros existem **abaixo** da leitura, agora.
+ *
+ * Medida, não estimativa: é a distância entre o último item visível e o fim da
+ * lista. Não é contador de não-lidas, e a diferença importa — este aparelho não
+ * sabe o que o agente já leu, e afirmar "3 novas" seria a interface inventando um
+ * dado que não existe em lugar nenhum.
+ *
+ * Só é oferecido quando [deveRolarParaOFim] **recusa** acompanhar: enquanto a
+ * lista se rola sozinha, um botão para ir ao fim seria um controle que não faz
+ * nada. A recusa é o que cria a necessidade, e por isso as duas decisões moram
+ * juntas.
+ */
+fun registrosAbaixoDaLeitura(
+    ultimoVisivel: Int,
+    ultimoIndice: Int,
+    folga: Int = FOLGA_DE_ROLAGEM,
+): Int {
+    if (deveRolarParaOFim(ultimoVisivel, ultimoIndice, folga)) return 0
+    return (ultimoIndice - ultimoVisivel).coerceAtLeast(0)
+}
 
 const val HORA_DESCONHECIDA = "--:--:--"
 
