@@ -194,6 +194,159 @@ class TrafegoDoCanalTest {
         assertFalse(i.leituraEmVoz.contains("--"))
     }
 
+    // ── Procedência: o ataque é personificação, não escuta ────────────────────
+
+    @Test
+    fun indicativoVazio_viraOrigemNaoConfirmada() {
+        // Vazio é o que `HistoricoDoCanal.falas` devolve quando o `join` de
+        // autoria não fecha — o autor não está no cadastro que este agente pode
+        // ver. Não é "sem nome": é "não consegui atribuir".
+        val i = montarTrafego(listOf(fala(indicativo = ""))).single()
+        assertEquals(Procedencia.NAO_CONFIRMADA, i.procedencia)
+        assertEquals(AUTOR_NAO_CONFIRMADO, i.autorExibido)
+    }
+
+    @Test
+    fun autoriaConferida_naoViraNaoConfirmada() {
+        // Contra-teste do anterior: se este passasse junto com o de cima sem o
+        // `isBlank()`, a marca apareceria em toda fala e não significaria nada.
+        val i = montarTrafego(listOf(fala(indicativo = "Bravo Um"))).single()
+        assertEquals(Procedencia.CONFIRMADA, i.procedencia)
+        assertEquals("Bravo Um", i.autorExibido)
+    }
+
+    @Test
+    fun falaPropriaNuncaEhNaoConfirmada() {
+        // O balão local nasce neste aparelho. Marcá-lo como duvidoso seria o
+        // aparelho desconfiando de si mesmo — e gastaria o sinal onde ele não
+        // informa nada.
+        val i = montarTrafego(listOf(fala(indicativo = "", propria = true))).single()
+        assertEquals(Procedencia.CONFIRMADA, i.procedencia)
+    }
+
+    @Test
+    fun duasNaoConfirmadasSeguidas_naoSaoAgrupadas() {
+        // Agrupar afirmaria que são a mesma pessoa. Não há nada que sustente
+        // isso: os dois indicativos vazios podem ser dois emissores diferentes.
+        val itens = montarTrafego(listOf(fala(id = "1", indicativo = ""), fala(id = "2", indicativo = "")))
+        assertTrue(itens[1].abreSequencia)
+    }
+
+    @Test
+    fun naoConfirmada_naoEscreveOAvisoDuasVezes() {
+        // Quem diz de onde veio é a faixa de procedência. Repetir a frase na
+        // linha do autor gastava duas linhas do bloco para informar uma — o
+        // primeiro desenho fazia isso, e a captura no emulador mostrou.
+        val i = montarTrafego(listOf(fala(indicativo = ""))).single()
+        assertFalse(i.mostraIndicativo)
+        // …e o leitor de tela continua recebendo o aviso, que é o canal que
+        // sobrou para quem não vê a faixa.
+        assertTrue(i.leituraEmVoz.startsWith(AUTOR_NAO_CONFIRMADO))
+    }
+
+    @Test
+    fun leituraEmVozAvisaAOrigemDuvidosa_antesDoTexto() {
+        // O tracejado da calha e a faixa acima da fala são sinais VISUAIS. Sem
+        // isto, quem ouve a tela receberia a frase de um desconhecido com a mesma
+        // autoridade da de um colega.
+        val i = montarTrafego(listOf(fala(indicativo = "", texto = "Apoio na praça."))).single()
+        assertTrue(i.leituraEmVoz.startsWith(AUTOR_NAO_CONFIRMADO))
+        assertTrue(i.leituraEmVoz.indexOf(AUTOR_NAO_CONFIRMADO) < i.leituraEmVoz.indexOf("Apoio"))
+    }
+
+    @Test
+    fun p1NaoConferidoMantemAsDuasMarcas() {
+        // Prioridade e procedência são ortogonais, e o caso que mais importa é
+        // justamente o cruzamento: um P1 forjado. A calha continua P1 — pode ser
+        // pedido de apoio real — e a procedência entra por outro canal.
+        val i = montarTrafego(listOf(fala(indicativo = "", prioridade = 1))).single()
+        assertEquals(TokenDeCalha.P1, i.calha)
+        assertEquals(Procedencia.NAO_CONFIRMADA, i.procedencia)
+        // E o critério 26 não é atropelado: o alerta não escreve um nome que não
+        // tem. A faixa de procedência ocupa o lugar do indicativo.
+        assertFalse(i.mostraIndicativo)
+        assertTrue(i.leituraEmVoz.startsWith("P1 emergência"))
+        assertTrue(i.leituraEmVoz.contains(AUTOR_NAO_CONFIRMADO))
+    }
+
+    @Test
+    fun alertaConferidoEscreveOIndicativo() {
+        // Contra-teste: se o ramo de `REGISTRO_DE_CANAL` passasse a devolver
+        // sempre `false`, o critério 26 morria em silêncio — um P1 próprio
+        // ficaria indistinguível de um P1 recebido.
+        val i = montarTrafego(listOf(fala(indicativo = "Alfa Dois", prioridade = 1))).single()
+        assertTrue(i.mostraIndicativo)
+    }
+
+    // ── Agrupamento por proximidade ───────────────────────────────────────────
+
+    @Test
+    fun falaPropriaNaoRepeteOIndicativo_porqueOLadoJaDiz() {
+        // "VOCÊ" em cada bloco gasta a linha do cabeçalho sem informar: o agente
+        // sabe o que disse, e a lateralidade já carrega a autoria.
+        val i = montarTrafego(listOf(fala(propria = true))).single()
+        assertFalse(i.mostraIndicativo)
+        // …mas o leitor de tela continua ouvindo, porque lado não sobrevive ao áudio.
+        assertTrue(i.leituraEmVoz.startsWith("Você"))
+    }
+
+    @Test
+    fun alertaProprioMantemOIndicativo_mesmoSemLado() {
+        // Critério 26: largura inteira apaga a lateralidade justamente no
+        // registro mais importante.
+        val i = montarTrafego(listOf(fala(propria = true, prioridade = 1))).single()
+        assertTrue(i.mostraIndicativo)
+    }
+
+    @Test
+    fun continuacaoDoMesmoAutor_naoAbreSequencia() {
+        val itens = montarTrafego(
+            listOf(
+                fala(id = "1", indicativo = "Bravo Um"),
+                fala(id = "2", indicativo = "Bravo Um"),
+                fala(id = "3", indicativo = "Alfa Dois"),
+            ),
+        )
+        assertTrue("primeiro item sempre abre", itens[0].abreSequencia)
+        assertFalse("mesmo autor adensa", itens[1].abreSequencia)
+        assertTrue("autor novo respira", itens[2].abreSequencia)
+    }
+
+    @Test
+    fun trocaDeLado_abreSequencia() {
+        // Contra-teste do anterior: o agrupamento não pode olhar só o indicativo.
+        // Recebida e própria do mesmo indicativo são dois turnos, não um.
+        val itens = montarTrafego(
+            listOf(
+                fala(id = "1", indicativo = "Bravo Um", propria = false),
+                fala(id = "2", indicativo = "Bravo Um", propria = true),
+            ),
+        )
+        assertTrue(itens[1].abreSequencia)
+    }
+
+    // ── Voltar ao fim do histórico ────────────────────────────────────────────
+
+    @Test
+    fun lendoLongeDoFim_ofereceOCaminhoDeVolta() {
+        // A recusa de `deveRolarParaOFim` é o que cria a necessidade: sem porta,
+        // quem subiu fica rolando com o polegar enquanto o canal anda.
+        assertEquals(39, registrosAbaixoDaLeitura(ultimoVisivel = 10, ultimoIndice = 49))
+    }
+
+    @Test
+    fun acompanhandoOCanal_naoOfereceNada() {
+        // Contra-teste: enquanto a lista se rola sozinha, um botão para ir ao fim
+        // seria um controle que não faz nada. As duas decisões têm de concordar.
+        assertEquals(0, registrosAbaixoDaLeitura(ultimoVisivel = 47, ultimoIndice = 49))
+        assertTrue(deveRolarParaOFim(ultimoVisivel = 47, ultimoIndice = 49))
+    }
+
+    @Test
+    fun listaVazia_naoOfereceCaminhoDeVolta() {
+        assertEquals(0, registrosAbaixoDaLeitura(ultimoVisivel = 0, ultimoIndice = -1))
+    }
+
     // ── Estabilidade (critério 13) ────────────────────────────────────────────
 
     @Test

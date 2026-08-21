@@ -112,8 +112,22 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _pares = MutableStateFlow<List<ParPresente>>(emptyList())
 
-    /** Quem detém o piso agora. Alimenta `ParPresente.falando`. */
     private val _quemFala = MutableStateFlow<String?>(null)
+
+    /**
+     * **Quem detém o piso agora.** `null` quando o canal está calado.
+     *
+     * Alimentava só `ParPresente.falando`, e por isso havia um valor que **nunca
+     * chegava à tela**: `AUTOR_NAO_CONFIRMADO`. A régua de presença casa por
+     * indicativo (`it.indicativo == quem`), e "Origem não confirmada" não casa com
+     * nenhum par — então uma transmissão de autoria duvidosa tocava no
+     * alto-falante sem absolutamente nada na tela, enquanto o `RadioTatico`
+     * escrevia em log que a origem era duvidosa. O ataque real deste produto é
+     * personificação; era o sinal contra ele que estava mudo.
+     *
+     * Exposto cru, sem casar com nada: quem decide como exibir é a tela.
+     */
+    val quemFala: StateFlow<String?> = _quemFala.asStateFlow()
 
     /**
      * `{agentId → indicativo}` do grupo, vindo de `cadastro_do_grupo` — a fonte

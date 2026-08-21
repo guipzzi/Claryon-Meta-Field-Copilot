@@ -281,6 +281,52 @@ propósito. `LeituraEmVozTest` afirma essa distinção por escrito.
 2. **A entrega deve ser um commit só** com o produtor de `Entrega` incluído, ou dois
    commits com o segundo obrigatório antes do merge? A spec pede o primeiro.
 
+## Adendo de 21/08 — o que o desenho de conversa mudou nos critérios acima
+
+Escrito **depois** do diff, e isso é dívida declarada: §7 pede spec antes de código.
+Fica aqui porque o alternativo é pior — a spec continuar descrevendo uma tela que não
+existe mais é como a próxima mentira nasce (§6, pergunta 4). Estado: **proposta**.
+
+**Já superado pelo próprio código, antes desta sessão:**
+
+- Critério 18 diz `Entrega.ENFILEIRADA` e rótulo `"na fila"`. **Não existe fila** —
+  `ArquivoDeFalasDiferidas` segue sem chamador. O estado se chama `NAO_SAIU` e a tela
+  escreve "não saiu". O critério, como escrito, exige que o app minta.
+- Os alvos `TelaDeGuarnicao.kt:207-214` e `:250` citados no cabeçalho `sobrepoe` já não
+  existem: `LinhaDeFala` foi substituída e o rótulo de entrega já saía em `TintaFraca`.
+
+**Mudado agora:**
+
+1. **Critério 9 vira regra de três ramos.** Além de omitir o indicativo em sequência do
+   mesmo par recebido, a fala **própria** nunca o mostra (a lateralidade já diz, e "VOCÊ"
+   repetido gasta a linha do cabeçalho), e a fala de **origem não confirmada** também não
+   — porque não há indicativo a mostrar. Critério 26 fica intacto: alerta próprio mantém.
+2. **Procedência entra como campo, não como cor.** `Procedencia.NAO_CONFIRMADA` sai de
+   `indicativo.isBlank()`, que é o que `HistoricoDoCanal.falas` devolve quando o `join`
+   de autoria não fecha. Três canais, nenhum cromático: calha **tracejada**, faixa escrita
+   acima do texto, e anúncio no leitor de tela **antes** do texto. A regra 21 (âmbar
+   reservado) e a 20 (cor = prioridade) seguem valendo, e é por isso que não há cor nova.
+3. **Hora e entrega descem para um rodapé alinhado à direita.** Critério 10 continua
+   verdadeiro — a hora está em todos os registros, inclusive em continuação. O que muda é
+   a posição, que passa a ser a do carimbo de um mensageiro e alinha os horários em coluna.
+4. **Espaçamento por proximidade.** `abreSequencia` dá 12 dp entre turnos de fala e 4 dp
+   dentro de um turno. Sem caixa e sem fio entre itens, proximidade é o único agrupador.
+5. **Caminho de volta ao fim do histórico.** Novo, e é consequência direta dos critérios
+   14-16: eles mandam **não** arrastar a leitura de quem subiu, e até aqui não havia porta
+   de volta. `registrosAbaixoDaLeitura` devolve a distância medida até o fim, e é zero
+   exatamente quando `deveRolarParaOFim` aceita acompanhar. **Não** é contador de não-lidas:
+   este aparelho não sabe o que o agente leu.
+6. **A barra de composição junta copiloto e PTT** numa superfície só, com fio entre eles.
+   Alvo do copiloto sobe para 48 dp.
+
+**O que foi recusado, e por quê:** citação de resposta. A gramática do mensageiro pede, e
+não há relação de réplica no tráfego de rádio nem coluna em `transmissions` que a guarde.
+A fatia acima da fala carrega procedência, que existe.
+
+**O que continua sem teste automatizado:** critérios 4, 5 e 8, mais tudo que este adendo
+acrescenta do lado do Compose. A pergunta aberta 1 (entrar com `ui-test-junit4`) segue
+aberta; a verificação de 21/08 foi por captura no emulador, com `ui.VitrineDaGuarnicao`.
+
 ## Estado da verificação
 
 Assinaturas de Compose usadas pelo desenho foram conferidas por `javap` nos AAR do

@@ -28,6 +28,7 @@ import com.claryon.field.radio.CanalDoPiloto
 import com.claryon.field.radio.RadioViewModel
 import com.claryon.field.ui.CascoTatico
 import com.claryon.field.ui.Destino
+import com.claryon.field.ui.marca.AberturaDoTurno
 import com.claryon.field.ui.CopilotoViewModel
 import com.claryon.field.ui.OculosViewModel
 import com.claryon.field.ui.MapaViewModel
@@ -74,6 +75,10 @@ class MainActivity : ComponentActivity() {
                 var mostrarPermissoes by remember { mutableStateOf(!tudoConcedido()) }
                 var mostrarLogin by remember { mutableStateOf(true) }
                 var destino by remember { mutableStateOf(Destino.GUARNICAO) }
+                // A abertura vem antes de tudo, inclusive das permissões: é a
+                // apresentação do produto, e ela cobre a leitura do cofre que
+                // acontece em paralelo. Ver `AberturaDoTurno`.
+                var abrindo by remember { mutableStateOf(true) }
 
                 // O estado da sessão é OBSERVADO, não perguntado: `autenticado()`
                 // lê o cofre cifrado e a primeira leitura custa ~468 ms de
@@ -81,11 +86,23 @@ class MainActivity : ComponentActivity() {
                 val sessao by SessaoDoAgente.estado.collectAsState()
 
                 when {
+                    abrindo -> AberturaDoTurno(
+                        // A abertura só sai quando o cofre respondeu. Enquanto
+                        // `Verificando`, a condição logo abaixo desenhava PRETO —
+                        // a espera existia e não tinha rosto.
+                        sessaoResolvida =
+                            sessao !is SessaoDoAgente.EstadoDaSessao.Verificando,
+                        aoConcluir = { abrindo = false },
+                    )
+
                     mostrarPermissoes ->
                         TelaDePermissoes(aoConcluir = { mostrarPermissoes = false })
 
                     // Ainda lendo o cofre: NÃO mostrar login, senão a tela pisca
-                    // na cara de quem já tem sessão.
+                    // na cara de quem já tem sessão. Depois da abertura isto só
+                    // acontece se a sessão voltar a `Verificando`, o que hoje não
+                    // ocorre — a condição fica como rede de segurança, não como
+                    // caminho esperado.
                     sessao is SessaoDoAgente.EstadoDaSessao.Verificando -> Unit
 
                     mostrarLogin && sessao is SessaoDoAgente.EstadoDaSessao.Ausente -> TelaDeLogin(
@@ -156,6 +173,7 @@ private fun Operacao(
     val estadoPtt by radio.estado.collectAsState()
     val falas by radio.falas.collectAsState()
     val pares by radio.pares.collectAsState()
+    val quemFala by radio.quemFala.collectAsState()
     val noAr by radio.noAr.collectAsState()
     val copilotoOcupado by copiloto.copilotoOcupado.collectAsState()
     val estadoMapa by mapa.estado.collectAsState()
@@ -240,6 +258,10 @@ private fun Operacao(
                 // tela que não é composta.
                 aoAbrirCopiloto = copiloto::cicloDeVoz,
                 copilotoOcupado = copilotoOcupado,
+                // Sem esta linha, `AUTOR_NAO_CONFIRMADO` continuaria sem caminho
+                // até a tela: a régua de presença casa por indicativo e ele não
+                // casa com par nenhum. Ver o KDoc de `RadioViewModel.quemFala`.
+                quemEstaNoAr = quemFala,
                 modifier = modifier,
             )
 
