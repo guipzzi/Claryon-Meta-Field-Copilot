@@ -143,6 +143,26 @@ fun utteranceFor(outcome: ActionOutcome): Utterance = when (outcome) {
             Priority.RESPOSTA,
         )
 
+    // **A citação é a resposta, e ela cabe no teto.**
+    //
+    // "Artigo 28, Lei 9.503" tem 4 palavras. O TEXTO do artigo não vem aqui de
+    // propósito: são dezenas de palavras contra o teto de 7, e num produto sem
+    // display o agente não consegue pular o que está sendo lido. A leitura verbatim
+    // está proposta em `specs/` esperando decisão humana — sobrepor regra dura é
+    // decisão de gente, não diff (§7).
+    //
+    // Dizer ONDE está sem fingir que leu é a resposta honesta que cabe hoje.
+    is ActionOutcome.NormaEncontrada ->
+        Utterance.Falar("${outcome.citacao}, ${outcome.norma}", Priority.RESPOSTA)
+
+    // **Recusa é resposta, e precisa SOAR como resposta.**
+    //
+    // Não é `SinalizarEFalar(FALHA, ...)`: nada falhou. O copiloto procurou no
+    // corpus e nada ficou perto o bastante do limiar. Vestir isso de erro ensinaria
+    // o agente a desconfiar do aparelho quando o aparelho acertou.
+    ActionOutcome.NormaNaoEncontrada ->
+        Utterance.Falar("Não achei na norma.", Priority.RESPOSTA)
+
     ActionOutcome.NaoEntendi ->
         Utterance.SinalizarEFalar(Earcon.FALHA, "Não entendi, repita.", Priority.RESPOSTA)
 

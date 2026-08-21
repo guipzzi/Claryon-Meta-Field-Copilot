@@ -46,6 +46,12 @@ class DeterministicIntentRouter : IntentRouter {
             // Comandos explícitos ANTES do léxico de ocorrências. "Modo
             // abordagem" contém "abordagem", que é tipo de ocorrência — sem esta
             // ordem, trocar de modo dispararia um alerta para a guarnição.
+            // **Antes de DETALHAR de propósito.** "que artigo a lei prevê, repita"
+            // contém "repita"; sem esta ordem a pergunta viraria repetição da última
+            // resposta e a consulta nunca aconteceria. Mesmo raciocínio que pôs
+            // CONSULTAR_PLACA_EXPLICITO antes do termo solto "placa".
+            matches(texto, CONSULTAR_NORMA) -> Intent.ConsultarNorma(texto)
+
             matches(texto, DETALHAR) -> Intent.Detalhar
             matches(texto, MODO_STANDBY) -> Intent.TrocarModo(ModoOperacao.STANDBY)
             matches(texto, MODO_OCORRENCIA) -> Intent.TrocarModo(ModoOperacao.OCORRENCIA)
@@ -204,6 +210,27 @@ class DeterministicIntentRouter : IntentRouter {
         // de novo na Rui Barbosa" virava `Detalhar` e o app repetia a última
         // resposta — ou dizia "Nada a repetir." — enquanto nenhum alerta saía.
         val DETALHAR = listOf("detalhar", "repetir", "repita")
+
+        /**
+         * **Consulta à norma. Marcador legal EXPLÍCITO, e a estreiteza é medida.**
+         *
+         * A tentação era aceitar "posso…" e "pode…", que é como um policial de fato
+         * pergunta. Não entram, e o motivo saiu de medição: entregar o corpus
+         * inteiro ao roteador mostra que **252 dos 1817 artigos já viram ação** com
+         * o léxico de hoje (`FronteiraDoConhecimentoEmAppTest`). Um padrão largo
+         * aqui somaria a esse total, e num roteador que casa por `contains` cada
+         * termo comum acrescentado é uma ocorrência de rádio virando consulta.
+         *
+         * Todos exigem a palavra da lei junto: "diz a lei", "qual artigo", "o que
+         * prevê". *"Posso apreender a moto?"* NÃO casa hoje — e isso é limitação
+         * conhecida, escrita, com o caminho de conserto sendo medir recall sobre um
+         * conjunto de perguntas reais, não alargar por intuição.
+         */
+        val CONSULTAR_NORMA = listOf(
+            "diz a lei", "diz o codigo", "que artigo", "qual artigo", "qual o artigo",
+            "que diz a lei", "o que preve", "preve a lei", "na lei sobre",
+            "artigo fala", "codigo de transito diz", "consultar norma", "consulte a norma",
+        )
         val MODO_STANDBY = listOf("modo standby", "modo espera", "modo descanso")
         val MODO_OCORRENCIA = listOf("modo ocorrencia", "modo abordagem")
         val MODO_ATIVO = listOf("modo ativo", "modo patrulha")

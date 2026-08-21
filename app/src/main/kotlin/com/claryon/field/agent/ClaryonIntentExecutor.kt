@@ -122,6 +122,26 @@ class ClaryonIntentExecutor(
      * Padrão que recusa tudo: um executor construído sem esta dependência não pode
      * silenciosamente parecer capaz de trocar de canal.
      */
+    /**
+     * **Consulta à norma: pergunta entra, `(citação, documento)` sai — ou `null`.**
+     *
+     * Repare no tipo: `String`, não `Trecho`. **Este executor não nomeia
+     * `core-knowledge` em lugar nenhum**, e é de propósito. A regra dura é que texto
+     * recuperado não vire ação; a forma barata de sustentá-la é o executor
+     * literalmente não ter vocabulário para falar de conhecimento. Quem conhece os
+     * dois lados é a raiz de composição, que costura `Trecho → (citacao, norma)` uma
+     * vez só, num lugar que dá para auditar de olho.
+     *
+     * É o mesmo padrão de [localizarPar] e [minhaPosicao]: o executor declara o que
+     * precisa, não de quem.
+     *
+     * **O padrão é `null`, e isso não é adiar — é dizer a verdade.** Enquanto não
+     * houver índice, não há resposta, e o produto responde "Não achei na norma".
+     * O contrário — devolver algo plausível para o caminho "parecer pronto" — é
+     * exatamente a falha que este projeto cometeu seis vezes e que o §6 do
+     * `CLAUDE.md` existe para impedir.
+     */
+    private val consultarNorma: suspend (String) -> Pair<String, String>? = { null },
     private val trocarDeGrupo: suspend (String) -> TrocaDeGrupo =
         { TrocaDeGrupo.Falhou(FalhaOperacional.SEM_LEXICO_DE_CANAIS) },
     /**
@@ -226,6 +246,11 @@ class ClaryonIntentExecutor(
                 }
             TrocaDeGrupo.NaoReconhecido -> ActionOutcome.GrupoNaoReconhecido(intent.rotuloFalado)
             is TrocaDeGrupo.Falhou -> ActionOutcome.Falhou(r.falha)
+        }
+
+        is Intent.ConsultarNorma -> when (val achado = consultarNorma(intent.pergunta)) {
+            null -> ActionOutcome.NormaNaoEncontrada
+            else -> ActionOutcome.NormaEncontrada(achado.first, achado.second)
         }
 
         is Intent.NaoReconhecida -> ActionOutcome.NaoEntendi

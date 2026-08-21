@@ -97,6 +97,38 @@ sealed interface ActionOutcome {
         val destinatarios: Int?,
     ) : ActionOutcome
 
+    /**
+     * **A norma foi recuperada. [citacao] e [norma] são `String` pura, de propósito.**
+     *
+     * O `Trecho` fica do outro lado da fronteira: `core-agent` não tem
+     * `core-knowledge` no classpath, e não deve ter. O que atravessa é o mínimo para
+     * o agente saber **onde** está a resposta — `"Art. 28"` e `"Lei 9.503/1997"`.
+     *
+     * ## Por que o TEXTO do artigo não vem junto
+     *
+     * Não é economia: é o teto de **7 palavras** por fala operacional, que é
+     * invariante deste produto e tem teste varrendo todos os ramos de
+     * [utteranceFor]. Um artigo de lei tem dezenas de palavras, e num produto sem
+     * display o agente não tem como pular o que está sendo lido — despejar um
+     * parágrafo no ouvido de quem está em ocorrência é pior do que não responder.
+     *
+     * Ler o artigo inteiro é capacidade legítima e **está proposta em `specs/`**,
+     * esperando decisão humana, porque sobrepor regra dura é decisão de gente (§7).
+     * Enquanto isso, a citação é resposta honesta: diz onde está, sem fingir que
+     * leu.
+     */
+    data class NormaEncontrada(val citacao: String, val norma: String) : ActionOutcome
+
+    /**
+     * **Nada no corpus ficou perto o bastante — e isto é resposta, não falha.**
+     *
+     * Devolver o vizinho mais próximo quando ninguém está perto é como o produto
+     * inventaria lei. A recusa é o comportamento correto e precisa soar como
+     * recusa: [utteranceFor] a transforma em fala curta, não em silêncio nem em
+     * earcon de erro. O agente ouviu, o copiloto procurou, e não achou.
+     */
+    data object NormaNaoEncontrada : ActionOutcome
+
     /** Transcrição não casou com nenhuma intenção. Não é falha: é "repita". */
     data object NaoEntendi : ActionOutcome
 

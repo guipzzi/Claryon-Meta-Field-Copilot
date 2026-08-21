@@ -37,8 +37,84 @@ class UtteranceTest {
         // `nomeFalavelDeGrupo`.
         add(ActionOutcome.GrupoTrocado("Grupamento Tático de Ações Especiais Três Bravo"))
         add(ActionOutcome.GrupoNaoReconhecido("guarnicao 9"))
+        add(ActionOutcome.TransmissaoAberta("GTA-3 Alfa"))
+        add(ActionOutcome.ParNaoLocalizado("Alfa Dois"))
+        // Os quatro ramos que a lista dizia cobrir e não cobria. Aqui com o pior
+        // caso de cada um: indicativo longo, rumo presente (que acrescenta palavra),
+        // e contagem desconhecida, que é onde a fala muda de forma.
+        Rumo.entries.forEach {
+            add(
+                ActionOutcome.PosicaoEncontrada(
+                    PosicaoRelativa("Alfa Dois", 1_450, it, emMovimento = true, idadeS = 240),
+                ),
+            )
+        }
+        TipoDeOcorrencia.entries.forEach { tipo ->
+            Prioridade.entries.forEach { p ->
+                add(ActionOutcome.AlertaDisparado(tipo, p, destinatarios = null))
+                add(ActionOutcome.AlertaDisparado(tipo, p, destinatarios = 12))
+            }
+        }
+        // A citação mais longa que o corpus produz, para o teto valer no pior caso.
+        add(ActionOutcome.NormaEncontrada("Art. 359-M-B do CP", "Decreto-Lei 2.848/1940"))
+        add(ActionOutcome.NormaNaoEncontrada)
         add(ActionOutcome.NaoEntendi)
         FalhaOperacional.entries.forEach { add(ActionOutcome.Falhou(it)) }
+    }
+
+    /**
+     * **A lista acima dizia "todos" e não era todos — este teste torna a frase verdadeira.**
+     *
+     * Achado em 21/08, ao acrescentar `NormaEncontrada`: o KDoc de [todos] afirma
+     * "Todos os resultados possíveis", e faltavam **quatro** — `TransmissaoAberta`,
+     * `PosicaoEncontrada`, `ParNaoLocalizado` e `AlertaDisparado`. Ou seja, o teto de
+     * sete palavras nunca tinha sido verificado nesses ramos, e ninguém saberia:
+     * a varredura passava verde porque varria só o que alguém lembrou de listar.
+     *
+     * O compilador garante que `utteranceFor` TRATE todo [ActionOutcome] — `when`
+     * sobre `sealed` não fecha sem isso. O que ele não garante é que alguém MEÇA a
+     * saída de cada ramo. Essa parte era disciplina, e disciplina falhou quatro
+     * vezes de onze.
+     *
+     * Agora é reflexão: os subtipos selados vêm da própria classe, e a lista tem de
+     * cobrir todos. Acrescentar um resultado sem acrescentá-lo aqui quebra ESTE
+     * teste com o nome do que faltou — antes de o produto falar frase longa demais
+     * no ouvido de um agente em ocorrência.
+     */
+    @Test
+    fun aListaCobreTodoSubtipoSelado_senaoOTetoNaoEVerificado() {
+        // **Reflexão do Java, não `sealedSubclasses`.**
+        //
+        // `KClass.sealedSubclasses` exige `kotlin-reflect` em runtime e a primeira
+        // versão morreu com `KotlinReflectionNotSupportedError`. Arrastar
+        // `kotlin-reflect` (≈3 MB) para dentro de `core-agent` por causa de UM teste
+        // seria pagar caro por conveniência — e o `CLAUDE.md` manda justificar
+        // dependência nova por tamanho e alternativa nativa.
+        //
+        // A alternativa nativa existe e é exata aqui: os subtipos são declarados
+        // ANINHADOS dentro da interface, então o compilador os emite como
+        // `ActionOutcome$NormaEncontrada` e `getDeclaredClasses()` os enxerga sem
+        // biblioteca nenhuma. O filtro por `isAssignableFrom` evita contar tipo
+        // aninhado que não seja resultado.
+        val selados = ActionOutcome::class.java.declaredClasses
+            .filter { ActionOutcome::class.java.isAssignableFrom(it) }
+            .map { it.simpleName }
+            .toSet()
+        assertTrue(
+            "Reflexão não achou subtipo nenhum de ActionOutcome. Sem controle " +
+                "positivo esta varredura 'não acha faltante' também quando está " +
+                "quebrada — e aí não prova nada.",
+            selados.size >= 10,
+        )
+        val cobertos = todos.mapNotNull { it::class.simpleName }.toSet()
+        val faltando = (selados - cobertos).sorted()
+        assertEquals(
+            "Estes ActionOutcome existem e NÃO passam pela varredura de saída, " +
+                "então o teto de 7 palavras não é verificado neles:\n" +
+                faltando.joinToString("\n") { "  $it" },
+            emptyList<String>(),
+            faltando,
+        )
     }
 
     private fun textoDe(u: Utterance): String? = when (u) {

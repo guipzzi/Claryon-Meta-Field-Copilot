@@ -92,6 +92,33 @@ sealed interface Intent {
      */
     data class AlertarOcorrencia(val ocorrencia: Ocorrencia) : Intent
 
+    /**
+     * **Consultar a norma (Fase 4, Etapa A): pergunta entra, artigo de lei sai.**
+     *
+     * *"Hey Claryon, posso apreender moto sem placa?"* — o copiloto recupera o
+     * trecho de lei e devolve a **citação**, não uma opinião.
+     *
+     * ## Três coisas que esta intenção deliberadamente NÃO faz
+     *
+     * **Não carrega o trecho.** `core-agent` não conhece `core-knowledge` e não
+     * pode: a fronteira entre os módulos é o que garante que texto recuperado não
+     * vire ação, e ela é testada dos dois lados (`FronteiraDoConhecimentoTest` lá,
+     * `FronteiraDoConhecimentoEmAppTest` aqui). O que viaja daqui para o executor é
+     * a **pergunta**; o que volta é `ActionOutcome.NormaEncontrada`, com citação e
+     * norma em `String` pura. Quem conhece os dois lados é `app`, e só ele.
+     *
+     * **Não decide se sabe.** O limiar mora em `PortaDoConhecimento`, do outro lado.
+     * Daqui não dá para saber se a resposta existe — e é bom que não dê, porque a
+     * recusa (`NormaNaoEncontrada`) tem de ser tão real quanto o acerto.
+     *
+     * **Não é atalho para o LLM.** Na Etapa B um modelo vai reescrever o trecho em
+     * fala corrida, mas essa camada fica **por cima** deste caminho, atrás de flag,
+     * e a saída dela nunca reentra como `Intent`. A regra dura do `CLAUDE.md` §2 —
+     * "LLM escolhendo ação" é proibido — se sustenta porque não existe construtor de
+     * `Intent` alcançável a partir de texto gerado.
+     */
+    data class ConsultarNorma(val pergunta: String) : Intent
+
     /** Nada reconhecido — carrega a transcrição bruta para diagnóstico. */
     data class NaoReconhecida(val transcricao: String) : Intent
 }
