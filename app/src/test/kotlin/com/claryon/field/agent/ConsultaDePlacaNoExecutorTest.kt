@@ -143,10 +143,11 @@ class ConsultaDePlacaNoExecutorTest {
     }
 
     /**
-     * O portão vale para a placa **ditada** também — inclusive para a que um modelo
-     * de linguagem normalizar quando a Etapa B ligar `PlacaDitada`. A regra dura diz
-     * que o LLM só preenche campo; o que a torna verificável é o formato ser
-     * conferido depois, aqui, num ponto que nenhuma fonte contorna.
+     * O portão vale para a placa **ditada** também — a que `PlacaDitada` monta a
+     * partir do alfabeto fonético desde 22/08, e a que um modelo de linguagem
+     * viesse a normalizar um dia. A regra dura diz que o LLM só preenche campo; o
+     * que a torna verificável é o formato ser conferido depois, aqui, num ponto que
+     * nenhuma fonte contorna.
      */
     @Test
     fun placaDitadaForaDoFormato_tambemNaoTocaABase() = runTest {

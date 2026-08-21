@@ -387,11 +387,12 @@ class ClaryonIntentExecutor(
      * `PlacaOcr` já filtra por `PlacaValidator`, e o roteador também. A conferência
      * neste ponto é de propósito, e não é redundância defensiva: este é o **único
      * lugar por onde uma placa entra na consulta**, venha do reconhecedor de texto,
-     * do roteador determinístico ou — quando a Etapa B ligar `PlacaDitada` — de um
-     * modelo de linguagem normalizando alfabeto fonético. A regra dura do
-     * `CLAUDE.md` §2 diz que o LLM só preenche campo de intenção já definida; o que
-     * torna essa regra verificável é o formato ser conferido **depois**, num ponto
-     * que nenhuma dessas fontes pode contornar.
+     * do casamento literal do roteador ou — desde 22/08 — de `PlacaDitada`,
+     * normalizando alfabeto fonético **deterministicamente**, sem modelo nenhum.
+     * A regra dura do `CLAUDE.md` §2 diz que o LLM só preenche campo de intenção já
+     * definida; o que torna essa regra verificável é o formato ser conferido
+     * **depois**, num ponto que nenhuma dessas fontes pode contornar — e é o que
+     * valeria igualmente se um modelo viesse a preencher esse campo um dia.
      *
      * Saída que não case com Mercosul (`LLLNLNN`) ou com o padrão antigo
      * (`LLLNNNN`) é **erro de leitura, não consulta**. É o que impede o pior modo de

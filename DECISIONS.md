@@ -2009,6 +2009,10 @@ normalizando alfabeto fonético. A regra dura diz que o LLM só preenche campo d
 intenção já definida; o que a torna verificável é o formato ser conferido **depois**,
 num ponto que nenhuma dessas fontes contorna.
 
+> **Superado em 22/08** na última parte: `PlacaDitada` foi ligada ao roteador e a
+> normalização do alfabeto fonético é **determinística**, sem LLM nenhum. O portão
+> único continua exatamente como descrito acima. Ver a entrada de 2026-08-22.
+
 ### O que não coube, e por quê
 
 `FalhaOperacional` é enum fechado em `core-agent` e **não tem valor para câmera**.
@@ -2016,3 +2020,91 @@ num ponto que nenhuma dessas fontes contorna.
 `CopilotoDoAgente` e **morre no log**: o agente ouve "Consulta indisponível.". A
 distinção que sobreviveu é a que mais importa — `PLACA_NAO_LIDA` ("aproxime-se") só
 sai quando frames chegaram e nenhum tinha placa.
+
+---
+
+## 2026-08-22 · A placa ditada tinha extrator medido e nenhuma porta — literal primeiro, ditada depois
+
+**Sétima vez.** `PlacaDitada.kt` (mais `AlfabetoFonetico.kt` e `NumeroFalado.kt`)
+nasceu em 21/08 com recall 40/40, zero extração errada, zero falso positivo em 44
+negativos e zero placa fabricada sobre os 1817 trechos de lei — e com **zero
+chamadores em qualquer `src/main`**. Quem extraía placa em produção era
+`DeterministicIntentRouter.extrairPlaca`, uma linha de `PlacaValidator.extrair`:
+casamento **literal** de sete caracteres. Então o agente que dita *"tango bravo unido
+três delta sete zero"* — que é como se dita placa por rádio, e é o exemplo de aceite
+da spec — caía em `Intent.ConsultarPlaca(placa = null)` e o app **abria a câmera**
+para ler a placa que ele acabara de falar.
+
+### A ordem foi pedida com um argumento, e a medição derrubou o argumento
+
+O pedido dizia: *"o literal primeiro, o ditado como segundo caminho — inverter faria
+o ditado reinterpretar uma placa que já estava escrita"*. **Não é o que acontece.** A
+segunda tentativa só roda quando a primeira devolve `null`, então `literal ?: ditada`
+e `ditada ?: literal` só divergem quando **as duas** devolvem placa e as placas
+diferem. Medido sobre as 84 elocuções do banco mais os 1817 trechos de lei do corpus:
+**zero divergências**. Ligada a inversão em `extrairPlaca`, a suíte inteira continua
+verde — o que, pela pergunta 3 do §6, provava que o teste da ordem que eu tinha
+escrito não testava a ordem.
+
+O que **está** medido é que os dois são necessários, e por motivos opostos:
+
+- **sem a ditada**, *"tango bravo unido três delta sete zero"* devolve `null`;
+- **sem o literal**, perde-se a placa escrita. Em *"consultar placa ABC 1D23 e o carro
+  é um Gol"* o montador de corridas não para na placa — "e" e "o" valem a si mesmas
+  como letras por regra de `AlfabetoFonetico.letra` —, a corrida chega a `ABC1D23EO`
+  e é descartada **inteira**: sete exatos, sem fatiar, que é o desenho que impede
+  fabricar placa dentro de corrida longa.
+
+**E a ordem escolhida tem custo conhecido.** Zero divergências no material medido não
+é "não pode divergir": a construção existe e é fala plausível de rádio — a **correção
+falada**. Em *"consultar placa ABC1234, não — placa XYZ5678"*, o literal lê a
+**primeira** placa do texto e `PlacaDitada` lê depois da **última** menção a "placa"
+(é o desenho da âncora). Com o literal primeiro, o app consulta `ABC1234`: a placa que
+o agente acabou de corrigir. Fica asserido e **não** consertado — nenhuma elocução
+medida exercita isso, e trocar quem vence é decisão de spec pelo §7. O teste existe
+para que quem mudar a ordem veja o custo antes de decidir.
+
+### A ditada recebe a transcrição CRUA, e isso não é detalhe
+
+`texto`, dentro do roteador, chega minúsculo: `normalizar` e
+`PalavraDeAtivacaoNaFala.conferir` baixam a caixa. E **a caixa alta é evidência** no
+montador de corridas — é a única coisa que separa "ABC" de "do" em *"a placa do
+carro"*. Passar o texto normalizado teria matado em silêncio toda a família de
+ditadas soletradas (*"placa ABC mil duzentos e trinta e quatro"*), e o sintoma seria
+recall baixo sem erro nenhum no caminho. A âncora de `PlacaDitada` só lê depois da
+palavra "placa", então o gatilho que vem junto na transcrição crua é inofensivo.
+
+### O contra-teste, com os dois lados, medido pelo caminho de produção
+
+`PlacaDitadaNoRoteadorTest` reconstrói o **roteador de ontem** (literal e nada mais,
+com a mesma normalização) para que "isto devolvia `null`" seja asserção e não
+memória. Sobre o banco de `BancoDePlacasDitadas`, atravessando `route()`:
+
+| | ontem | hoje |
+|---|---|---|
+| positivos extraídos (40) | **2** | **40** |
+| extraídos ERRADOS | 0 | **0** |
+| falsos positivos (44 negativos) | 0 | **0** |
+
+Uma asserção só não serviria: *"a ditada passa a valer"* sozinha passaria com um
+extrator que aceitasse qualquer coisa; *"o literal não regride"* sozinha passaria com
+o código de ontem, sem mudança nenhuma. Há ainda um controle de instrumento no lado
+negativo — **42 dos 44 negativos chegam a `ConsultarPlaca`** —, senão o zero de falso
+positivo seria do léxico do roteador e não do extrator.
+
+O banco de elocuções saiu de dentro de `BancoDePlacasDitadasTest` para
+`BancoDePlacasDitadas`, porque banco de referência em duas cópias diverge no primeiro
+negativo que alguém acrescenta a uma só delas.
+
+### O que ficou aberto, de propósito
+
+- **`Recusada` perde o motivo.** `NADA_DITADO`, `FORA_DA_GRAMATICA` e `AMBIGUA` viram
+  os três `null`, que abre a câmera. Para o primeiro é o certo; para os outros dois o
+  certo seria pedir repetição citando o que se ouviu, e isso exige campo novo em
+  `Intent.ConsultarPlaca` — mudança de contrato, que pelo §7 começa por diff de spec.
+  Enquanto não começa, o `null` **não regride nada**: era o que o roteador já
+  devolvia.
+- **"unido" continua `SEM_FONTE`.** ~40 buscas, nenhuma fonte; toda fonte brasileira
+  dá *Uniform*/*Uniforme* para U. Ela só está na tabela porque é a palavra do exemplo
+  de aceite da spec. Trocar o exemplo por *"uniforme"* e tirá-la é decisão de spec, e
+  está registrada como pendência em `specs/consulta-de-placa-por-camera.spec.md`.
