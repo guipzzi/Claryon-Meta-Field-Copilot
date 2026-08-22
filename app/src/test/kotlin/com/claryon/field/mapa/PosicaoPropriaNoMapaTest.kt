@@ -2,29 +2,32 @@ package com.claryon.field.mapa
 
 import com.claryon.net.RespostaDePosicao
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * **A posição do PORTADOR — a única do mapa que ninguém carimba.**
+ * **A posição do PORTADOR — a que ninguém carimbava.**
  *
  * A analogia é o Uber Driver: quando o motorista perde GPS ou rede, o app diz na
- * tela, e o passageiro vê que a posição está velha. Estes testes medem os dois
- * lados dessa régua no Claryon, e eles não estão no mesmo lugar:
+ * tela, e o passageiro vê que a posição está velha. Até 21/08 este arquivo fixava
+ * o **defeito**: do par a régua existia e era boa, do portador não existia régua
+ * nenhuma, e `montarDeGrandezas` afirmava `temPosicaoPropria = true` sobre a lista
+ * VAZIA — que é exatamente o que `posicoes_do_grupo` devolve quando quem pergunta
+ * nunca publicou, porque o `cross join minha` zera o resultado inteiro.
  *
- *  - **Do PAR**, a régua existe e é boa. [ParNoMapa.atualizadoHa] aparece em toda
- *    linha, o [Frescor] esmaece aos 2 min e para de afirmar posição aos 10.
- *  - **Do PORTADOR**, não existe régua nenhuma. [EstadoDoMapa] não tem campo para
- *    a idade da posição própria, e [MapaDePares.montarDeGrandezas] afirma
- *    `temPosicaoPropria = true` sem ter recebido evidência de posição própria
- *    nenhuma — inclusive sobre a lista VAZIA, que é exatamente o que o servidor
- *    devolve quando quem pergunta nunca publicou (o `cross join minha` de
- *    `posicoes_do_grupo` zera o resultado inteiro).
+ * O KDoc daquela versão terminava assim: *"se alguém acrescentar o carimbo da
+ * posição própria, eles falham e a falha é o aviso de que este arquivo precisa ser
+ * reescrito junto"*. Foi o que aconteceu. Esta é a versão reescrita, e o assunto
+ * dela mudou de lado: em vez de fixar a mentira, ela prova que os **três estados
+ * que colapsavam em um** agora são distinguíveis.
  *
- * Os testes abaixo **fixam o comportamento de hoje**, com o defeito nomeado no
- * corpo. Não são aspiração: se alguém acrescentar o carimbo da posição própria,
- * eles falham e a falha é o aviso de que este arquivo precisa ser reescrito junto.
+ *  1. **Não publiquei** — a causa é do portador.
+ *  2. **Ninguém publicou** — a causa é do grupo, e o mapa fica em branco só com a
+ *     posição própria, sem acusar ninguém.
+ *  3. **Não estou recebendo** — a sondagem falhou; nada aqui dentro é afirmação.
  */
 class PosicaoPropriaNoMapaTest {
 
@@ -77,64 +80,187 @@ class PosicaoPropriaNoMapaTest {
         assertTrue(quinzeMin.idadeFalada!!.contains("15 minutos"))
     }
 
-    // ── O portador não tem carimbo nenhum ─────────────────────────────────────
+    // ── Agora o portador também tem ───────────────────────────────────────────
 
     /**
-     * **O defeito, fixado.** `EstadoDoMapa` não tem onde guardar a idade da posição
-     * própria, embora `RespostaDePosicao.idadeDoSolicitanteS` chegue do servidor em
-     * TODA linha. O dado existe no fio, é lido em
-     * `MapaViewModel.montarMapa` — e morre ali, virando um booleano de tudo-ou-nada.
+     * **O carimbo do portador existe, e vem do dado que já viajava no fio.**
+     *
+     * `idade_solicitante_s` chega em TODA linha de `posicoes_do_grupo` desde a
+     * migração `0007` — não custa requisição nova. Ele era lido no ViewModel e
+     * morria ali, virando um booleano de tudo-ou-nada; agora atravessa até o estado
+     * da tela.
+     *
+     * Contra-teste: dois valores diferentes têm de sair diferentes. Um campo
+     * cravado em zero passaria numa asserção de existência.
      */
     @Test
-    fun oEstadoDoMapaNaoTemCampoParaAIdadeDaPosicaoPropria() {
-        val campos = EstadoDoMapa::class.java.declaredFields.map { it.name.lowercase() }
-        assertTrue(
-            "EstadoDoMapa ganhou campo de idade própria ($campos) — o carimbo do " +
-                "portador passou a existir e este teste precisa ser reescrito",
-            campos.none { "minhaidade" in it || "idadepropria" in it || "publicando" in it },
+    fun oEstadoDoMapaCarregaAIdadeDaPosicaoPropria() {
+        val fresca = MapaDePares.montarDeGrandezas(
+            listOf(par(idadeDoSolicitanteS = 3)),
+            assinado = true,
         )
-        // O que existe é só a coordenada, sem quando.
-        assertTrue("minhalatitude" in campos)
-        assertTrue("minhalongitude" in campos)
+        val velha = MapaDePares.montarDeGrandezas(
+            listOf(par(idadeDoSolicitanteS = 97)),
+            assinado = true,
+        )
+
+        assertEquals(3, fresca.minhaIdadeS)
+        assertEquals(97, velha.minhaIdadeS)
+        assertNotEquals(
+            "se as duas saíssem iguais, o campo existiria e não carregaria nada",
+            fresca.minhaIdadeS,
+            velha.minhaIdadeS,
+        )
     }
 
+    /** Sem linha nenhuma não há de onde tirar a idade, e ela é nula em vez de zero. */
+    @Test
+    fun semLinha_aIdadePropriaEhNula_naoZero() {
+        val estado = MapaDePares.montarDeGrandezas(emptyList(), assinado = true)
+        assertNull(
+            "zero seria 'medida agora' — uma afirmação que a resposta vazia não faz",
+            estado.minhaIdadeS,
+        )
+    }
+
+    // ── Os três estados que colapsavam em um ─────────────────────────────────
+
     /**
-     * **Lista vazia afirma posição própria que ninguém provou.**
+     * **O defeito principal, agora do lado certo da asserção.**
      *
-     * É o estado real de quem nunca publicou: `posicoes_do_grupo` faz
-     * `cross join minha`, e sem linha em `agent_positions` o resultado é ZERO
-     * linhas — não uma linha dizendo "você não publicou". `montarDeGrandezas`
-     * carimba `temPosicaoPropria = true` e `motivoIndisponivel = null` em cima
-     * disso, e a gaveta da tela lê esse estado como *"Ninguém publicando ·
-     * Nenhum par do talk group está enviando posição agora"*: a causa é minha e a
-     * frase acusa os outros.
+     * Lista vazia com a transmissão parada é "eu não publiquei", e o mapa não pode
+     * afirmar posição própria em cima disso. Era esse `true` literal que a gaveta
+     * lia como *"Ninguém publicando · Nenhum par do talk group está enviando
+     * posição agora"*: a causa era do portador e a frase acusava os outros.
      */
     @Test
-    fun listaVazia_aindaAfirmaTerPosicaoPropria() {
-        val estado = MapaDePares.montarDeGrandezas(emptyList(), assinado = true)
+    fun listaVazia_semTransmissao_naoAfirmaPosicaoPropria() {
+        val estado = MapaDePares.montarDeGrandezas(
+            emptyList(),
+            assinado = true,
+            minhaPosicaoSobe = false,
+            motivoDaMinhaPosicao = "Sua posição não sobe: o turno não abriu.",
+        )
 
-        assertTrue(
-            "hoje o mapa afirma posição própria sem nenhuma evidência dela",
+        assertFalse(
+            "sem evidência nenhuma de posição própria, o mapa não pode afirmá-la",
             estado.temPosicaoPropria,
         )
-        assertNull(
-            "e não diz motivo nenhum — 'não publiquei' e 'ninguém publicou' " +
-                "chegam à tela como o mesmo estado",
-            estado.motivoIndisponivel,
+        assertFalse(estado.minhaPosicaoSobe)
+        assertTrue(
+            "e a causa é a do PORTADOR, não uma sobre a guarnição: " +
+                "${estado.motivoDaMinhaPosicao}",
+            estado.motivoDaMinhaPosicao!!.contains("Sua posição"),
         )
         assertTrue(estado.pares.isEmpty())
     }
 
     /**
-     * A mesma afirmação sobrevive à posição própria mais velha que o mundo.
-     *
-     * `montarDeGrandezas` não olha [RespostaDePosicao.idadeDoSolicitanteS] — quem
-     * olha é `MapaViewModel.montarMapa`, **e só quando a lista não está vazia**.
-     * Este teste marca a fronteira: no objeto puro, a idade do solicitante não
-     * muda absolutamente nada.
+     * **Contra-teste do mesmo ponto**: a MESMA lista vazia, com a transmissão
+     * viva, é o outro estado — "ninguém publicou". Os dois têm de divergir, senão
+     * a distinção não existe.
      */
     @Test
-    fun aIdadeDoSolicitanteNaoMudaNadaNoObjetoPuro() {
+    fun listaVazia_comTransmissaoViva_ehOOutroEstado() {
+        val naoPubliquei = MapaDePares.montarDeGrandezas(
+            emptyList(),
+            assinado = true,
+            minhaPosicaoSobe = false,
+            motivoDaMinhaPosicao = "Sua posição não sobe: sem rede.",
+        )
+        val ninguemPublicou = MapaDePares.montarDeGrandezas(
+            emptyList(),
+            assinado = true,
+            minhaPosicaoSobe = true,
+            motivoDaMinhaPosicao = "Última posição enviada há 12 s.",
+        )
+
+        assertFalse(naoPubliquei.temPosicaoPropria)
+        assertTrue(
+            "eu publico: a lista vazia agora fala do grupo, e só aí ela pode",
+            ninguemPublicou.temPosicaoPropria,
+        )
+        assertNotEquals(
+            "com o `true` literal de volta, estes dois estados voltam a ser um só",
+            naoPubliquei.temPosicaoPropria,
+            ninguemPublicou.temPosicaoPropria,
+        )
+    }
+
+    /**
+     * **Com linhas, o próprio `cross join` é a prova.** O servidor não teria
+     * calculado distância nenhuma sem a minha posição — então `temPosicaoPropria`
+     * é verdade mesmo com o estado local ainda por atualizar (o serviço acabou de
+     * subir, o primeiro POST subiu, o `StateFlow` ainda não foi lido).
+     */
+    @Test
+    fun comLinhas_aPosicaoPropriaEhProvadaPelaRespostaDoServidor() {
+        val estado = MapaDePares.montarDeGrandezas(
+            listOf(par()),
+            assinado = true,
+            minhaPosicaoSobe = false,
+        )
+        assertTrue(
+            "houve linha, logo houve `cross join minha`, logo o servidor tem a minha posição",
+            estado.temPosicaoPropria,
+        )
+    }
+
+    /** O terceiro estado: não estou recebendo. Distinto dos outros dois. */
+    @Test
+    fun naoEstouRecebendo_ehUmTerceiroEstado() {
+        val fora = EstadoDoMapa.indisponivel(
+            "Não foi possível ler as posições da guarnição.",
+            minhaPosicaoSobe = true,
+            motivoDaMinhaPosicao = "Última posição enviada há 8 s.",
+        )
+
+        assertFalse(fora.assinado)
+        assertTrue(fora.motivoIndisponivel!!.contains("ler as posições"))
+        assertTrue(
+            "receber e transmitir falham separado: a sondagem caiu e a minha " +
+                "posição continua subindo",
+            fora.minhaPosicaoSobe,
+        )
+    }
+
+    /**
+     * As três causas que chegam à tela precisam ser três frases distintas. Uma
+     * frase única e verdadeira ("posição indisponível") passaria em qualquer
+     * asserção que olhasse um estado de cada vez.
+     */
+    @Test
+    fun osTresEstados_chegamAtelaComoTresFrasesDiferentes() {
+        val naoPubliquei = MapaDePares.montarDeGrandezas(
+            emptyList(), assinado = true,
+            minhaPosicaoSobe = false,
+            motivoDaMinhaPosicao = "Sua posição não sobe: o turno não abriu.",
+        )
+        val ninguemPublicou = MapaDePares.montarDeGrandezas(
+            emptyList(), assinado = true,
+            minhaPosicaoSobe = true,
+            motivoDaMinhaPosicao = "Última posição enviada há 12 s.",
+        )
+        val naoRecebo = EstadoDoMapa.indisponivel(
+            "Não foi possível ler as posições da guarnição.",
+            minhaPosicaoSobe = true,
+            motivoDaMinhaPosicao = "Última posição enviada há 12 s.",
+        )
+
+        // O trio (temPosicaoPropria, motivoIndisponivel != null) tem de separar os
+        // três — é exatamente essa tupla que a tela consulta no `when`.
+        val assinaturas = listOf(naoPubliquei, ninguemPublicou, naoRecebo)
+            .map { it.temPosicaoPropria to (it.motivoIndisponivel != null) }
+        assertEquals("três estados, três leituras da tela", 3, assinaturas.toSet().size)
+    }
+
+    /**
+     * A idade do solicitante não mexe em nenhuma linha de par: as distâncias já
+     * vieram calculadas do servidor. Ela decide sobre a tela INTEIRA, no ViewModel,
+     * e essa fronteira é deliberada.
+     */
+    @Test
+    fun aIdadeDoSolicitanteNaoMudaALinhaDoPar() {
         val fresca = MapaDePares.montarDeGrandezas(
             listOf(par(idadeDoSolicitanteS = 1)),
             assinado = true,
@@ -143,12 +269,15 @@ class PosicaoPropriaNoMapaTest {
             listOf(par(idadeDoSolicitanteS = 86_400)),
             assinado = true,
         )
-        assertEquals(fresca.temPosicaoPropria, podre.temPosicaoPropria)
-        assertEquals(fresca.motivoIndisponivel, podre.motivoIndisponivel)
         assertEquals(
             "a linha do par sai idêntica com a minha posição de um dia atrás",
             fresca.pares.single(),
             podre.pares.single(),
+        )
+        assertNotEquals(
+            "mas o estado da tela sabe a diferença",
+            fresca.minhaIdadeS,
+            podre.minhaIdadeS,
         )
     }
 }

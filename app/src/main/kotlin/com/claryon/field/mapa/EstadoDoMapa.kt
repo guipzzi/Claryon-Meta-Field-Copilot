@@ -73,12 +73,59 @@ data class ParNoMapa(
         get() = rumoGraus == null || distanciaM < com.claryon.agent.FalaDePosicao.JUNTO_M
 }
 
-/** O que a tela mostra num instante. */
+/**
+ * O que a tela mostra num instante.
+ *
+ * **Três estados que colapsavam em um.** Até 21/08 a lista vazia era uma coisa só,
+ * e a gaveta escrevia *"Ninguém publicando · Nenhum par do talk group está
+ * enviando posição agora"* em cima de qualquer uma delas. Uma auditoria mostrou
+ * que a mais comum era justamente aquela em que a frase mente: `posicoes_do_grupo`
+ * faz `cross join minha`, então **quem não publicou recebe zero linhas mesmo com a
+ * guarnição inteira publicando** — a causa é do portador e a frase acusava os
+ * outros. Os três agora são distinguíveis daqui:
+ *
+ *  1. **Não publiquei** — [temPosicaoPropria] `false`. A causa está em
+ *     [motivoDaMinhaPosicao], derivada do estado real da transmissão.
+ *  2. **Ninguém publicou** — [temPosicaoPropria] `true` e [pares] vazia. Decisão
+ *     do dono do produto: o mapa fica em branco, **só com a posição do portador**,
+ *     sem acusar ninguém.
+ *  3. **Não estou recebendo** — [motivoIndisponivel] preenchido. A sondagem falhou
+ *     ou não há sessão; nada do que está aqui dentro é afirmação sobre o mundo.
+ */
 data class EstadoDoMapa(
     val pares: List<ParNoMapa>,
     val assinado: Boolean,
+    /**
+     * O **servidor** tem a minha posição.
+     *
+     * Deixou de ser o literal `true` que era: com linhas na resposta, a prova é
+     * direta (o `cross join minha` só rende linha se eu tiver publicado); sem
+     * linhas, a melhor evidência é local — [EstadoDaTransmissao.viva].
+     */
     val temPosicaoPropria: Boolean,
     val motivoIndisponivel: String?,
+    /**
+     * Há quanto tempo o servidor tem a minha posição, em segundos.
+     *
+     * Vem de `idade_solicitante_s`, que chega em **toda** linha de
+     * `posicoes_do_grupo` desde a migração `0007` — não custa requisição nova. O
+     * dado existia no fio, era lido no ViewModel e morria ali, virando um booleano
+     * de tudo-ou-nada. `null` quando não há linha nenhuma de onde tirá-lo.
+     */
+    val minhaIdadeS: Int? = null,
+    /**
+     * **A minha posição está subindo agora?** O carimbo do portador, que era o
+     * único do mapa que ninguém dava.
+     */
+    val minhaPosicaoSobe: Boolean = false,
+    /**
+     * Por que sobe, ou por que não — sempre derivada do estado, nunca fixa.
+     *
+     * Presente também no caminho feliz ("Última posição enviada há 40 s"): dizer
+     * "está subindo" sem dizer *quando* subiu é a mesma afirmação sem lastro que
+     * o resto deste arquivo existe para eliminar.
+     */
+    val motivoDaMinhaPosicao: String? = null,
     /**
      * A coordenada do **portador**, e só dela.
      *
@@ -120,6 +167,26 @@ data class EstadoDoMapa(
             temPosicaoPropria = false,
             motivoIndisponivel = motivo,
         )
+
+        /**
+         * O mesmo, carregando a causa da transmissão própria.
+         *
+         * "Não estou recebendo" e "não estou transmitindo" são falhas
+         * independentes e podem coexistir — a rede caiu para os dois lados. A tela
+         * precisa das duas para não trocar uma pela outra.
+         */
+        fun indisponivel(
+            motivo: String,
+            minhaPosicaoSobe: Boolean,
+            motivoDaMinhaPosicao: String?,
+        ) = EstadoDoMapa(
+            pares = emptyList(),
+            assinado = false,
+            temPosicaoPropria = false,
+            motivoIndisponivel = motivo,
+            minhaPosicaoSobe = minhaPosicaoSobe,
+            motivoDaMinhaPosicao = motivoDaMinhaPosicao,
+        )
     }
 }
 
@@ -131,6 +198,17 @@ data class EstadoDoMapa(
  */
 object MapaDePares {
 
+    /**
+     * **Caminho do espelho de coordenadas — hoje sem chamador em `src/main`.**
+     *
+     * `grep -rn "MapaDePares.montar(" app/src` devolve só `MapaDeParesTest`. Ele é
+     * o resto da época em que a recepção era assinatura Realtime de coordenadas de
+     * par; desde que virou sondagem de RPC, quem monta a tela é
+     * [montarDeGrandezas]. Fica registrado aqui em vez de na cabeça de quem ler:
+     * classe testada sem chamador é **escrita**, não construída, e as regras que
+     * este bloco ainda protege (frescor, movimento, ordem) estão duplicadas na
+     * outra função — é lá que elas valem no aparelho.
+     */
     fun montar(marcadores: List<MarcadorDePar>, assinado: Boolean): EstadoDoMapa =
         EstadoDoMapa(
             pares = marcadores.map(::traduzir),
@@ -143,6 +221,19 @@ object MapaDePares {
      * Monta a partir das grandezas que o servidor calculou — o caminho do mapa
      * desde que a recepção passou a ser sondagem de RPC em vez de assinatura de
      * coordenadas.
+     *
+     * **`temPosicaoPropria` deixou de ser o literal `true`.** Ele era escrito
+     * mesmo sobre a lista VAZIA, que é exatamente o que `posicoes_do_grupo`
+     * devolve quando quem pergunta nunca publicou — o `cross join minha` zera o
+     * resultado inteiro. A tela lia esse `true` e concluía "ninguém do grupo está
+     * publicando" a partir de uma resposta que não diz nada sobre o grupo.
+     *
+     * A regra agora tem duas metades e nenhuma inventa:
+     *
+     *  - **Com linhas**, o próprio `cross join` é a prova: o servidor não teria
+     *    calculado distância nenhuma sem a minha posição.
+     *  - **Sem linhas**, a resposta é muda, e a única evidência disponível é local
+     *    — [minhaPosicaoSobe], que vem de `TransmissaoDePosicao`.
      */
     fun montarDeGrandezas(
         posicoes: List<com.claryon.net.RespostaDePosicao>,
@@ -150,6 +241,8 @@ object MapaDePares {
         minhaLatitude: Double? = null,
         minhaLongitude: Double? = null,
         meuRumoGraus: Float? = null,
+        minhaPosicaoSobe: Boolean = false,
+        motivoDaMinhaPosicao: String? = null,
     ): EstadoDoMapa = EstadoDoMapa(
         pares = posicoes.map { p ->
             val frescor = frescorDe(p.idadeS)
@@ -167,8 +260,14 @@ object MapaDePares {
             )
         },
         assinado = assinado,
-        temPosicaoPropria = true,
+        temPosicaoPropria = posicoes.isNotEmpty() || minhaPosicaoSobe,
         motivoIndisponivel = null,
+        // A idade da MINHA posição, a mesma que mede toda distância desta tela.
+        // `minOf` e não `first`: as linhas trazem o mesmo valor, e o mínimo é o
+        // único agregado que não passa a mentir se um dia deixarem de trazer.
+        minhaIdadeS = posicoes.minOfOrNull { it.idadeDoSolicitanteS },
+        minhaPosicaoSobe = minhaPosicaoSobe,
+        motivoDaMinhaPosicao = motivoDaMinhaPosicao,
         minhaLatitude = minhaLatitude,
         minhaLongitude = minhaLongitude,
         meuRumoGraus = meuRumoGraus,

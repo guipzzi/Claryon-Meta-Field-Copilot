@@ -4,8 +4,10 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.claryon.agent.FalaDePosicao
+import android.os.SystemClock
 import com.claryon.field.auth.SessaoDoAgente
 import com.claryon.field.local.ProvedorDeLocal
+import com.claryon.field.local.TransmissaoDePosicao
 import com.claryon.field.radio.CanaisDoAgente
 import com.claryon.field.radio.CanalDoPiloto
 import com.claryon.field.mapa.TracoDoRastro
@@ -84,8 +86,16 @@ class MapaViewModel(app: Application) : AndroidViewModel(app) {
             if (!SessaoDoAgente.redeConfigurada ||
                 SessaoDoAgente.tokenValido(getApplication()) == null
             ) {
-                _estado.value =
-                    EstadoDoMapa.indisponivel("Sem sessão. Entre para ver a guarnição.")
+                // A causa da transmissão vai junto **também aqui**: sem sessão as
+                // duas metades caem, e a tela precisa dizer as duas. Medido no
+                // aparelho — sem esta linha o cabeçalho acendia "fora do mapa" em
+                // vermelho e não havia onde ler por quê.
+                val t = TransmissaoDePosicao.estado.value
+                _estado.value = EstadoDoMapa.indisponivel(
+                    "Sem sessão. Entre para ver a guarnição.",
+                    minhaPosicaoSobe = t.viva,
+                    motivoDaMinhaPosicao = t.causa(SystemClock.elapsedRealtime()),
+                )
                 return@launch
             }
 
@@ -122,7 +132,16 @@ class MapaViewModel(app: Application) : AndroidViewModel(app) {
                         )
                     },
                     onFailure = {
-                        EstadoDoMapa.indisponivel("Não foi possível ler as posições da guarnição.")
+                        // **Receber e transmitir falham separado.** A sondagem
+                        // caiu, e isso não diz nada sobre a minha posição estar
+                        // subindo — a causa da transmissão vai junto para a tela
+                        // não trocar uma falha pela outra.
+                        val t = TransmissaoDePosicao.estado.value
+                        EstadoDoMapa.indisponivel(
+                            "Não foi possível ler as posições da guarnição.",
+                            minhaPosicaoSobe = t.viva,
+                            motivoDaMinhaPosicao = t.causa(SystemClock.elapsedRealtime()),
+                        )
                     },
                 )
                 // Redesenhar por tempo, e não só quando chega dado: o esmaecimento
@@ -261,10 +280,21 @@ class MapaViewModel(app: Application) : AndroidViewModel(app) {
      * inteira falsa — não só uma linha.
      */
     private fun montarMapa(lista: List<RespostaDePosicao>): EstadoDoMapa {
+        // **O estado da TRANSMISSÃO própria, lido a cada redesenho.** É o que
+        // separa "ninguém publicou" de "eu não publiquei" — duas causas que a
+        // resposta do servidor não distingue, porque `posicoes_do_grupo` faz
+        // `cross join minha` e devolve zero linhas nos dois casos.
+        val transmissao = TransmissaoDePosicao.estado.value
+        val agora = SystemClock.elapsedRealtime()
+        val sobe = transmissao.viva
+        val causa = transmissao.causa(agora)
+
         val minhaIdade = lista.minOfOrNull { it.idadeDoSolicitanteS } ?: Int.MAX_VALUE
         if (lista.isNotEmpty() && minhaIdade > FalaDePosicao.IDADE_MAXIMA_S) {
             return EstadoDoMapa.indisponivel(
                 "Sua posição está desatualizada. As distâncias seriam medidas do lugar errado.",
+                minhaPosicaoSobe = sobe,
+                motivoDaMinhaPosicao = causa,
             )
         }
         // A origem do mapa vem da coleta local, não do servidor: o servidor
@@ -277,6 +307,8 @@ class MapaViewModel(app: Application) : AndroidViewModel(app) {
             minhaLatitude = minha?.latitude,
             minhaLongitude = minha?.longitude,
             meuRumoGraus = minha?.rumoGraus,
+            minhaPosicaoSobe = sobe,
+            motivoDaMinhaPosicao = causa,
         )
     }
 

@@ -21,6 +21,8 @@ import com.claryon.agent.TipoServico
 import com.claryon.field.audio.AudioDoAgente
 import com.claryon.field.audio.SaidaUnica
 import com.claryon.field.local.ColetorDePosicao
+import com.claryon.field.local.FonteDoSistema
+import com.claryon.field.local.TransmissaoDePosicao
 import com.claryon.field.voice.CopilotoDoAgente
 import com.claryon.field.voice.EscutaDeAtivacao
 import com.claryon.field.voice.EstadoDaEscuta
@@ -32,12 +34,15 @@ import com.claryon.common.Telemetry
 import com.claryon.common.Priority
 import com.claryon.agent.Utterance
 import com.claryon.field.auth.SessaoDoAgente
+import com.claryon.net.PoliticaDeReconexao
 import com.claryon.net.PublicadorDePosicao
 import com.claryon.net.PublicadorDePosicaoSupabase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import com.claryon.field.MainActivity
 import com.claryon.field.R
 import kotlinx.coroutines.channels.BufferOverflow
@@ -84,11 +89,19 @@ class CopilotService : Service() {
         super.onCreate()
         criarCanal()
         coletor = ColetorDePosicao(
-            context = this,
             escopo = escopo,
             publicar = { lat, lon, precisao, velocidade, nanos ->
-                escritorDePosicao().publicar(lat, lon, precisao, velocidade, nanos)
+                val escritor = escritorDePosicao()
+                escritor.publicar(lat, lon, precisao, velocidade, nanos)
+                // **Aqui está o consumidor que `publicando()` não tinha.** A
+                // interface `PublicadorDePosicao.publicar` devolve `Unit` — a falha
+                // vive num flag interno do publicador, e enquanto ninguém lia esse
+                // flag o coletor tratava fracasso e sucesso como a mesma coisa. Uma
+                // linha, e o `onFailure` que era código morto vira um `Boolean`
+                // que a tela do mapa lê.
+                escritor.publicando()
             },
+            fonte = FonteDoSistema(this),
         )
         escuta = construirEscuta().also { viva ->
             escopo.launch { viva.estado.collect { _estadoDaEscuta.value = it } }
@@ -194,16 +207,45 @@ class CopilotService : Service() {
      * acorda e o dado morre no caminho.
      */
     /**
-     * Abre o turno antes de a primeira posição subir.
+     * Abre o turno antes de a primeira posição subir — **e insiste até conseguir**.
      *
      * Sem turno aberto o servidor recusa `publicar_posicao` com `42501` (`0019`),
      * e o coletor acordaria o GPS para nada. É idempotente do lado do servidor, o
      * que torna seguro chamar a cada subida do serviço.
+     *
+     * **Uma tentativa só era uma armadilha de turno inteiro.** O serviço sobe junto
+     * com a operação, que é exatamente o momento em que a rede tem mais chance de
+     * ainda não estar de pé: o token pode não ter saído do cofre, o Wi-Fi da
+     * delegacia pode estar trocando para dados, a viatura pode estar na garagem.
+     * Uma falha ali e a posição não subia até o agente encerrar e reabrir o turno —
+     * o que ninguém faz, porque nada avisava. O rádio, no arquivo ao lado, já
+     * reconecta com backoff; a posição não tinha razão nenhuma para ser diferente.
+     *
+     * O teto é de 64 s, e não os 5 min de [PoliticaDeReconexao.TETO_MS]: o rádio
+     * pode esperar cinco minutos porque o agente percebe um rádio mudo na hora. Um
+     * turno fechado é invisível — o único sinal é o companheiro não aparecer no
+     * mapa de outra pessoa.
      */
     private fun abrirTurno() {
         escopo.launch {
-            val ok = runCatching { escritorDePosicao().iniciarTurno() }.getOrDefault(false)
-            if (!ok) Log.w(TAG, "turno NÃO abriu — a posição não vai subir até abrir")
+            val backoff = PoliticaDeReconexao(tetoMs = TETO_DO_TURNO_MS)
+            while (isActive) {
+                val ok = runCatching { escritorDePosicao().iniciarTurno() }.getOrDefault(false)
+                TransmissaoDePosicao.turno(ok)
+                if (ok) {
+                    if (backoff.tentativasSeguidas > 0) {
+                        Log.i(TAG, "turno aberto na tentativa ${backoff.tentativasSeguidas + 1}")
+                    }
+                    return@launch
+                }
+                val espera = backoff.proximoAtrasoMs()
+                Log.w(
+                    TAG,
+                    "turno NÃO abriu (tentativa ${backoff.tentativasSeguidas}) — " +
+                        "a posição não sobe até abrir; nova tentativa em ${espera}ms",
+                )
+                delay(espera)
+            }
         }
     }
 
@@ -278,6 +320,11 @@ class CopilotService : Service() {
                     .onFailure { Log.w(TAG, "turno não encerrado", it) }
             }
         }
+        // O turno fechou **deste lado**, e é o que a interface precisa saber: com
+        // o serviço morto nada mais publica, independentemente de o `encerrar_turno`
+        // ter chegado ao servidor. Deixar `turnoAberto = true` pendurado faria a
+        // tela do mapa procurar a causa na rede.
+        TransmissaoDePosicao.turno(false)
         // Soltar o GPS antes de morrer. Um listener sobrevivente mantém o rádio
         // de posição acordado sem ninguém consumindo — o pior custo possível,
         // porque não aparece em lugar nenhum da interface.
@@ -413,6 +460,14 @@ class CopilotService : Service() {
 
         /** Teto do `VoiceCycle` (8 s) mais a resposta falada. */
         const val JANELA_DO_CICLO_MS = 10_000L
+
+        /**
+         * Teto do backoff de [abrirTurno]. 64 s é o mesmo teto que o rádio tático
+         * pratica na reconexão, e o motivo de não usar os 5 min do padrão está no
+         * KDoc daquela função: turno fechado é invisível para quem está com o
+         * aparelho.
+         */
+        private const val TETO_DO_TURNO_MS = 64_000L
 
         private val _modo = MutableStateFlow(ModoOperacao.STANDBY)
 

@@ -1,12 +1,8 @@
 package com.claryon.field.local
 
-import android.Manifest
-import android.content.Context
-import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
-import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import com.claryon.agent.ModoOperacao
@@ -15,6 +11,7 @@ import com.claryon.agent.PlanoDePosicao
 import com.claryon.agent.PoliticaDePosicao
 import com.claryon.agent.PortaDeCorrecao
 import com.claryon.agent.Veredito
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
@@ -70,13 +67,42 @@ import kotlinx.coroutines.launch
  *
  * O batimento existe para o caso do agente parado: sem ele, quem não se move
  * some do mapa por obsolescência, e companheiro que some parece em perigo.
+ *
+ * ## O que 21/08 corrigiu aqui, e por que tinha de ser corrigido junto
+ *
+ * Uma auditoria mediu **delta de zero linhas** em `agent_positions` em 20 min de
+ * aplicativo aberto, com GPS injetado e o Android confirmando a entrega das
+ * correções. Três defeitos desta classe conspiravam para que isso não aparecesse
+ * em lugar nenhum:
+ *
+ *  - **O `onFailure` do envio era código morto.** Ele só dispararia se `publicar`
+ *    LANÇASSE, e o publicador engolia tudo em `getOrDefault(false)` e devolvia
+ *    `Unit`. A linha *"publicação de posição falhou"* era inalcançável, e nenhuma
+ *    das 20 falhas apareceu no `logcat`. Agora [publicar] devolve **`Boolean`**, e
+ *    o resultado é lido.
+ *  - **O batimento avançava na falha.** `ultimaPublicada` e `ultimaPublicacaoMs`
+ *    eram escritos ANTES do `launch`, então uma publicação que fracassou empurrava
+ *    o relógio exatamente como uma que subiu — e a próxima correção era barrada
+ *    pelo filtro de deslocamento como se a anterior tivesse chegado. Agora o
+ *    carimbo é **cometido só no sucesso**.
+ *  - **O provedor podia cair sem ninguém saber.** O ouvinte era a lambda SAM
+ *    `LocationListener { ... }`, que implementa só `onLocationChanged`;
+ *    `onProviderDisabled` ficava no default vazio. Medido: 70 s de silêncio
+ *    absoluto com o GPS desligado. Agora o ouvinte é um objeto completo e a queda
+ *    do provedor vira estado em [TransmissaoDePosicao].
+ *
+ * Nada disso vira informação sozinho: é [TransmissaoDePosicao] quem leva estes
+ * três estados até a tela do mapa e o relatório de prontidão.
  */
 class ColetorDePosicao(
-    private val context: Context,
     private val escopo: CoroutineScope,
     /**
      * Publica no servidor. Recebe também a velocidade, que alimenta "deslocando",
      * e o `elapsedRealtimeNanos` da correção, de onde sai a idade real.
+     *
+     * **Devolve se o servidor aceitou**, e este `Boolean` é a correção do defeito
+     * mais caro da classe. Enquanto era `Unit`, o único jeito de a falha aparecer
+     * aqui era o publicador lançar — e ele nunca lança.
      */
     private val publicar: suspend (
         lat: Double,
@@ -84,7 +110,8 @@ class ColetorDePosicao(
         precisaoM: Float,
         velocidadeMs: Float?,
         nanosDaCorrecao: Long,
-    ) -> Unit,
+    ) -> Boolean,
+    private val fonte: FonteDeCorrecoes,
     private val agoraMs: () -> Long = { SystemClock.elapsedRealtime() },
 ) {
 
@@ -97,30 +124,61 @@ class ColetorDePosicao(
      */
     private var porta = PortaDeCorrecao()
 
-    private val lm: LocationManager? =
-        context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
-
     private var ouvinte: LocationListener? = null
     private var modoAtual: ModoOperacao? = null
     private var mapaVisivelAtual = false
 
+    /**
+     * **Só avançam em SUCESSO.** `@Volatile` porque o callback do provedor roda na
+     * thread do looper e a confirmação do POST chega pela corrotina.
+     */
+    @Volatile
     private var ultimaPublicada: Location? = null
+
+    @Volatile
     private var ultimaPublicacaoMs = 0L
 
-    /** `true` enquanto a coleta está de pé. Alimenta a prontidão no perfil. */
+    /**
+     * Uma publicação por vez.
+     *
+     * Sem isto, mover o carimbo para depois do POST abriria a porta que ele
+     * fechava: com o envio demorando, cada correção nova passaria pelo filtro de
+     * deslocamento (que compara com um `ultimaPublicada` ainda não atualizado) e
+     * dispararia outro POST. Numa rede ruim — que é justamente quando o envio
+     * demora — isso viraria uma rajada.
+     *
+     * Descartar a correção nova em vez de enfileirá-la é a regra 4 do KDoc da
+     * classe, aplicada aqui: a próxima correção carrega dado melhor.
+     */
+    private val envioEmVoo = AtomicBoolean(false)
+
+    /**
+     * `true` enquanto a coleta está de pé.
+     *
+     * O KDoc anterior dizia *"Alimenta a prontidão no perfil"* e era **mentira**:
+     * `grep` do símbolo devolvia zero chamadores em `src/main`. Quem alimenta a
+     * prontidão é [TransmissaoDePosicao], que esta classe escreve a cada mudança
+     * de estado; esta propriedade sobrou para o próprio `ajustarPara` decidir se
+     * precisa reconfigurar.
+     */
     val coletando: Boolean get() = ouvinte != null
 
     /**
      * Liga ou reconfigura a coleta para [modo].
      *
-     * Reconfigurar em vez de acumular: `removeUpdates` antes de qualquer novo
-     * `requestLocationUpdates`. Sem isso, trocar de modo três vezes deixaria três
-     * assinaturas vivas, cada uma acordando o GPS na sua cadência — e o consumo
-     * viraria a soma delas.
+     * Reconfigurar em vez de acumular: `cancelar` antes de qualquer nova
+     * assinatura. Sem isso, trocar de modo três vezes deixaria três assinaturas
+     * vivas, cada uma acordando o GPS na sua cadência — e o consumo viraria a
+     * soma delas.
+     *
+     * **Toda saída antecipada anota a causa** em [TransmissaoDePosicao]. Antes,
+     * as três eram `Log.w` e `return`: no aparelho, a coleta simplesmente não
+     * existia e a interface não tinha como saber disso.
      */
     fun ajustarPara(modo: ModoOperacao, mapaVisivel: Boolean) {
-        if (!temPermissao()) {
+        if (!fonte.temPermissao()) {
             Log.w(TAG, "sem permissão de localização — coleta não sobe")
+            TransmissaoDePosicao.coletaParada(MotivoDaColeta.SEM_PERMISSAO)
             return
         }
         if (modo == modoAtual && mapaVisivel == mapaVisivelAtual && coletando) return
@@ -129,26 +187,14 @@ class ColetorDePosicao(
         val plano = PoliticaDePosicao.planoPara(modo, mapaVisivel)
         val provedor = provedorPara(modo) ?: run {
             Log.w(TAG, "nenhum provedor de localização disponível")
+            TransmissaoDePosicao.coletaParada(MotivoDaColeta.SEM_PROVEDOR)
             return
         }
 
-        val novo = LocationListener { local -> aoReceber(local, plano) }
-        runCatching {
-            @Suppress("MissingPermission")
-            lm?.requestLocationUpdates(
-                provedor,
-                plano.intervaloMs,
-                // **Zero, e não `plano.deslocamentoMinimoM`.** O filtro de
-                // deslocamento continua existindo — mudou de lugar, para dentro de
-                // `aoReceber`, onde o batimento também pode votar. Ver o KDoc da
-                // classe: enquanto ele estava aqui, agente parado não recebia
-                // callback nenhum e o batimento era código inalcançável.
-                0f,
-                novo,
-                Looper.getMainLooper(),
-            )
-        }.onFailure {
-            Log.w(TAG, "requestLocationUpdates falhou: ${it.message}")
+        val novo = OuvinteDoProvedor(plano)
+        if (!fonte.assinar(provedor, plano.intervaloMs, novo)) {
+            Log.w(TAG, "assinatura de correções recusada pelo sistema")
+            TransmissaoDePosicao.coletaParada(MotivoDaColeta.ASSINATURA_RECUSADA)
             return
         }
 
@@ -156,6 +202,7 @@ class ColetorDePosicao(
         ouvinte = novo
         modoAtual = modo
         mapaVisivelAtual = mapaVisivel
+        TransmissaoDePosicao.coletaDePe(plano)
         Log.i(
             TAG,
             "coleta em $modo por $provedor: ${plano.intervaloMs}ms, publica a cada " +
@@ -164,13 +211,48 @@ class ColetorDePosicao(
     }
 
     fun parar() {
-        ouvinte?.let { runCatching { lm?.removeUpdates(it) } }
+        ouvinte?.let { fonte.cancelar(it) }
         ouvinte = null
         modoAtual = null
+        envioEmVoo.set(false)
+        TransmissaoDePosicao.coletaParada(MotivoDaColeta.PARADA)
+    }
+
+    /**
+     * O ouvinte **completo**, e não a lambda SAM.
+     *
+     * `LocationListener { local -> ... }` implementa só `onLocationChanged`; os
+     * outros três métodos ficam no default vazio da interface. Com o GPS desligado
+     * nos ajustes, o Android chama `onProviderDisabled` e mais nada — e o app
+     * media 70 s de silêncio absoluto, sem uma linha de log e sem nenhuma mudança
+     * na tela. O agente sumia do mapa da guarnição achando que estava visível.
+     */
+    private inner class OuvinteDoProvedor(private val plano: PlanoDePosicao) : LocationListener {
+
+        override fun onLocationChanged(local: Location) = aoReceber(local, plano)
+
+        override fun onProviderDisabled(provider: String) {
+            Log.w(TAG, "provedor $provider DESLIGADO — a posição para de subir")
+            TransmissaoDePosicao.provedorDesligado()
+        }
+
+        override fun onProviderEnabled(provider: String) {
+            Log.i(TAG, "provedor $provider religado")
+            // Sem correção ainda: só o provedor voltou. `correcaoRecebida` é quem
+            // move o carimbo, e ela só é chamada quando um ponto chega de verdade.
+            TransmissaoDePosicao.correcaoRecebida(agoraMs())
+        }
     }
 
     private fun aoReceber(local: Location, plano: PlanoDePosicao) {
         if (!coordenadaValida(local)) return
+
+        // **Antes da porta de qualidade, de propósito.** Uma correção que vai ser
+        // recusada por imprecisão ainda é prova de que o receptor está vivo, e o
+        // que este carimbo mede é o SILÊNCIO do provedor. Anotar só as aceitas
+        // faria "GPS ruim" ser reportado como "GPS mudo" — duas causas diferentes,
+        // duas ações diferentes.
+        TransmissaoDePosicao.correcaoRecebida(agoraMs())
 
         // **A porta de qualidade vem antes da porta de cadência**, e a ordem
         // importa: julgar a cadência primeiro faria uma correção-lixo "resetar" o
@@ -206,11 +288,13 @@ class ColetorDePosicao(
         // batimento existe para cobrir.
         if (!andou && !batimentoVencido) return
 
-        ultimaPublicada = local
-        ultimaPublicacaoMs = agoraMs()
+        if (!envioEmVoo.compareAndSet(false, true)) {
+            Log.i(TAG, "publicação anterior ainda em voo — descartando esta correção")
+            return
+        }
 
         escopo.launch {
-            runCatching {
+            val ok = runCatching {
                 publicar(
                     local.latitude,
                     local.longitude,
@@ -221,12 +305,28 @@ class ColetorDePosicao(
                     // ser um instante.
                     local.elapsedRealtimeNanos,
                 )
-            }.onFailure {
+            }.getOrElse {
+                Log.w(TAG, "publicação de posição lançou: ${it.message}")
+                false
+            }
+
+            if (ok) {
+                // **O carimbo só avança aqui.** Avançá-lo antes do envio fazia uma
+                // publicação fracassada empurrar o relógio do batimento igual a uma
+                // que subiu — e a correção seguinte era barrada pelo filtro de
+                // deslocamento contra um ponto que o servidor nunca recebeu.
+                ultimaPublicada = local
+                ultimaPublicacaoMs = agoraMs()
+                TransmissaoDePosicao.publicacaoOk(agoraMs())
+            } else {
                 // Falhou: **descarta**. A próxima correção carrega dado novo, e uma
                 // posição velha entregue depois não é informação atrasada — é
-                // informação errada, que o mapa mostraria como atual.
-                Log.w(TAG, "publicação de posição falhou, descartando: ${it.message}")
+                // informação errada, que o mapa mostraria como atual. Mas descartar
+                // não é calar: o estado cai, e a tela passa a dizer "sem rede".
+                Log.w(TAG, "publicação de posição recusada, descartando — o batimento NÃO avança")
+                TransmissaoDePosicao.publicacaoFalhou()
             }
+            envioEmVoo.set(false)
         }
     }
 
@@ -242,7 +342,7 @@ class ColetorDePosicao(
             ModoOperacao.STANDBY -> LocationManager.NETWORK_PROVIDER
             ModoOperacao.ATIVO, ModoOperacao.OCORRENCIA -> LocationManager.GPS_PROVIDER
         }
-        val disponiveis = runCatching { lm?.getProviders(true).orEmpty() }.getOrDefault(emptyList())
+        val disponiveis = fonte.provedoresAtivos()
         return when {
             preferido in disponiveis -> preferido
             // Degrada em vez de sumir: sem GPS (garagem, subsolo), a posição de
@@ -252,12 +352,6 @@ class ColetorDePosicao(
             else -> null
         }
     }
-
-    private fun temPermissao(): Boolean =
-        context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) ==
-            PackageManager.PERMISSION_GRANTED ||
-            context.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) ==
-            PackageManager.PERMISSION_GRANTED
 
     private fun coordenadaValida(l: Location): Boolean =
         l.latitude.isFinite() && l.longitude.isFinite() &&

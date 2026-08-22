@@ -140,6 +140,14 @@ fun TelaDoMapa(
                     Box(Modifier.height(Espaco.Curto))
                     TextoCorpoMenor(
                         estado.motivoIndisponivel
+                            // A causa da transmissão só entra aqui quando ela é
+                            // uma causa: com a posição subindo normalmente, ela
+                            // diria "enviada há 40 s" embaixo de "sem posição
+                            // própria" — duas frases verdadeiras que juntas
+                            // mentem. Esse caso é o da correção local vencida
+                            // (`ProvedorDeLocal` recusa acima de 2 min), e a
+                            // frase certa é a última.
+                            ?: estado.motivoDaMinhaPosicao.takeIf { !estado.minhaPosicaoSobe }
                             ?: "Aguardando a primeira correção de GPS.",
                         cor = Cores.TintaMedia,
                     )
@@ -147,11 +155,23 @@ fun TelaDoMapa(
             }
         }
 
-        CabecalhoFlutuante(
-            assinado = estado.assinado,
-            quantos = estado.pares.count { it.frescor != Frescor.ANTIGO },
-            modifier = Modifier.align(Alignment.TopCenter),
-        )
+        // **O cabeçalho passou a ter duas direções.** Ele dizia "recebendo" com o
+        // ponto verde pulsando enquanto a posição do próprio portador não subia há
+        // vinte minutos — a única afirmação da tela sobre o estado da rede falava
+        // só da metade que funcionava.
+        Column(Modifier.align(Alignment.TopCenter)) {
+            CabecalhoFlutuante(
+                assinado = estado.assinado,
+                minhaPosicaoSobe = estado.minhaPosicaoSobe,
+                quantos = estado.pares.count { it.frescor != Frescor.ANTIGO },
+            )
+            // A causa fica **fora da gaveta**, porque a gaveta abre recolhida: um
+            // aviso que só aparece depois de um toque não é aviso. Aparece só na
+            // falha — acender no funcionamento normal ensina a ignorar.
+            if (!estado.minhaPosicaoSobe && estado.motivoDaMinhaPosicao != null) {
+                AvisoDaPosicaoPropria(estado.motivoDaMinhaPosicao)
+            }
+        }
 
         // Só aparece quando a câmera saiu do portador. Botão permanente seria
         // ruído 90% do tempo; ausente, o agente que arrastou o mapa não teria
@@ -185,6 +205,8 @@ fun TelaDoMapa(
                 }
             },
             motivoIndisponivel = estado.motivoIndisponivel,
+            temPosicaoPropria = estado.temPosicaoPropria,
+            motivoDaMinhaPosicao = estado.motivoDaMinhaPosicao,
             modifier = Modifier.align(Alignment.BottomCenter),
         )
     }
@@ -197,9 +219,21 @@ fun TelaDoMapa(
  * rua, e rua é o conteúdo. O fundo é translúcido para o mapa continuar legível
  * por baixo, e a contagem exclui os pares antigos — dizer "3 na guarnição" com
  * dois deles de meia hora atrás seria contar fantasma.
+ *
+ * **Duas direções, não uma.** [assinado] fala de RECEBER e [minhaPosicaoSobe] de
+ * TRANSMITIR, e elas falham separadamente: a auditoria de 21/08 pegou o app
+ * recebendo posição de par nenhum e transmitindo nada, com o cabeçalho verde
+ * dizendo "recebendo". O aviso de transmissão aparece **só quando ela para** —
+ * indicador que acende no estado normal ensina a ser ignorado, e aí não avisa mais
+ * nada quando importa. É a mesma regra que decidiu o limiar de esmaecimento.
  */
 @Composable
-private fun CabecalhoFlutuante(assinado: Boolean, quantos: Int, modifier: Modifier = Modifier) {
+private fun CabecalhoFlutuante(
+    assinado: Boolean,
+    minhaPosicaoSobe: Boolean,
+    quantos: Int,
+    modifier: Modifier = Modifier,
+) {
     Row(
         modifier
             .fillMaxWidth()
@@ -219,10 +253,38 @@ private fun CabecalhoFlutuante(assinado: Boolean, quantos: Int, modifier: Modifi
                 cor = if (assinado) Cores.Vivo else Cores.TintaFraca,
             )
         }
+        if (!minhaPosicaoSobe) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                PontoDeEstado(cor = Cores.Falha, pulsando = false)
+                Box(Modifier.width(Espaco.Curto))
+                Etiqueta("fora do mapa", cor = Cores.Falha)
+            }
+        }
         Etiqueta(
             if (quantos == 1) "1 na guarnição" else "$quantos na guarnição",
             cor = Cores.TintaMedia,
         )
+    }
+}
+
+/**
+ * A causa de a posição própria não estar subindo, debaixo do cabeçalho.
+ *
+ * Uma linha só, e ela é **derivada** — "o turno não abriu", "sem rede", "sem
+ * correção de GPS há 4 min". Nunca uma frase fixa: a frase fixa é o defeito que
+ * esta tela inteira acabou de corrigir, e ela reaparece com facilidade porque
+ * parece inofensiva.
+ */
+@Composable
+private fun AvisoDaPosicaoPropria(motivo: String, modifier: Modifier = Modifier) {
+    Row(
+        modifier
+            .fillMaxWidth()
+            .background(Cores.Vazio.copy(alpha = 0.82f))
+            .padding(horizontal = Espaco.Padrao, vertical = Espaco.Curto),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        TextoCorpoMenor(motivo, cor = Cores.Falha)
     }
 }
 
@@ -280,6 +342,10 @@ private fun GavetaDaGuarnicao(
     aoAlternar: () -> Unit,
     aoTocarPar: (String) -> Unit,
     motivoIndisponivel: String?,
+    /** O servidor tem a minha posição. `false` colapsava com "ninguém publicou". */
+    temPosicaoPropria: Boolean,
+    /** Por que a minha posição não sobe — derivada, nunca fixa. */
+    motivoDaMinhaPosicao: String?,
     modifier: Modifier = Modifier,
 ) {
     val giro by animateFloatAsState(
@@ -337,13 +403,48 @@ private fun GavetaDaGuarnicao(
                         TextoCorpoMenor(motivoIndisponivel, cor = Cores.TintaMedia)
                     }
 
+                    // **A causa é MINHA e a frase acusava a guarnição.**
+                    //
+                    // Este ramo escrevia "Ninguém publicando · Nenhum par do talk
+                    // group está enviando posição agora" sobre qualquer lista
+                    // vazia. Só que `posicoes_do_grupo` faz `cross join minha`:
+                    // quem nunca publicou recebe **zero linhas com a guarnição
+                    // inteira publicando**, e essa é a lista vazia mais comum. A
+                    // tela transformava um defeito do portador numa afirmação
+                    // sobre os companheiros dele.
+                    !temPosicaoPropria -> Column(
+                        Modifier.fillMaxWidth().padding(Espaco.Padrao),
+                    ) {
+                        Etiqueta("Você não está no mapa", cor = Cores.Falha)
+                        Box(Modifier.height(Espaco.Curto))
+                        TextoCorpoMenor(
+                            motivoDaMinhaPosicao
+                                // Sem causa derivada não se inventa uma: dizer o que
+                                // se sabe é melhor que dizer o que soa bem.
+                                ?: "Sua posição ainda não subiu para o servidor.",
+                            cor = Cores.TintaMedia,
+                        )
+                        Box(Modifier.height(Espaco.Curto))
+                        TextoCorpoMenor(
+                            "Sem ela o servidor não tem de onde medir as distâncias, " +
+                                "e a guarnição não aparece.",
+                            cor = Cores.TintaFraca,
+                        )
+                    }
+
+                    // Eu publico e não veio ninguém: aí sim a lista vazia fala do
+                    // grupo. **Decisão do dono do produto:** o mapa fica em branco,
+                    // só com a posição do portador, e a gaveta não acusa ninguém —
+                    // um par pode estar em Standby, sem sinal, ou fora do turno, e a
+                    // tela não tem como saber qual dos três.
                     pares.isEmpty() -> Column(
                         Modifier.fillMaxWidth().padding(Espaco.Padrao),
                     ) {
-                        Etiqueta("Ninguém publicando", cor = Cores.TintaFraca)
+                        Etiqueta("Só você no mapa", cor = Cores.TintaFraca)
                         Box(Modifier.height(Espaco.Curto))
                         TextoCorpoMenor(
-                            "Nenhum par do talk group está enviando posição agora.",
+                            "Sua posição está subindo. Nenhum outro par da guarnição " +
+                                "tem posição no mapa agora.",
                             cor = Cores.TintaMedia,
                         )
                     }

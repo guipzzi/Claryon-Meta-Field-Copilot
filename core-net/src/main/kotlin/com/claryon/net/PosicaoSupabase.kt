@@ -1,5 +1,6 @@
 package com.claryon.net
 
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -29,6 +30,16 @@ class PublicadorDePosicaoSupabase(
     @Volatile
     private var ultimaPublicacaoOk = false
 
+    /**
+     * O resultado do último POST.
+     *
+     * **Passou a ter consumidor em `src/main` em 21/08.** Até então `grep` do
+     * símbolo devolvia só o teste instrumentado e a pré-condição de
+     * `CanalDePosicoes.assinar` — que o mapa não usa desde que a recepção virou
+     * sondagem de RPC. Ou seja: o único indicador de que a posição própria estava
+     * subindo era lido por ninguém. Hoje o `CopilotService` o devolve ao coletor a
+     * cada publicação, e ele vira o ponto de cor de "Minha posição no mapa".
+     */
     override fun publicando(): Boolean = ultimaPublicacaoOk
 
     override suspend fun iniciarTurno(): Boolean = rpcSimples("iniciar_turno")
@@ -46,7 +57,10 @@ class PublicadorDePosicaoSupabase(
      * disso.
      */
     private suspend fun rpcSimples(nome: String): Boolean {
-        val token = tokenDeSessao() ?: return false
+        val token = tokenDeSessao() ?: run {
+            Log.w(TAG, "$nome não chamado: sem token de sessão")
+            return false
+        }
         return withContext(Dispatchers.IO) {
             runCatching<Boolean> {
                 val req = Request.Builder()
@@ -67,7 +81,14 @@ class PublicadorDePosicaoSupabase(
         velocidadeMs: Float?,
         nanosDaCorrecao: Long?,
     ) {
+        // **Este `return` era silencioso, e é o primeiro dos três defeitos que
+        // deixaram 20 min de coleta sumirem sem uma linha de log.** Sem sessão não
+        // há a quem publicar — isso é correto — mas sair sem dizer nada faz o
+        // aparelho acordar o GPS, montar a correção e jogá-la fora em segredo. O
+        // `false` abaixo é o que a interface lê como "sem rede"; o log é o que
+        // torna o caso reproduzível no `adb logcat -s ClaryonField`.
         val token = tokenDeSessao() ?: run {
+            Log.w(TAG, "posição descartada: sem token de sessão — nada sobe até o login")
             ultimaPublicacaoOk = false
             return
         }
@@ -102,8 +123,20 @@ class PublicadorDePosicaoSupabase(
                 .build()
 
             ultimaPublicacaoOk = runCatching {
-                client.newCall(req).execute().use { it.isSuccessful }
-            }.getOrDefault(false)
+                client.newCall(req).execute().use { resposta ->
+                    if (!resposta.isSuccessful) {
+                        // O código HTTP separa duas causas que a interface trata
+                        // diferente: `42501`/403 é turno fechado (`0019`), e 5xx ou
+                        // exceção é rede. Sem esta linha as duas chegavam ao
+                        // `logcat` como a mesma ausência de linha nenhuma.
+                        Log.w(TAG, "publicar_posicao recusada: HTTP ${resposta.code}")
+                    }
+                    resposta.isSuccessful
+                }
+            }.getOrElse {
+                Log.w(TAG, "publicar_posicao não saiu: ${it.javaClass.simpleName}: ${it.message}")
+                false
+            }
         }
     }
 
@@ -119,5 +152,6 @@ class PublicadorDePosicaoSupabase(
 
     private companion object {
         val JSON = "application/json".toMediaType()
+        const val TAG = "ClaryonField"
     }
 }

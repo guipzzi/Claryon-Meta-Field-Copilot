@@ -3,6 +3,7 @@ package com.claryon.field
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.os.Bundle
+import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
@@ -21,6 +22,8 @@ import androidx.compose.ui.platform.LocalContext
 import com.claryon.agent.LexicoDeOcorrencias
 import com.claryon.agent.ModoOperacao
 import com.claryon.field.auth.SessaoDoAgente
+import com.claryon.field.local.EstadoDaTransmissao
+import com.claryon.field.local.TransmissaoDePosicao
 import com.claryon.field.oculos.SessaoDosOculos
 import com.claryon.field.permissoes.PermissoesEssenciais
 import com.claryon.field.service.CopilotService
@@ -202,10 +205,27 @@ private fun Operacao(
     val escuta by CopilotService.estadoDaEscuta.collectAsState()
     val quemMeConsultou: QuemMeConsultouViewModel = viewModel()
     val consultas by quemMeConsultou.estado.collectAsState()
+    // **O estado da transmissão da posição própria.** De processo, e não do
+    // ViewModel: quem escreve é o serviço em primeiro plano, que sobrevive à tela.
+    val transmissao by TransmissaoDePosicao.estado.collectAsState()
     // Lê ao ENTRAR no perfil, não em laço: a tela não fica aberta, e sondar
     // transformaria a própria consulta de transparência numa fonte de tráfego.
     LaunchedEffect(destino) {
         if (destino == Destino.PERFIL) quemMeConsultou.carregar()
+    }
+    // **O relógio da causa, e só enquanto o perfil está aberto.**
+    //
+    // "Última posição enviada há 40 s" envelhece sozinha: sem isto, a frase
+    // congelava no instante da última correção e o perfil afirmaria 40 s sobre um
+    // dado de dez minutos — a mesma classe de mentira que o esmaecimento do mapa
+    // existe para impedir. Mesmos 5 s do redesenho do mapa, e pela mesma razão:
+    // idade depende de relógio, não de dado novo.
+    var agoraDoPerfil by remember { mutableStateOf(SystemClock.elapsedRealtime()) }
+    LaunchedEffect(destino) {
+        while (destino == Destino.PERFIL) {
+            agoraDoPerfil = SystemClock.elapsedRealtime()
+            kotlinx.coroutines.delay(5_000L)
+        }
     }
     val registro by oculos.registration.collectAsState()
     // A causa tipada que o `errorStream` entrega. Ela era coletada desde 21/08 e
@@ -315,6 +335,8 @@ private fun Operacao(
                     escuta,
                     LexicoDeOcorrencias.gazetteer.size,
                     motivoDosOculos,
+                    transmissao,
+                    agoraDoPerfil,
                 ),
                 consultas = consultas,
                 aoSair = aoEncerrarTurno,
@@ -347,6 +369,8 @@ private fun capacidadesDe(
     escuta: EstadoDaEscuta,
     logradouros: Int,
     motivoDosOculos: String?,
+    transmissao: EstadoDaTransmissao,
+    agoraMs: Long,
 ): List<Capacidade> {
     val pttVivo = ptt !is com.claryon.field.ui.componentes.EstadoDoPtt.Indisponivel
     return listOf(
@@ -423,6 +447,27 @@ private fun capacidadesDe(
                 EstadoDaEscuta.SEM_ROTA -> "Sem rota de áudio. Conecte os óculos ou o fone."
                 EstadoDaEscuta.SEM_MODELO -> "Modelo de ativação ausente no aplicativo."
             },
+        ),
+        // **A sexta, e a que faltava desde sempre: as cinco acima são todas sobre
+        // RECEBER.**
+        //
+        // Rádio, óculos, mapa, gazetteer e palavra de ativação respondem "o que
+        // chega até mim". Nenhuma respondia "o que sai de mim" — e foi por aí que
+        // uma auditoria mediu **delta de zero linhas** em `agent_positions` em
+        // 20 min de aplicativo aberto sem que uma única linha da interface
+        // mudasse de cor. Os dois indicadores que existiam para isso,
+        // `PublicadorDePosicao.publicando()` e `ColetorDePosicao.coletando`, tinham
+        // **zero consumidores em `src/main`**; o KDoc do segundo chegava a afirmar
+        // "Alimenta a prontidão no perfil", sobre a linha que não existia.
+        //
+        // A causa é derivada de `EstadoDaTransmissao`, com a mesma disciplina das
+        // duas linhas acima: a régua deste painel é que capacidade morta traz a
+        // causa junto, e string fixa aqui reproduziria o defeito que a linha do
+        // mapa registra ter cometido.
+        Capacidade(
+            nome = "Minha posição no mapa",
+            viva = transmissao.viva,
+            motivo = transmissao.causa(agoraMs),
         ),
     )
 }

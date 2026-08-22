@@ -3,6 +3,7 @@ package com.claryon.field.radio
 import android.app.Application
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
+import android.os.SystemClock
 import androidx.lifecycle.viewModelScope
 import com.claryon.field.voice.SileroVoiceActivityDetector
 import com.claryon.field.service.CopilotService
@@ -30,6 +31,7 @@ import com.claryon.net.CodecDeVoz
 import com.claryon.net.ConfigOpus
 import com.claryon.net.HistoricoDoCanal
 import com.claryon.net.RegistroDeTransmissao
+import com.claryon.net.RespostaDePosicao
 import com.claryon.net.ConfigRealtime
 import com.claryon.net.MediaCodecOpus
 import com.claryon.net.TransporteAoVivo
@@ -50,6 +52,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Locale
+import com.claryon.field.local.EstadoDaTransmissao
+import com.claryon.field.local.TransmissaoDePosicao
 
 /**
  * **Liga o rádio tático à interface.**
@@ -156,12 +160,23 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
     private val _cadastro = MutableStateFlow<Map<String, String>?>(null)
 
     /**
-     * A idade da posição **deste** aparelho, de `idade_solicitante_s`.
+     * A idade da posição **deste** aparelho — com duas fontes, na ordem de
+     * [idadePropriaDe].
      *
-     * Vem da mesma resposta de `posicoes_do_grupo` (`0007`), então não custa
-     * chamada nenhuma — e sem ela o portador apareceria na própria guarnição como
-     * "sem posição" enquanto publica normalmente, que é a mentira mais fácil de
-     * notar e a mais fácil de deixar passar.
+     * A preferida é `idade_solicitante_s`, que vem na mesma resposta de
+     * `posicoes_do_grupo` (`0007`) e não custa chamada nenhuma. **Mas ela só existe
+     * quando existe linha**, e `0021:130-149` faz `cross join minha` filtrando
+     * `a.id <> eu.id`: a resposta só traz PARES.
+     *
+     * Este KDoc dizia, até 22/08, que sem ela *"o portador apareceria na própria
+     * guarnição como sem posição enquanto publica normalmente"* — descrevendo como
+     * defeito evitado exatamente o que o código fazia numa guarnição de um, com os
+     * colegas numa garagem, ou no começo do turno. A lista vinha vazia e a promessa
+     * virava mentira.
+     *
+     * A segunda fonte é local e independente de par: `TransmissaoDePosicao`, o
+     * instante do último POST aceito. Ver [idadePropriaDe] para por que o servidor
+     * tem precedência.
      */
     private val _idadePropria = MutableStateFlow<Int?>(null)
 
@@ -744,11 +759,32 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
                 .associate { it.indicativo to it.idadeS }
             // A idade da posição DESTE aparelho vem na mesma resposta
             // (`idade_solicitante_s`, migração `0007`), então não custa chamada
-            // nenhuma. Sem ela o portador apareceria "sem posição" na própria
-            // guarnição enquanto publica normalmente.
-            _idadePropria.value = lista.firstOrNull()
-                ?.idadeDoSolicitanteS
-                ?.takeIf { it != Int.MAX_VALUE }
+            // nenhuma — **quando vem alguma linha**.
+            //
+            // **E era exatamente aí que estava o defeito, até 22/08.** A linha era
+            // `lista.firstOrNull()?.idadeDoSolicitanteS`, e `posicoes_do_grupo`
+            // (`0021:126`) faz `cross join minha` **e** filtra `a.id <> eu.id`: a
+            // resposta só traz linhas de PARES. Sem nenhum par com posição publicada —
+            // guarnição de um, colegas numa garagem, começo de turno — a lista vem
+            // vazia, `_idadePropria` virava `null`, e o portador aparecia **"sem
+            // posição" na própria guarnição enquanto publicava perfeitamente**.
+            //
+            // O KDoc que estava aqui prometia justamente o contrário. Ele descrevia o
+            // que a linha *pretendia*, não o que ela fazia.
+            //
+            // O conserto é trocar a fonte de evidência quando a do servidor não vem:
+            // `TransmissaoDePosicao` é objeto de processo alimentado pelo
+            // `ColetorDePosicao` e pelo `CopilotService`, e guarda o instante do último
+            // POST **aceito**. É prova local e independente de par — que é o que faltava.
+            //
+            // A ordem importa: o servidor tem precedência quando responde, porque ele
+            // sabe o que de fato chegou; o local só entra quando não há resposta a
+            // consultar. Inverter faria o aparelho confiar no próprio otimismo.
+            _idadePropria.value = idadePropriaDe(
+                lista = lista,
+                transmissao = TransmissaoDePosicao.estado.value,
+                agoraMs = SystemClock.elapsedRealtime(),
+            )
         }
     }
 
@@ -1069,7 +1105,14 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
      *
      * O que ele **não** pode ser é silencioso: com piso local, dois agentes podem
      * achar que detêm o canal ao mesmo tempo e falar por cima. Quem opera precisa
-     * saber que está nesse modo — por isso o log e o estado, não só o `else`.
+     * saber que está nesse modo.
+     *
+     * **E "saber" virou audível em 22/08.** Até então havia log e [pisoRemoto], e
+     * nenhum dos dois alcança quem está de óculos numa ocorrência. O sinal agora
+     * é o cliente **declarar** o que é (`ClienteDePiso.arbitradoPeloServidor`), e o
+     * `RadioTatico` falar *"Sem servidor. Piso local."* ao entrar em modo ativo —
+     * uma vez por abertura, na abertura e não no toque. O log e o estado ficam:
+     * eles servem ao `logcat` e à tela, que são outros públicos.
      */
     private suspend fun pisoDoCanal(agenteId: String): ClienteDePiso {
         // **`tokenValido()`, não `tokenCorrente`.** O segundo é cache da última
@@ -1149,4 +1192,43 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
         const val LIMIAR_DE_PRESENCA_S = 120
         val HORA: SimpleDateFormat = SimpleDateFormat("HH:mm:ss", Locale("pt", "BR"))
     }
+}
+
+/**
+ * **A idade da posição DESTE aparelho, com duas fontes e uma ordem.**
+ *
+ * O servidor é a fonte preferida: `idade_solicitante_s` vem em toda linha de
+ * `posicoes_do_grupo` e reflete o que de fato chegou lá. Mas ele **só responde quando
+ * há par com posição** — `0021:130-149` faz `cross join minha` e filtra `a.id <> eu.id`,
+ * de modo que a lista vem vazia numa guarnição de um, com os colegas numa garagem, ou
+ * no começo do turno.
+ *
+ * Até 22/08 a linha era `lista.firstOrNull()?.idadeDoSolicitanteS`, e nesse caso o
+ * portador aparecia **"sem posição" na própria guarnição enquanto publicava
+ * perfeitamente**. O defeito não era de cálculo: era usar evidência sobre OS OUTROS
+ * para afirmar algo sobre SI.
+ *
+ * [transmissao] é a segunda fonte, e é local: `ultimaPublicacaoOkMs` é o instante do
+ * último POST **aceito**, escrito pelo coletor. Ela não sabe o que o servidor pensa —
+ * mas sabe o que este aparelho conseguiu enviar, que é exatamente o que falta quando
+ * não há a quem perguntar.
+ *
+ * **A ordem não é arbitrária.** O servidor tem precedência quando responde; o local só
+ * entra quando não há resposta. Inverter faria o aparelho confiar no próprio otimismo:
+ * um POST aceito não prova que a linha sobreviveu à retenção do outro lado.
+ *
+ * Devolve `null` quando nenhuma das duas sabe — e aí "sem posição" é verdade.
+ */
+internal fun idadePropriaDe(
+    lista: List<RespostaDePosicao>,
+    transmissao: EstadoDaTransmissao,
+    agoraMs: Long,
+): Int? {
+    val doServidor = lista.firstOrNull()?.idadeDoSolicitanteS?.takeIf { it != Int.MAX_VALUE }
+    if (doServidor != null) return doServidor
+
+    val ok = transmissao.ultimaPublicacaoOkMs ?: return null
+    // `elapsedRealtime` não anda para trás, mas relógio de teste e reinício de processo
+    // podem produzir diferença negativa. Idade negativa não existe: vira zero.
+    return ((agoraMs - ok).coerceAtLeast(0L) / 1_000L).toInt()
 }

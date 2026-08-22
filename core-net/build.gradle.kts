@@ -49,6 +49,25 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+
+    testOptions {
+        unitTests {
+            // **Sem isto, `android.util.Log` lança `RuntimeException("not mocked")`
+            // em teste JVM — e o que fica intestável é justamente o CAMINHO DE
+            // FALHA, porque é ele que loga.** O `app` já carrega esta linha, com o
+            // mesmo argumento por escrito; `core-net` ficou sem ela e tem
+            // `android.util.Log` em seis arquivos de `src/main`. O preço apareceu
+            // ao cobrir `PublicadorDePosicaoSupabase`: a publicação sem token, a
+            // recusa por HTTP e a queda de rede passaram a registrar a causa — e
+            // as três viraram testes que explodiam na infraestrutura antes de
+            // chegar na asserção.
+            //
+            // `returnDefaultValues` devolve 0/null/false para todo método de
+            // framework não implementado. Não é substituto do Robolectric: só
+            // torna o stub silencioso em vez de explosivo.
+            isReturnDefaultValues = true
+        }
+    }
 }
 
 dependencies {
