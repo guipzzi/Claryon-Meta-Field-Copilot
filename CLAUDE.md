@@ -21,10 +21,10 @@ pública. Hackathon AI Glasses Brasil — **18/09/2026**.
 |---|---|---|
 | **P1 · Rede de comunicação** | PTT/walkie-talkie entre operadores, com transcrição | **A transcrição ocorre na ORIGEM**, antes de trafegar. Todos os receptores exibem exatamente o mesmo texto, sem divergência — e o servidor nunca precisa transcrever |
 | **P2 · Geolocalização** | Posição da guarnição, atualizada e persistida | O servidor devolve **grandezas** (distância, rumo), **nunca coordenada** de terceiro |
-| **P3 · IA on-device** | Copiloto especialista em segurança pública | **100% local.** Wake word "Hey Claryon". Nada de IA na nuvem em caminho nenhum |
+| **P3 · IA on-device** | Copiloto especialista em segurança pública | **100% local.** Palavra de ativação: **"Claryon"**, isolada. Nada de IA na nuvem em caminho nenhum |
 
-**Casos de uso do P3:** *"Hey Claryon, envie um resumo da última hora"* ·
-*"Hey Claryon, onde está a guarnição do Sgt. Paiva?"*
+**Casos de uso do P3:** *"Claryon, envie um resumo da última hora"* ·
+*"Claryon, onde está a guarnição do Sgt. Paiva?"*
 
 ---
 

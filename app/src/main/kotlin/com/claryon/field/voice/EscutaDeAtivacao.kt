@@ -78,7 +78,7 @@ fun DetectorDeAtivacao.comoOuvido(): OuvidoDeAtivacao = object : OuvidoDeAtivaca
  *    de centímetros. Por isso o [suprimido], que é o **mesmo** `SupressorDeSaidaPropria`
  *    de processo que o rádio usa.
  * 2. **O rádio.** Enquanto o agente segura o PTT, ele está falando com pessoas, não
- *    com o copiloto. Um "Hey Claryon" dito no ar é conversa, não comando.
+ *    com o copiloto. Um "Claryon" dito no ar é conversa, não comando.
  * 3. **O ciclo que ela mesma abriu.** Depois de detectar, o copiloto passa segundos
  *    ouvindo e depois falando. O refratário de 1 s do detector cobre o eco imediato;
  *    [silenciarPor] cobre o ciclo inteiro, e quem sabe a duração dele é quem o roda.
