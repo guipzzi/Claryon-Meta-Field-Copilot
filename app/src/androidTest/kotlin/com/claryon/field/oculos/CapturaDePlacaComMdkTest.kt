@@ -62,8 +62,8 @@ class CapturaDePlacaComMdkTest {
     @Test
     fun capturaDePlaca_comMdkPareado(): Unit = runBlocking {
         val s = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-            .also { this@_ScratchPlacaMdkTest.scope = it }
-        val m = MockDeviceController(context).also { this@_ScratchPlacaMdkTest.mock = it }
+            .also { this@CapturaDePlacaComMdkTest.scope = it }
+        val m = MockDeviceController(context).also { this@CapturaDePlacaComMdkTest.mock = it }
 
         assertTrue("MockDeviceKit não pareou o Ray-Ban simulado", m.enableWithPhoneCameraFeed())
 
