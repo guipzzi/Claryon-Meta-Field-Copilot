@@ -65,6 +65,20 @@ Duas ordens que não podem ser invertidas:
 2. A **ação acontece antes** de existir qualquer frase — `utteranceFor` recebe o
    resultado, nunca a intenção. Ver "Honestidade" adiante.
 
+### Abertura do rádio (`RadioViewModel.abrir`)
+```
+1. CanaisDoAgente.registrarRadio(…, noAr = { radio != null })   // ⚠️ ANTES do passo 2
+2. audio.iniciar() → GlassesAudioRoute                          // falha ⇒ return
+3. RadioTatico(...) → entrarEmModoAtivo(rota) → radio = novo
+```
+Inverter 1 e 2 → **todo aparelho sem HFP fica sem fio de voz.** Foi o defeito
+corrigido em 22/08: o registro morava depois do `return@launch` da falha de rota, e
+com óculos não pareados, fone ausente ou emulador ele nunca rodava — *"Claryon,
+guarnição 3 na escuta"* era recusado sem motivo com detector, whisper e roteador
+funcionando. Nada no passo 1 precisa de HFP: são lambdas que rodam no celular. Quem
+depende da rota é o rádio **funcionar**, e é isso — e só isso — que `noAr` responde,
+lido no instante do comando. Trava: `FioDeVozSemRotaDeAudioTest`.
+
 ### Encerramento
 ```
 clearCommunicationDevice()   // senão todo áudio do sistema fica preso em 8 kHz
@@ -243,6 +257,16 @@ Capturar exige `GlassesAudioRoute`, e o único jeito de obter uma é rotear de f
   palavras). Até 21/08 a regra era "nunca falado" — alto-falante open-ear vaza som para quem está ao lado
 - Falha nunca é silêncio. Todo erro tem earcon próprio
 - Fila de prioridade: nível 1 (emergência) interrompe tudo; nível 3 é suprimido em Modo Tático
+- **"Interrompe tudo" inclui a SÍNTESE, não só o que já está soando.** Uma fala do
+  copiloto passa ~1 s dentro do Piper antes de virar som, e uma leitura de norma passa
+  muito mais. Até 22/08 o P1 que chegava nessa janela não cortava nada e ainda esperava a
+  fala inteira tocar (~10,9 s contra os ≤ 200 ms do aceite). O item em curso na
+  `PrioritySoundQueue` é **síntese + reprodução** num job só
+- **`cancel()` de corrotina não interrompe JNI.** O Piper é nativo: quem corta não *para* a
+  síntese, **desiste de esperar por ela** — a síntese fica órfã numa corrotina irmã e o PCM
+  que chegar depois não tem quem o toque. Qualquer conserto de preempção que dependa de o
+  `render` obedecer ao `cancel` funciona no teste e mente em campo. Corolário: todo `render`
+  da fila tem de **suspender**, nunca bloquear a thread do laço
 
 ---
 

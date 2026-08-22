@@ -23,8 +23,13 @@ import org.junit.Test
  * A lacuna era real e específica: toda suíte existente (`VoiceOutputSaidaTest`,
  * em `app`) enfileira um som por vez e espera terminar antes do próximo. Nenhum
  * teste jamais colocou dois sons na fila AO MESMO TEMPO — e é só nesse cenário
- * que `deveInterromper`/`playing?.cancel()` (`PrioritySoundQueue.kt:53-54`) roda.
- * Zero execuções desse ramo, em qualquer quantidade de `./gradlew test`.
+ * que `deveInterromper`/`emCurso?.cancel()` (em `enqueue`) roda. Zero execuções
+ * desse ramo, em qualquer quantidade de `./gradlew test`.
+ *
+ * **Este arquivo cobre o corte durante a REPRODUÇÃO, e só ele.** Todo `render`
+ * daqui é instantâneo, o que deixa a janela "está sintetizando" com largura zero
+ * — e foi exatamente ali que o defeito de 22/08 viveu, verde, por semanas. O
+ * corte durante a síntese tem arquivo próprio: `PreempcaoDuranteASinteseTest`.
  *
  * `render`/`play` trabalham com `ShortArray?`, não com `Sound` — aqui o PCM
  * carrega só o ordinal da prioridade, o suficiente para o teste rastrear quem

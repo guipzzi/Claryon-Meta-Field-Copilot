@@ -37,7 +37,18 @@ class SoundScheduler {
         return next
     }
 
-    /** Um [novo] som deve interromper o que toca agora em [atual]? Só emergência. */
+    /**
+     * Um [novo] som deve interromper o que está **em curso** em [atual]? Só
+     * emergência.
+     *
+     * **[atual] é o item em curso, não "o que toca agora".** A diferença custou
+     * um defeito: enquanto o `render` rodava fora do escopo de reprodução,
+     * [PrioritySoundQueue] passava `null` aqui durante toda a síntese — um
+     * segundo por frase, com o Piper — e esta função respondia, corretamente,
+     * `false` para uma emergência que tinha todo o direito de cortar. A política
+     * nunca esteve errada; ela era chamada com um retrato incompleto do
+     * mecanismo. Hoje o mecanismo publica a prioridade **antes** de sintetizar.
+     */
     fun deveInterromper(novo: Priority, atual: Priority?): Boolean =
         novo == Priority.EMERGENCIA && atual != null && atual != Priority.EMERGENCIA
 

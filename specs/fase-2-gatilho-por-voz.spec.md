@@ -44,7 +44,7 @@ Tudo abaixo foi lido no arquivo, não lembrado.
 | Supressor é `ArrayList` **sem sincronização**; `registrar`/`abrir`/`fechar`/`suprimido`/`podarAntesDe`/`limpar` sem lock | `SupressorDeSaidaPropria.kt:40,47,56,62,72,83,90` |
 | A janela é registrada pela duração **presumida**, **antes** de tocar | `app/.../audio/SaidaUnica.kt` (`reproduzirComRotaESupressao`: `supressor.registrar(...)` e só então `rota?.emUso { audio.reproduzir(...) }`) |
 | `RadioTatico.emitirComSupressao` registra `earcon + DURACAO_FALA_ESTIMADA_MS = 2_000L` no instante do **enfileiramento** | `RadioTatico.kt:524-542` |
-| A fila **descarta** INFORMATIVO em Modo Tático (`offer` → `false`) e **cancela** o job em curso na emergência (`playing?.cancel()`) | `core-sound/.../SoundScheduler.kt:28`; `core-sound/.../PrioritySoundQueue.kt` (`enqueue`) |
+| A fila **descarta** INFORMATIVO em Modo Tático (`offer` → `false`) e **cancela** o job em curso na emergência (`emCurso?.cancel()` — desde 22/08 o job cobre **síntese + reprodução**, e não só a reprodução) | `core-sound/.../SoundScheduler.kt:28`; `core-sound/.../PrioritySoundQueue.kt` (`enqueue`) |
 | Os filtros do rádio **removem** quadros (`.filter`), o que a spec item 21 proíbe | `RadioTatico.kt:238,397` |
 | O quadro do microfone **não carrega tempo de captura** — só `sequencia`; há `.buffer(50, DROP_OLDEST)` por consumidor (≈1 s) | `core-audio/.../FonteUnicaDeMicrofone.kt:84,100,222` |
 | O teto ancora na **invocação** de `transmitir`, não no BIP | `core-net/.../SessaoPtt.kt:118` e `:211` (`withTimeout((duracaoMaximaMs - (agoraMs() - inicio))...)`) |

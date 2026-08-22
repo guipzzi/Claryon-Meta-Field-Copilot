@@ -29,7 +29,7 @@ import kotlinx.coroutines.sync.withLock
  *
  * Até aqui, `RadioViewModel` e `DiagnosticsViewModel` construíam **cada um a sua**
  * `VoiceOutput` — duas `PrioritySoundQueue`, cada uma com o próprio
- * `SoundScheduler` e o próprio `playingPriority`. `deveInterromper` só enxerga o
+ * `SoundScheduler` e o próprio `prioridadeEmCurso`. `deveInterromper` só enxerga o
  * que toca **na mesma fila**: um alerta P1 do rádio (earcon `PRIORITARIA`,
  * `Priority.EMERGENCIA`) chegava na fila do rádio e não sabia que a fila do
  * copiloto estava no meio de uma frase. Resultado documentado em `ESTADO.md`: "um
