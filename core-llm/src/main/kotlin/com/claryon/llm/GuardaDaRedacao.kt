@@ -80,12 +80,27 @@ class GuardaDaRedacao(
 
         val fonteNormalizada = normalizar(fonte)
 
-        // Régua 1 — cifras. Absoluta.
-        val cifrasDaFonte = CIFRA.findAll(fonteNormalizada).map { it.value }.toSet()
-        val cifraSemLastro = CIFRA.findAll(normalizar(texto))
-            .map { it.value }
-            .firstOrNull { it !in cifrasDaFonte }
-        if (cifraSemLastro != null) return null
+        // Régua 1 — grandezas. Absoluta.
+        //
+        // **Era `Regex("""\d+""")`, e reprovava ZERO de 268 gerações medidas.** Os três
+        // furos eram todos da cifra crua, e `Grandezas` existe para tapá-los:
+        //
+        //  1. `"trinta dias"` não tem dígito — a regex não via número nenhum.
+        //  2. `"500 gramas"` onde a fonte diz `"500 dias-multa"` passava, porque a
+        //     cifra `500` ESTÁ na fonte. Trocar a grandeza mantendo o número é a forma
+        //     mais perigosa de invenção: parece citação.
+        //  3. `"1,5"` virava as cifras `1` e `5`, ambas comuns em qualquer norma.
+        //
+        // Comparar `Grandeza(valor, classe)` fecha os três de uma vez: o extenso é
+        // normalizado, a classe separa tempo de massa, e o decimal é um número só.
+        //
+        // Número sem unidade reconhecida (`Art. 33`, `§ 1º`) tem `classe == null` e
+        // continua sendo comparado só pelo valor — é o comportamento antigo, que para
+        // esse caso estava certo.
+        val grandezasDaFonte = Grandezas.extrair(fonteNormalizada).toSet()
+        val semLastro = Grandezas.extrair(normalizar(texto))
+            .firstOrNull { it !in grandezasDaFonte }
+        if (semLastro != null) return null
 
         // Régua 2 — lastro lexical.
         val raizesDaFonte = palavras(fonteNormalizada).map { raiz(it) }.toSet()
