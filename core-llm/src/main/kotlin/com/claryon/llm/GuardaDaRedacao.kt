@@ -6,9 +6,21 @@ package com.claryon.llm
  * ## O que este guarda é, e o que ele NÃO é
  *
  * Ele **não prova** que o modelo não alucinou. Prova de não-alucinação neste
- * produto tem um nome e já existe: é a Etapa A, que lê o trecho *verbatim* e não
- * tem passo capaz de produzir texto novo. Este guarda é a válvula que devolve o
- * produto àquele caminho quando a redação sai sem lastro.
+ * produto tem um nome e já existe: é a Etapa A, que não tem passo capaz de
+ * produzir texto novo. Este guarda é a válvula que devolve o produto àquele
+ * caminho quando a redação sai sem lastro.
+ *
+ * **E "aquele caminho" é a CITAÇÃO, não a leitura do artigo.** Este KDoc dizia
+ * *"a Etapa A, que lê o trecho verbatim"*, e isso nunca foi verdade em produção:
+ * o que o agente ouve é `"Art. 306, Lei 9.503"` — quatro palavras —, e o corpo
+ * do artigo não atravessa a camada de recuperação, que entrega apenas o par
+ * `citacao, norma`. Ler o artigo em voz alta esbarra no teto de **7 palavras**
+ * do `CLAUDE.md` §4 e está **proposto**, não construído, em
+ * `specs/leitura-de-norma.spec.md`.
+ *
+ * A distinção não é de redação: quem lê "cai na leitura verbatim" supõe uma rede
+ * de segurança que responde a pergunta. A rede que existe diz **onde** procurar.
+ * É bem menos, e é o que há.
  *
  * Registrar isso importa: um filtro apresentado como garantia vira a próxima
  * mentira do repositório, e o `CLAUDE.md` §6 persegue exatamente essa família.
@@ -69,10 +81,23 @@ class GuardaDaRedacao(
     /**
      * O texto aprovado, ou `null` quando ele não tem lastro na fonte.
      *
-     * [fonte] é o material com procedência: o trecho recuperado, a citação e a
-     * pergunta do agente. Nada mais entra — em particular, a resposta anterior
-     * não entra, senão uma alucinação aprovada uma vez viraria lastro para a
-     * próxima.
+     * [fonte] é o material com procedência: o trecho recuperado e a citação.
+     *
+     * **A pergunta do agente NÃO entra, e isto mudou em 22/08.** Ela entrava, pelo
+     * raciocínio de que uma resposta honesta reusa as palavras da pergunta. Medido:
+     * com a pergunta na fonte, um modelo que apenas a ECOA obtém lastro **1,00 sem
+     * tocar no artigo**. Remedido no aparelho em 22/08, sobre as 20 perguntas do banco
+     * de abordagem: **2 de 9** aprovações caem no prazo de produção, **2 de 12** no
+     * prazo de medição, e **5 de 13** com a formulação de prompt que entrou no mesmo
+     * dia — quanto mais o modelo ecoa, mais esta régua trabalha. Palavra que a
+     * pergunta compartilha com o artigo já está no trecho e segue contando; some
+     * apenas a que existe só na pergunta — a que não tem lastro na norma.
+     *
+     * **Nenhuma redação honesta foi perdida na troca**, que era o risco alegado: as
+     * recusas novas, lidas uma a uma no log, são todas eco puro ou meta-comentário.
+     *
+     * A resposta anterior também não entra: uma alucinação aprovada uma vez viraria
+     * lastro para a próxima, e o filtro degradaria sozinho ao longo do turno.
      */
     fun aprovar(gerado: String, fonte: String): String? {
         val texto = gerado.trim()
@@ -143,10 +168,10 @@ class GuardaDaRedacao(
     companion object {
         /**
          * **Não medido em corpus real.** Escolhido pelo lado do erro que custa
-         * menos: reprovar demais devolve o produto à leitura verbatim, que é o
-         * comportamento padrão e correto; aprovar demais põe texto sem lastro na
-         * boca do copiloto. Quem calibrar troca este número **com a medição
-         * junto**.
+         * menos: reprovar demais devolve o produto à citação seca (`"Art. 306,
+         * Lei 9.503"`), que é o comportamento padrão e correto; aprovar demais
+         * põe texto sem lastro na boca do copiloto. Quem calibrar troca este
+         * número **com a medição junto**.
          */
         const val LASTRO_MINIMO_PADRAO: Double = 0.55
 

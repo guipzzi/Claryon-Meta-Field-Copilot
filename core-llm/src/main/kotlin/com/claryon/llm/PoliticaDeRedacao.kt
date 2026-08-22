@@ -58,10 +58,30 @@ object PoliticaDeRedacao {
 
     /** O que o produto vai fazer com o trecho recuperado. */
     sealed interface Decisao {
-        /** Etapa B: o LLM reescreve, com a leitura verbatim como rede de segurança. */
+        /**
+         * Etapa B: o LLM reescreve, com a Etapa A como rede de segurança.
+         *
+         * **A rede é a CITAÇÃO, não a leitura do artigo** — ver [LerVerbatim].
+         */
         data object Redigir : Decisao
 
-        /** Etapa A: Piper lê o trecho palavra por palavra. [motivo] vai para o log. */
+        /**
+         * Etapa A. [motivo] vai para o log.
+         *
+         * **O nome deste caso mente, e ficou.** Ele diz `LerVerbatim`, mas o que
+         * o produto faz neste ramo é falar `"Art. 306, Lei 9.503"` — quatro
+         * palavras, a procedência e nada mais. O texto do artigo **não é lido**:
+         * a camada de recuperação entrega ao produto só a citação e o documento,
+         * nunca o corpo do artigo. Lê-lo em voz alta esbarra no teto de 7
+         * palavras do `CLAUDE.md` §4 e está **proposto**, não construído, em
+         * `specs/leitura-de-norma.spec.md`.
+         *
+         * O nome não foi trocado porque renomear um `sealed` público é diff largo
+         * em módulo que outro agente está tocando; a mentira fica **anotada** até
+         * a decisão humana sobre aquela spec, que resolve as duas coisas de uma
+         * vez — ou o produto passa a ler, e o nome vira verdade, ou não passa, e
+         * o nome vira `CitarProcedencia`.
+         */
         data class LerVerbatim(val motivo: Motivo) : Decisao
     }
 

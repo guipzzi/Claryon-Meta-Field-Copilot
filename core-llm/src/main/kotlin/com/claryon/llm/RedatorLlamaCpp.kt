@@ -54,6 +54,11 @@ internal object NativoDoRedator {
  * @param nCtx janela de contexto. `1024` cabe um trecho de norma longo mais a
  *   pergunta e a resposta, e o KV cache cresce linearmente com isto — é o
  *   parâmetro que mais custa RAM depois dos pesos.
+ * @param formulacao o par instrução/mensagem do usuário. Existe como parâmetro
+ *   para que a bancada rode várias sobre o mesmo banco de perguntas sem editar
+ *   produção — ver [FormulacaoDoPrompt]. O padrão é
+ *   [FormulacaoDoPrompt.PRODUCAO], e trocá-lo é mudança de comportamento que só
+ *   acontece com a medição junto.
  */
 class RedatorLlamaCpp(
     private val arquivoDoModelo: File,
@@ -63,6 +68,7 @@ class RedatorLlamaCpp(
     private val prazoMs: Int = PRAZO_PADRAO_MS,
     private val guarda: GuardaDaRedacao = GuardaDaRedacao(),
     private val despachante: CoroutineDispatcher = Dispatchers.Default,
+    private val formulacao: FormulacaoDoPrompt = FormulacaoDoPrompt.PRODUCAO,
 ) : Redator {
 
     @Volatile
@@ -105,18 +111,46 @@ class RedatorLlamaCpp(
         val gerado = runCatching {
             NativoDoRedator.nativoRedigir(
                 handle,
-                INSTRUCAO,
-                usuario(pedido),
+                formulacao.instrucao,
+                formulacao.usuario(pedido),
                 maxTokens,
                 prazoMs,
             )
         }.onFailure { Log.e(TAG, "redator: geração falhou", it) }.getOrNull()
             ?: return@withContext null
 
-        // **A fonte do guarda é o pedido, e só ele.** Se a saída anterior
-        // entrasse aqui, uma alucinação aprovada uma vez viraria lastro para a
-        // seguinte, e o filtro degradaria sozinho ao longo do turno.
-        val fonte = "${pedido.trecho}\n${pedido.procedencia}\n${pedido.pergunta}"
+        // **A fonte do guarda é o TRECHO, e a pergunta ficou de fora.**
+        //
+        // Ela entrava aqui até 22/08, por um raciocínio que soava certo: uma redação
+        // que responde à pergunta reusa naturalmente as palavras dela, e penalizá-la
+        // por isso reprovaria redação honesta.
+        //
+        // **A medição derrubou o raciocínio.** Com a pergunta na fonte, um modelo que
+        // apenas a ECOA obtém lastro **1,00 sem tocar no artigo** — e ecoar a pergunta
+        // é comportamento registrado deste modelo. Medido por diferença sobre as 20
+        // perguntas do banco de abordagem, com o prompt de 22/08 em vigor: das **9**
+        // aprovações que a composição antiga daria no prazo de produção, **2 caem**; no
+        // prazo de medição, **2 de 12**. Com o prompt de hoje (`FormulacaoDoPrompt.SEM_ROTULO`,
+        // que devolve o foco à pergunta) o eco fica mais frequente e a régua pega mais:
+        // **5 de 13**. Quanto mais o modelo ecoa, mais esta linha trabalha.
+        //
+        // As quatro recusas lidas uma a uma são todas eco ou meta-comentário — *"Vendeu
+        // simulacro de pistola na loja de brinquedo."*, *"Comprei o carro com chassi
+        // adulterado, respondo ao ag"*, *"O TRECHO DA NORMA trata sobre o crime de
+        // adulterar placa…"*, *"A adaptação da norma à pergunta feita pelo agente é
+        // simples: o agente responde que não sabe…"*. **Nenhuma redação honesta foi
+        // perdida**, que era o risco que justificava a composição antiga.
+        //
+        // O medo de reprovar redação honesta não se concretiza: palavra que a pergunta
+        // e o artigo compartilham **já está no trecho**, e continua contando. O que
+        // deixa de contar é a palavra que existe SÓ na pergunta — que é precisamente a
+        // que não tem lastro na norma.
+        //
+        // A `procedencia` fica, porque é curta e é a citação que a resposta deve poder
+        // repetir. A saída anterior continua fora: uma alucinação aprovada uma vez
+        // viraria lastro para a seguinte, e o filtro degradaria sozinho ao longo do
+        // turno.
+        val fonte = "${pedido.trecho}\n${pedido.procedencia}"
         val aprovado = guarda.aprovar(gerado, fonte)
         if (aprovado == null) {
             // **O texto RECUSADO vai para o log, não só a nota.** Sem ele, três
@@ -127,7 +161,7 @@ class RedatorLlamaCpp(
             // terceiro: nada aqui esbarra na proibição de indexar interlocutor.
             Log.w(
                 TAG,
-                "redator: RECUSADO (lastro %.2f) — cai na leitura verbatim · cru=\"%s\""
+                "redator: RECUSADO (lastro %.2f) — cai na citação da Etapa A · cru=\"%s\""
                     .format(guarda.lastro(gerado, fonte), gerado.take(240).replace('\n', ' ')),
             )
         }
@@ -140,40 +174,8 @@ class RedatorLlamaCpp(
         if (h != 0L) runCatching { NativoDoRedator.nativoLiberar(h) }
     }
 
-    private fun usuario(pedido: PedidoDeRedacao): String = buildString {
-        append("PERGUNTA DO AGENTE: ").append(pedido.pergunta).append('\n')
-        append("TRECHO DA NORMA:\n").append(pedido.trecho).append('\n')
-    }
-
     companion object {
         private const val TAG = "ClaryonField"
-
-        /**
-         * **A instrução é fixa e não recebe nada de fora.** Prompt montado com
-         * texto de terceiro é o caminho pelo qual conteúdo recuperado passa a
-         * mandar no modelo; aqui o único material variável viaja no papel de
-         * `user`, nunca no de `system`.
-         *
-         * Ela também não oferece nenhuma ação: não há ferramenta, não há campo
-         * de comando, não há verbo de aparelho. O `CLAUDE.md` §2 proíbe LLM
-         * escolhendo ação, e a garantia forte disso é de classpath e de teste em
-         * `app` — esta instrução é só a primeira camada.
-         *
-         * **Curta porque foi MEDIDO que a longa não funciona.** A primeira versão
-         * tinha seis linhas e uma cláusula de escape (*"se o trecho não responder
-         * à pergunta, responda NÃO SEI"*). No emulador, com Llama 3.2 1B Q4_K_M,
-         * ela produziu `"NÃO SEI."` em **5 de 6** gerações sobre um artigo do CTB
-         * que responde à pergunta diretamente. Trocada por estas três linhas, o
-         * mesmo modelo, o mesmo trecho e a mesma semente passaram a produzir
-         * resumo utilizável. A cláusula de recusa saiu porque ela é da Etapa A —
-         * quem decide que não sabe é o limiar de `PortaDoConhecimento`, não o
-         * modelo — e aqui ela só dava ao modelo uma saída fácil.
-         */
-        private val INSTRUCAO = """
-            Resuma o TRECHO DA NORMA em duas frases curtas, em português do Brasil.
-            Use somente o que está escrito no trecho. Não cite número de artigo.
-            Comece direto pelo resumo, sem preâmbulo e sem aspas.
-        """.trimIndent()
 
         /**
          * Três frases faladas cabem folgadamente em 96 tokens. O teto existe

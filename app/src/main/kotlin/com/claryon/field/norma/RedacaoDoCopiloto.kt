@@ -26,7 +26,8 @@ import kotlinx.coroutines.launch
  * A decisão é tomada **uma vez, no boot** — literalmente em
  * `ClaryonApp.onCreate` —, com três entradas que só existem no aparelho:
  *
- *  1. o GGUF está em `filesDir`? (não vai no APK; ver [ARQUIVO_DO_MODELO])
+ *  1. o GGUF está no aparelho? (não vai no APK; ver [arquivoDoModelo], que
+ *     procura no diretório privado **e** no externo do app)
  *  2. a chave humana está ligada? ([FeatureFlag.REDACAO_POR_LLM])
  *  3. a RAM do aparelho comporta? (`ActivityManager.MemoryInfo`)
  *
@@ -43,25 +44,37 @@ import kotlinx.coroutines.launch
  *
  * O contrapeso é [liberar], chamada por `onTrimMemory` — se o sistema apertar,
  * o redator é a **primeira** coisa que devolve memória, porque é a capacidade
- * mais cara e a única cuja ausência não quebra o produto: sem ela, a Etapa A lê
- * o trecho verbatim, que é o comportamento padrão.
+ * mais cara e a única cuja ausência não quebra o produto: sem ela, a Etapa A
+ * responde com a **citação**, que é o comportamento padrão.
+ *
+ * ## Duas coisas que este KDoc afirmava e não eram verdade (corrigido em 22/08)
+ *
+ *  1. **"a Etapa A lê o trecho verbatim"** — não lê. `utteranceFor` fala
+ *     `"Art. 306, Lei 9.503"`; o texto do artigo não chega a `app`, porque
+ *     [ConsultaDeNorma.consultar] devolve `Pair<citacao, norma>`. Leitura
+ *     verbatim esbarra no teto de 7 palavras do `CLAUDE.md` §4 e é **proposta**
+ *     em `specs/leitura-de-norma.spec.md`, esperando decisão humana.
+ *  2. **[redigir] tem ZERO chamadores em `src/main`** — [decidirNoBoot] e
+ *     [liberar] são chamados por `ClaryonApp`, mas a redação em si nunca é
+ *     pedida por ninguém. Pelo critério do `CLAUDE.md` §6, a Etapa B está
+ *     **escrita**, não construída: falta o caminho alcançável pelo agente.
+ *
+ * Ligar [redigir] à fala **não é diff de código**: a fala derivada de norma é
+ * governada pelo teto de 7 palavras, que é regra dura. Pelo §7, sobrepor regra
+ * dura entra como spec e espera. A medição que fundamenta essa decisão está em
+ * `OrcamentoDaEtapaBNoAparelhoTest`.
  */
 object RedacaoDoCopiloto {
 
     private const val TAG = "ClaryonField"
 
     /**
-     * **Nome fixo em `filesDir`, e nunca em `assets/`.**
+     * **Nome fixo em disco, e nunca em `assets/`.**
      *
      * `llama_model_load_from_file` faz `fopen`/`mmap`: asset dentro do APK não
      * tem caminho no sistema de arquivos, comprimido ou não. Além de ser
      * requisito técnico, é o que mantém o APK com o tamanho que tem — o GGUF
-     * chega por `adb push` ou por download fora do caminho crítico:
-     *
-     * ```
-     * adb push Llama-3.2-1B-Instruct-Q4_K_M.gguf /data/local/tmp/redator.gguf
-     * adb shell run-as com.claryon.field cp /data/local/tmp/redator.gguf files/
-     * ```
+     * chega por `adb push` ou por download fora do caminho crítico.
      *
      * Nome genérico e não o do modelo: trocar de família de modelo passa a ser
      * trocar um arquivo, sem recompilar nem mexer em constante.
@@ -82,7 +95,60 @@ object RedacaoDoCopiloto {
     /** `true` quando a Etapa B está de pé neste aparelho, nesta execução. */
     val redigindo: Boolean get() = decisaoDoBoot is PoliticaDeRedacao.Decisao.Redigir
 
-    fun arquivoDoModelo(context: Context): File = File(context.filesDir, ARQUIVO_DO_MODELO)
+    /**
+     * **Onde o GGUF pode estar, na ordem em que se procura.**
+     *
+     * ## Por que dois lugares, e por que o externo existe
+     *
+     * O caminho histórico é `filesDir`, e ele obriga o onboarding a **duplicar**
+     * 770 MiB: `adb push` não escreve no diretório privado do app, então o
+     * arquivo entra em `/data/local/tmp` e é copiado depois — duas vezes o
+     * espaço enquanto a cópia acontece, e uma cópia que fica lá para sempre.
+     *
+     * `getExternalFilesDir` é o diretório do app **dentro** do armazenamento
+     * compartilhado: `adb push` escreve nele direto, sem `run-as`, portanto
+     * também em build de release; o app lê sem permissão nenhuma desde a API 19;
+     * e a desinstalação leva o arquivo junto.
+     *
+     * **A dúvida real era se o llama.cpp carrega de lá**, porque armazenamento
+     * "externo" é FUSE em Android moderno e `mmap` sobre FUSE não é garantido.
+     * Medido em 22/08 no emulador arm64 API 35
+     * (`OrcamentoDaEtapaBNoAparelhoTest.osDoisCaminhosDeEmbarqueSaoMedidos`):
+     *
+     * ```
+     * cópia /data/local/tmp → filesDir ....... 908 ms (770,28 MiB)
+     * preparar() direto do externo ........... 2 168 ms, devolveu true
+     * ```
+     *
+     * Carrega. Então o onboarding do dia do evento é uma linha e nenhuma cópia:
+     *
+     * ```
+     * adb push Llama-3.2-1B-Instruct-Q4_K_M.gguf \
+     *   /sdcard/Android/data/com.claryon.field/files/redator.gguf
+     * ```
+     *
+     * ## A ordem: privado primeiro
+     *
+     * `filesDir` vence quando os dois existem. Não é preferência técnica — é que
+     * o armazenamento compartilhado é gravável por quem tem acesso ao aparelho, e
+     * um GGUF trocado é um copiloto trocado. Quem quiser a garantia forte usa o
+     * diretório privado, que continua funcionando exatamente como antes; quem
+     * quiser o onboarding barato usa o externo. **Nenhum dos dois é caminho novo
+     * no código**: é a mesma `File` chegando ao mesmo lugar.
+     *
+     * Devolve o caminho **privado** quando não há arquivo em lugar nenhum, para
+     * que o log do boot e o motivo `SEM_MODELO` continuem apontando para onde o
+     * arquivo deveria estar.
+     */
+    fun arquivoDoModelo(context: Context): File {
+        val privado = File(context.filesDir, ARQUIVO_DO_MODELO)
+        if (privado.isFile) return privado
+        // `getExternalFilesDir` devolve `null` com o armazenamento desmontado —
+        // estado normal, não erro, e aqui vira "não achei", como qualquer outra
+        // ausência de arquivo.
+        val externo = context.getExternalFilesDir(null)?.let { File(it, ARQUIVO_DO_MODELO) }
+        return if (externo != null && externo.isFile) externo else privado
+    }
 
     /**
      * Decide, registra e — se for o caso — aquece o modelo. **Não suspensa e não
@@ -130,7 +196,7 @@ object RedacaoDoCopiloto {
                     // Decidiu redigir e o motor não subiu: isso NÃO pode ficar
                     // como "vai tentar de novo na hora da pergunta", porque a
                     // hora da pergunta é dentro do aceite de 4 s.
-                    Log.w(TAG, "redação: motor não carregou — voltando à leitura verbatim")
+                    Log.w(TAG, "redação: motor não carregou — voltando à citação da Etapa A")
                     decisaoDoBoot = PoliticaDeRedacao.Decisao.LerVerbatim(
                         PoliticaDeRedacao.Motivo.SEM_MODELO,
                     )
@@ -146,8 +212,24 @@ object RedacaoDoCopiloto {
      *
      * `null` é resposta esperada e frequente: Etapa B desligada, aparelho fraco,
      * modelo ausente, prazo estourado ou texto reprovado pelo guarda de lastro.
-     * Quem chama **lê o trecho verbatim** — que é a Etapa A e continua sendo o
-     * comportamento correto do produto.
+     * Quem chama cai na Etapa A — que hoje é a **citação** (`"Art. 306, Lei
+     * 9.503"`), não a leitura do artigo — e continua sendo o comportamento
+     * correto do produto.
+     *
+     * **Medido em 22/08, com a configuração de produção, sobre as 20 perguntas
+     * do banco de abordagem que passam o limiar de 0,30**
+     * (`OrcamentoDaEtapaBNoAparelhoTest`, emulador arm64 API 35, 2,5 GB): `null`
+     * em **9 de 20** por prazo estourado, mais 4 reprovadas pelo guarda — **13 de
+     * 20 caem**. O ramo de queda não é excepcional: ele é a **maioria** do
+     * comportamento desta função neste aparelho.
+     *
+     * **E o número da esquerda é do APARELHO, não do produto.** No mesmo dia, a
+     * mesma configuração rendeu **14 de 20 com texto** numa execução e **4 de 20**
+     * em outra, com a máquina que hospeda o emulador mais carregada. A causa está
+     * no log nativo: o prefill de ~500 tokens custa **1,6 a 2,5 s** e o prazo é
+     * 2 500 ms, então `llama_decode` devolve `2` (abortado) **antes de o prompt
+     * entrar**. Quem for prometer esta capacidade num palco precisa saber que ela
+     * fica muda quando o celular estiver ocupado — e no dia do evento ele estará.
      *
      * **Esta função não anuncia a procedência.** O número do artigo e o nome da
      * lei saem do trecho recuperado, byte a byte, pela boca de quem chama; nunca

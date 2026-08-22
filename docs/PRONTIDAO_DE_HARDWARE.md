@@ -108,9 +108,34 @@ e o mapa fica **preto e mudo** — sem marcador e sem mensagem. Não há
 
 A degradação é o piso; o teto também é aproveitado.
 
-- **Etapa B (LLM local)** só liga onde há RAM: o portão mede antes de carregar. Num
-  aparelho de 8 GB o copiloto redige; num de 4 GB ele **cita verbatim**, que é uma
-  resposta pior e ainda correta.
+- **Etapa B (LLM local)** só liga onde há RAM: o portão mede antes de carregar
+  (`PoliticaDeRedacao`, piso de 3 GB de RAM total e folga de 1,90× sobre o GGUF).
+
+  > ⚠️ **Este item dizia "num aparelho de 8 GB o copiloto redige", e isso não é
+  > verdade em produção** — corrigido em 22/08. `RedacaoDoCopiloto.redigir` tem
+  > **zero chamadores em `src/main`**: o portão decide, o modelo carrega, e
+  > ninguém pede a redação. Em qualquer aparelho, de 4 ou de 16 GB, o agente ouve
+  > a **citação** (`"Art. 306, Lei 9.503"`). Pelo `CLAUDE.md` §6 isso é
+  > capacidade **escrita**, não construída.
+  >
+  > E a medição de 22/08 diz que ligá-la, hoje, pioraria o produto. Com a
+  > configuração de produção, sobre as 20 perguntas do banco de abordagem que
+  > passam o limiar de 0,30 (emulador arm64 API 35, 2,5 GB):
+  >
+  > | | |
+  > |---|---|
+  > | sem texto nenhum (prazo de 2 500 ms estourado) | **7 de 20** |
+  > | com texto | 13 |
+  > | aprovadas pelo guarda de lastro | **10** |
+  > | dessas 10, **utilizáveis** por leitura humana do log | **≈2** |
+  >
+  > O resto são ecos da própria pergunta (*"O número do motor foi remarcado."*),
+  > vazamentos do andaime do prompt (*"TRECHO DA NORMA: …"*) e uma consequência
+  > inventada. Ver `OrcamentoDaEtapaBNoAparelhoTest`.
+
+- **A leitura do artigo em voz alta não existe** e não é o degrau de baixo da
+  Etapa B: ela esbarra no teto de 7 palavras do `CLAUDE.md` §4 e está **proposta**
+  em `specs/leitura-de-norma.spec.md`, esperando decisão humana.
 - **Provedor de posição** acompanha o modo: `NETWORK_PROVIDER` em Standby,
   `GPS_PROVIDER` em Ativo e Ocorrência.
 - **Freio térmico** com `NaN` tratado: em aparelho que aguenta mais, o freio não atua.

@@ -7,10 +7,29 @@ package com.claryon.llm
  * O redator é uma camada de *redação*, não de conhecimento e não de decisão.
  * Ele nunca é a fonte do que se diz: o conteúdo vem inteiro de
  * [PedidoDeRedacao.trecho], que a Etapa A recuperou do corpus. Se o redator
- * falhar, recusar ou demorar, quem chama **lê o trecho verbatim** e o produto
+ * falhar, recusar ou demorar, quem chama cai no caminho da Etapa A e o produto
  * continua de pé — é esse o desenho registrado no `ROADMAP.md`:
  *
  * > *"O produto nunca fica dependendo do LLM funcionar."*
+ *
+ * ## O caminho de queda é a CITAÇÃO — e este KDoc dizia outra coisa
+ *
+ * Até 22/08 estas linhas diziam *"quem chama **lê o trecho verbatim**"*. Nenhuma
+ * das duas metades era verdade, e a diferença importa para quem for ligar esta
+ * interface:
+ *
+ *  - **não há "quem chama".** `RedacaoDoCopiloto.redigir` — o único ponto de
+ *    entrada desta interface no produto — tem **zero chamadores em `src/main`**;
+ *  - **não há leitura verbatim.** O que o agente ouve numa consulta de norma é
+ *    `"Art. 306, Lei 9.503"` — a citação e o documento. O corpo do artigo não
+ *    atravessa a camada de recuperação: o que ela entrega é o par
+ *    `citacao, norma`. Lê-lo em voz alta esbarraria no teto de **7 palavras** do
+ *    `CLAUDE.md` §4, e está **proposto** — não construído — em
+ *    `specs/leitura-de-norma.spec.md`.
+ *
+ * Ou seja: a rede de segurança existe e funciona, mas ela diz **onde** está a
+ * regra, não **qual é** a regra. Quem for ligar a Etapa B precisa saber que o
+ * degrau abaixo dela é esse, e não uma leitura completa do artigo.
  *
  * ## As três coisas que uma implementação não pode fazer
  *

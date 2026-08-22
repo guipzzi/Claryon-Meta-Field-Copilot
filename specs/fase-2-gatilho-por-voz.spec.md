@@ -41,7 +41,7 @@ Tudo abaixo foi lido no arquivo, não lembrado.
 | Fato | Onde |
 |---|---|
 | Ciclo de voz consome microfone cru | `CopilotoViewModel.kt:487` |
-| Supressor é `ArrayList` **sem sincronização**; `registrar`/`abrir`/`fechar`/`suprimido`/`podarAntesDe`/`limpar` sem lock | `SupressorDeSaidaPropria.kt:40,47,56,62,72,83,90` |
+| Supressor é `ArrayList` **sem sincronização**; `registrar`/`suprimido`/`podarAntesDe`/`limpar` sem lock. *(Corrigido em 22/08: `abrir`/`fechar` **não existem mais** — a janela sem fim previsto foi removida, ver §3.9.2. A corrida segue de pé nos quatro métodos restantes.)* | `SupressorDeSaidaPropria.kt` |
 | A janela é registrada pela duração **presumida**, **antes** de tocar | `app/.../audio/SaidaUnica.kt` (`reproduzirComRotaESupressao`: `supressor.registrar(...)` e só então `rota?.emUso { audio.reproduzir(...) }`) |
 | `RadioTatico.emitirComSupressao` registra `earcon + DURACAO_FALA_ESTIMADA_MS = 2_000L` no instante do **enfileiramento** | `RadioTatico.kt:524-542` |
 | A fila **descarta** INFORMATIVO em Modo Tático (`offer` → `false`) e **cancela** o job em curso na emergência (`emCurso?.cancel()` — desde 22/08 o job cobre **síntese + reprodução**, e não só a reprodução) | `core-sound/.../SoundScheduler.kt:28`; `core-sound/.../PrioritySoundQueue.kt` (`enqueue`) |
@@ -58,7 +58,7 @@ Tudo abaixo foi lido no arquivo, não lembrado.
 | ~~`WakeWordDetector` é interface **sem implementação**~~ **apagada em 20/08** | Quem faz o trabalho é `app/.../voice/EscutaDeAtivacao.kt`; a costura de teste é `OuvidoDeAtivacao`, no módulo do app |
 | `EventoPtt.Transmitindo -> Unit` (**não há BIP**) e `Encerrada` só faz `Log.i` (**fecho é mudo**) | `RadioTatico.kt:423,444` |
 | `QuadrosNaoEntregues -> Log.w(...)` e nada mais — rede caída no meio é **silêncio** | `RadioTatico.kt:443` |
-| `Earcon.FALHA` já carrega 3 fatos distintos (`CanalOcupado`, `CanalPerdido`, `LimiteDeDuracao`) | `RadioTatico.kt:427,433,438` |
+| `Earcon.FALHA` já carregava 3 fatos distintos (`CanalOcupado`, `CanalPerdido`, `LimiteDeDuracao`). *(22/08: são **sete** — entraram `SemRede`, `PedidoRecusado` e `CanalNaoDevolvido`. Quatro deles ganharam **fala** própria pela causa curta, o que resolve o "não sei o que aconteceu"; o argumento por earcons distintos continua de pé para os que ainda soam iguais.)* | `RadioTatico.tratarPtt` |
 | `trocarDeGrupo` faz `supressor.limpar()` no meio do próprio comando do aceite | `RadioTatico.kt:313` |
 | Primeira guarda de troca é `if (transmitindo())` → canal aberto por voz vira **estado absorvente** | `app/.../radio/PoliticaDeTrocaDeGrupo.kt:57-59` |
 | `grupoCorrenteId` é `@Volatile var` semeado por `CanalDoPiloto.ID`, e `carregar()` **nunca o escreve** | `app/.../radio/CanaisDoAgente.kt:66-72,150` |
@@ -81,7 +81,7 @@ Tudo abaixo foi lido no arquivo, não lembrado.
 | Fonte de falso positivo | O que impede hoje |
 |---|---|
 | TTS do próprio copiloto | **Nada** no caminho do ciclo de voz (`CopilotoViewModel.kt:487` é cru) |
-| Transmissão recebida, tocando no alto-falante open-ear | **Nada** — `supressor.abrir` em `RadioTatico.kt:462` protege a captura do rádio, não o ciclo |
+| Transmissão recebida, tocando no alto-falante open-ear | **Nada** — a janela registrada pelo rádio em `EventoRecepcao.Audio` protege a captura do rádio, não o ciclo. *(22/08: era `supressor.abrir`, uma janela sem fim; hoje é uma janela por bloco decodificado. O buraco do ciclo de voz é o mesmo.)* |
 | Earcon do próprio produto | **Nada** no ciclo; e a janela registrada é **presumida**, não real |
 | Rádio VHF da viatura no ambiente | **Nada**, e não haverá: é som ambiente, o supressor só conhece o que **nós** emitimos |
 | Colega falando a 60 cm (co-localização) | **Nada** — o beamforming é premissa não medida neste repositório |
@@ -221,7 +221,9 @@ Ancorar no BIP é o certo — **e é perigoso na ordem errada**. `ClienteDePisoR
 ### 3.9 Intertravamentos (o que hoje não existe e o aceite A4 exige)
 
 1. **Transmissão em curso desliga o caminho de comando.** `cicloDeVoz()` tem uma guarda só (gravação de evidência). `RadioTatico` precisa expor o estado e o portão precisa consultá-lo. Sem isso: o agente diz a frase **durante** uma transmissão por toque, ela vai ao ar, e todo receptor cai no laço acústico.
-2. **Janela de recepção aberta desarma o portão.** Enquanto `supressor` tem janela sem fim previsto (`abrir` sem `fechar`), o microfone contém a mistura; blanquear não basta.
+2. **Janela de recepção aberta desarma o portão.** Enquanto o supressor tem janela viva pela recepção, o microfone contém a mistura; blanquear não basta.
+
+   > **Correção de 2026-08-22.** Este item dizia *"janela sem fim previsto (`abrir` sem `fechar`)"*, e essa forma de janela **deixou de existir**: `abrir`/`fechar` foram removidos do `SupressorDeSaidaPropria` porque quem fechava a janela não era quem tocava o som. O receptor leva 2 s para concluir que uma fala foi cortada pela rede, e nesses 2 s — sem som nenhum saindo — a captura do próximo agente a apertar o PTT era descartada inteira, sem tom. Hoje cada bloco decodificado registra a própria duração. O intertravamento continua necessário, com a janela agora sendo a soma dos blocos mais a margem.
 3. **Voz e toque não compartilham `GatilhoPtt`.** Hoje um encosto acidental na barra do PTT com canal aberto por voz encontra `pressionadoEm` e **mata a transmissão**, sem earcon. `RadioTatico` passa a ter noção explícita de dono da transmissão corrente (`voz` | `toque`), e `aoSoltar` recusa encerrar o que não abriu. `ResultadoDeAbertura` ganha `JaNoAr` com fala própria (3 palavras).
 4. **Canal aberto por voz não é estado absorvente.** A primeira guarda de `PoliticaDeTrocaDeGrupo` recusa trocar enquanto `transmitindo()`. Com o canal aberto por VOX o agente não tem como sair, e a **recusa falada vai ao ar**. Enquanto a decisão de 3.6 (abrir não troca) valer, a recusa por `TRANSMISSAO_EM_CURSO` passa a ser **earcon**, não fala.
 5. **Rede caída no meio não pode ser `Log.w`.** `QuadrosNaoEntregues` acima de um limiar (~10 quadros = 200 ms) vira aviso audível, **um só**, como já se faz na reprodução. Com o aparelho no bolso, o agente fala 30 s para um socket morto e ouve só o `FALHA` genérico do teto — que ele lê como "acabou o tempo", não como "ninguém te ouviu".
@@ -286,7 +288,7 @@ Numerada do que destrava mais para o que destrava menos. **Passo sem medição n
 | # | O que | Arquivos | Como se mede |
 |---|---|---|---|
 | **0.1** | Supressor thread-safe (`@Synchronized` nos 6 métodos, ou snapshot imutável) | `core-net/.../SupressorDeSaidaPropria.kt:40-92` | Stress: 2 dispatchers reais escrevendo e lendo por 10 s, zero exceção. **Tem de FALHAR em `HEAD`** — senão não exercita a corrida |
-| **0.2** | Janela pelos instantes **reais**: `abrir` antes de reproduzir, `fechar` em `finally` do `play` (dispara sob cancelamento) | `app/.../audio/SaidaUnica.kt` (`reproduzirComRotaESupressao`), `core-sound/.../PrioritySoundQueue.kt` | Contra-teste: iniciar fala de ~1,8 s, cortar com P1 aos 11 ms, exigir `suprimido(t+300) == false`. Hoje é `true` por ~1,9 s |
+| **0.2** | Janela pelos instantes **reais**: `abrir` antes de reproduzir, `fechar` em `finally` do `play` (dispara sob cancelamento). ⚠️ **Precisa de redesenho — 22/08:** `abrir`/`fechar` foram **removidos** do `SupressorDeSaidaPropria` (a janela sem fim previsto era o mecanismo do defeito 5 do caos de piso; ver §3.9.2). O problema que este item ataca — janela presumida em vez de real — **continua de pé**, e a forma que sobreviveu é registrar a janela real **depois** de tocar, ou registrá-la em fatias enquanto se toca, como o rádio passou a fazer por bloco decodificado. A escolha entre as duas é decisão humana e não foi tomada. | `app/.../audio/SaidaUnica.kt` (`reproduzirComRotaESupressao`), `core-sound/.../PrioritySoundQueue.kt` | Contra-teste: iniciar fala de ~1,8 s, cortar com P1 aos 11 ms, exigir `suprimido(t+300) == false`. Hoje é `true` por ~1,9 s |
 | **0.3** | `emitirComSupressao` só registra se a fila **aceitou** o som | `RadioTatico.kt:524-532`, `SoundScheduler.kt:28` | Modo Tático + INFORMATIVO → `janelasVivas` inalterado. Hoje sobe 2 080 ms para um som que nunca tocou |
 | **0.4** | Carimbo de captura em `Sinal.Amostras`; `suprimido(quadro.capturadoEmMs)` | `core-audio/.../FonteUnicaDeMicrofone.kt:84,170` + os 3 consumidores | Contra-teste: atraso artificial de 500 ms entre produtor e coletor; exigir que os quadros da janela sejam descartados **mesmo assim**. Hoje falha |
 | **0.5** | `Flow<ShortArray>.semNossaSaida(supressor)` com **silêncio digital**; `RadioTatico:238,397` migram de `.filter` para `.map` | novo em `core-audio`; `RadioTatico.kt:238,397` | Teste: 240 ms de janela no meio de fala contínua → a contagem de silêncio do detector **avança** e o segmento **não** se emenda. Nenhum teste existente faz isso |

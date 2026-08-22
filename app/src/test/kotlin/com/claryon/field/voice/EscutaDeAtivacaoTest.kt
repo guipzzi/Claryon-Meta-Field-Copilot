@@ -285,4 +285,50 @@ class EscutaDeAtivacaoTest {
         aoDetectar = {},
         suprimido = suprimido,
     )
+
+    /**
+     * **O laço e o estado publicado não podem divergir.**
+     *
+     * [EscutaDeAtivacao.escutando] lê o `Job` vivo; [EscutaDeAtivacao.estado] é o valor
+     * publicado. São duas fontes para o mesmo fato, e duas fontes envelhecem em
+     * direções diferentes se ninguém as prender — foi assim que o KDoc de `escutando`
+     * passou a afirmar que ela alimentava o perfil, o que nunca foi verdade.
+     *
+     * Elas não divergem porque o `finally` de `escutar` leva `OUVINDO` para `EM_PAUSA`
+     * e **não suspende**, de modo que roda também no cancelamento. Este teste é o que
+     * transforma essa propriedade de detalhe de implementação em invariante: quem puser
+     * um `withContext` ou um `delay` naquele `finally` descobre aqui, e não no perfil
+     * de um agente afirmando que o microfone está de pé com o laço morto.
+     */
+    @Test
+    fun oLacoEOEstadoNaoDivergem() = runTest {
+        val escopo = TestScope(StandardTestDispatcher(testScheduler))
+        // **Um fluxo que não termina.** `quadros(n)` completa, o `collect` retorna e o
+        // `finally` encerra o laço sozinho — a escuta estaria morta por conclusão
+        // normal, e não por `parar()`, que é o que este teste quer observar.
+        // `awaitCancellation` deixa a corrotina viva e ociosa, que é o estado real de
+        // uma escuta esperando alguém falar.
+        val vivoEOcioso: Flow<ShortArray> = flow {
+            emit(ShortArray(320))
+            kotlinx.coroutines.awaitCancellation()
+        }
+        val escuta = escutaCom(escopo, DetectorFalso(), vivoEOcioso)
+
+        escuta.ajustarPara(ModoOperacao.ATIVO)
+        escopo.advanceUntilIdle()
+        assertTrue("a escuta não subiu", escuta.escutando)
+        assertEquals(EstadoDaEscuta.OUVINDO, escuta.estado.value)
+
+        escuta.parar()
+        escopo.advanceUntilIdle()
+
+        assertFalse("o laço sobreviveu ao parar()", escuta.escutando)
+        assertEquals(
+            "O laço morreu e o estado ficou em OUVINDO. É a divergência que o KDoc " +
+                "de `escutando` declara impossível — e é exatamente o perfil " +
+                "afirmando microfone de pé sobre uma escuta morta.",
+            EstadoDaEscuta.EM_PAUSA,
+            escuta.estado.value,
+        )
+    }
 }

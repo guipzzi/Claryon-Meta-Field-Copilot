@@ -2108,3 +2108,79 @@ negativo que alguém acrescenta a uma só delas.
   dá *Uniform*/*Uniforme* para U. Ela só está na tabela porque é a palavra do exemplo
   de aceite da spec. Trocar o exemplo por *"uniforme"* e tirá-la é decisão de spec, e
   está registrada como pendência em `specs/consulta-de-placa-por-camera.spec.md`.
+
+---
+
+## 2026-08-22 — Bateria de caos com N pares: os oito defeitos do Pilar 1
+
+Oito defeitos achados por `CaosDePisoComNParesTest`, `CaosDeRecepcaoComNParesTest` e
+`CaosDoRadioComNParesTest`. O que segue são as decisões **não óbvias** — as óbvias
+estão no diff.
+
+- **O anúncio de fala é o gatilho da preempção; o árbitro é quem decide.** O
+  bloqueador era uma janela de **232 quadros (4 640 ms)** em que o interrompido por
+  P1 seguia no fio, porque só descobria na renovação seguinte (`RENOVAR_MS` =
+  5 000 ms). Duas alternativas foram descartadas: (i) **encurtar a renovação** — 200 ms
+  fecha a janela e cobra 5 RPCs por segundo por locutor, o turno inteiro, num
+  aparelho que precisa durar 12 h; (ii) **cortar no próprio anúncio** — instantâneo e
+  gratuito, e dá a qualquer cliente forjado o poder de calar quem quiser do grupo
+  anunciando P1 sem ter piso, que é a mesma classe de negação de serviço que a
+  proibição de identidade por parâmetro (§2) existe para fechar. O que ficou: o
+  anúncio, que **já era difundido para o grupo inteiro e ninguém lia**, dispara uma
+  confirmação imediata com o árbitro, e é a resposta dele que corta. Custo: um RPC,
+  só quando uma P1 aparece. Degradação declarada: se o anúncio se perder, a janela
+  volta a ser o intervalo de renovação — e há teste medindo as duas corridas.
+
+- **`liberar` deixou de ser `Unit`.** Três camadas escondiam o mesmo fato
+  (`rpcBooleano` sem `onFailure`, o `Boolean?` descartado, o `runCatching` do
+  encerramento). Trocar por `Boolean` fecharia a primeira e deixaria a pergunta
+  ambígua: `false` do `liberar_canal` significa "nada foi apagado", que é bom —
+  ninguém segura o canal. O que é ruim é **ausência de resposta**. Daí
+  `ResultadoDaLiberacao` com dois casos, e não um booleano com três significados.
+
+- **`SemRede` e `Recusado` são desfechos separados, e não um `Ocupado` genérico.**
+  Rede caída devolvia `Ocupado(detentor = "?")`, e o `"?"` morria dentro do evento.
+  As três recusas pedem gestos diferentes — esperar o colega, andar até pegar sinal,
+  conferir credencial —, e um 4xx do PostgREST não é queda de rede: mandar o agente
+  procurar torre por um problema de token é trocar uma mentira por outra. O earcon
+  continua sendo `FALHA` nas três: a **categoria** é a mesma, e o que separa é a causa
+  curta de `utteranceFor`. Earcons novos continuam propostos em
+  `docs/AVALIACAO_DAS_PROPOSTAS_FASE_2.md`, e a decisão é humana.
+
+- **`abrir`/`fechar` saíram do `SupressorDeSaidaPropria` — a API encolheu de
+  propósito.** A janela sem fim previsto era o mecanismo do defeito: quem a fechava
+  (`EventoRecepcao.Terminou`) não era quem tocava o som, e o receptor leva 2 s para
+  concluir que uma fala foi cortada pela rede. Nesses 2 s **não saía som nenhum** e a
+  captura do próximo agente a apertar o PTT era descartada inteira, com a barra de PTT
+  no ar e nenhum tom. Consertar mantendo `abrir`/`fechar` — fechar mais cedo, por
+  vigia de ociosidade — deixaria de pé a forma que produz o defeito. Hoje há um
+  mecanismo só: registrar som nosso **exige dizer por quanto tempo**, e quem reproduz
+  fluxo de duração desconhecida registra bloco a bloco, com a duração que acabou de
+  decodificar. A margem de 80 ms emenda blocos consecutivos.
+
+- **Fala truncada ganhou campo em vez de contagem.** `Terminou.perdidos` vem **zero**
+  justamente no caso truncado — o receptor não sabe contar quadros que nunca
+  existiram —, então nenhuma heurística sobre contagem distinguiria os dois casos.
+  `FimDaFala` é o campo. De quebra, `EventoDeRede.FimDeTransmissao` deixou de ser
+  descartado: quando o `ultimo` se perde mas o emissor soltou o botão, a conclusão sai
+  em 200 ms e como **encerramento**, não como corte.
+
+- **Quem entra no meio da fala recebe `ChegandoSemAnuncio`, e não um `Chegando`
+  fabricado.** Fabricar um anúncio com autor vazio poria a resolução de autoria a
+  serviço de um dado que não existe. O evento novo é a admissão honesta — "alguém
+  fala, não sei quem" —, e é dele que o `RadioTatico` parte para perguntar ao servidor
+  de quem é o piso (`autor_da_transmissao`, migração `0015`), que é a única fonte que
+  não depende de um anúncio já passado.
+
+- **`renovar_canal` apaga a concessão do ex-membro, e não só recusa a renovação**
+  (migração `0024`, arquivo novo — a `0005` é histórico aplicado). Recusar devolveria
+  `false`, o aparelho pararia de falar (certo), e a linha ficaria de pé até o TTL:
+  30 s de silêncio pagos por quem ficou na guarnição e não fez nada. É a mesma lógica
+  pela qual o TTL existe.
+
+- **O piso local se declara por voz, e o custo está declarado.** `ClienteDePiso`
+  ganhou `arbitradoPeloServidor`, e `RadioTatico` fala *"Sem servidor. Piso local."*
+  ao entrar em modo ativo. **Custo:** como toda fala do copiloto, ela abre janela de
+  supressão de ~2 s — o rádio abre segundos antes de alguém falar, então a conta
+  fecha, mas o número está aqui para não ser redescoberto como surpresa. Na abertura
+  e não no toque: repetir a cada PTT treinaria o agente a ignorar o aviso.

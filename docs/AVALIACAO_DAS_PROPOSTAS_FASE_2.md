@@ -88,6 +88,16 @@ como saber que está errado.
 **sem display**, o som é a única interface: cinco causas com um som só significa que
 o agente não sabe o que aconteceu.
 
+> **Atualização de 2026-08-22.** São **sete** hoje: entraram `SemRede`,
+> `PedidoRecusado` e `CanalNaoDevolvido`, da bateria de caos com N pares. Quatro
+> deles passaram a sair como `SinalizarEFalar` — earcon de categoria **mais** a
+> causa em ≤7 palavras —, o que resolve a parte de "não sei o que aconteceu" sem
+> gastar earcon novo: *"Canal ocupado."* e *"Sem sinal. Nada foi transmitido."*
+> mandam o agente fazer coisas opostas. O argumento desta proposta **não caiu**: ele
+> vale exatamente para os pares que a fala não separa, e continua valendo inteiro
+> para abertura × fecho de canal, onde a fala custaria latência num sinal que
+> precisa ser instantâneo.
+
 Pior: no desenho atual **abertura e fecho de canal soariam idênticos**. O agente não
 distingue "estou no ar" de "saí do ar" — e no produto isso é a diferença entre
 falar para a guarnição e falar sozinho.

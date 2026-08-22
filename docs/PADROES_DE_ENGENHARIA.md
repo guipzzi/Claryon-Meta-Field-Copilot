@@ -226,6 +226,35 @@ Capturar exige `GlassesAudioRoute`, e o único jeito de obter uma é rotear de f
   rádio — e por `RadioTatico.transmitindo`, e **reinicia o anel do detector nas duas bordas
   da mudez**. Sem o reinício ele emendaria os dois lados e avaliaria uma janela que nunca
   existiu no mundo, que é falso positivo por construção
+- **Toda janela de supressão tem fim declarado — não existe `abrir` sem duração.**
+  (22/08.) Havia uma segunda forma: uma janela sem fim previsto, aberta no anúncio de fala
+  recebida e fechada em `EventoRecepcao.Terminou`. Quem fechava não era quem tocava, e o
+  receptor leva 2 s para concluir que uma fala foi cortada pela rede — nesses 2 s não saía
+  som nenhum e a captura do **próximo** agente a apertar o PTT era descartada inteira, com
+  a barra no ar e nenhum tom. Quem reproduz fluxo de duração desconhecida registra **bloco
+  a bloco**, com a duração de cada bloco decodificado; a margem de 80 ms emenda um no outro
+- **O interrompido por P1 descobre pelo ANÚNCIO, não pela renovação.** (22/08.) O anúncio
+  de fala do emissor P1 é difundido para o grupo inteiro, inclusive para quem está no ar —
+  o sinal já estava no fio e ninguém o lia. Ele é o **gatilho** de uma confirmação imediata
+  com o árbitro; quem corta a fala é a resposta do árbitro, nunca o anúncio. Sem isso a
+  janela de duas vozes no fio era o intervalo de renovação: medido em **232 quadros,
+  4 640 ms**. Tratar o anúncio como decisão daria a qualquer cliente forjado o poder de
+  calar a guarnição
+- **As três recusas de canal têm falas diferentes porque pedem gestos opostos.** (22/08.)
+  Canal ocupado se resolve **esperando**; pedido sem resposta se resolve **andando** até
+  pegar sinal; recusa de autorização se resolve conferindo credencial. O earcon é o mesmo —
+  a categoria é a mesma —, e o que separa é a causa curta
+- **Devolução de canal tem desfecho, e ele é lido.** `liberar` devolve
+  `ResultadoDaLiberacao`, e `NaoDevolvido` vira tom antes de `Encerrada`. Um
+  `liberar_canal` perdido deixa a guarnição muda até o TTL de 30 s, e só quem causou pode
+  agir
+- **Fim de fala recebida diz COMO acabou.** `EventoRecepcao.Terminou` carrega
+  `FimDaFala.ENCERRADA_PELO_EMISSOR | CORTADA_NO_MEIO`. `perdidos` vem zero justamente no
+  caso truncado — o receptor não sabe contar quadros que nunca existiram —, então contar
+  nunca bastou para distinguir
+- **Piso local se declara em voz na abertura do rádio.** Sem sessão não há arbitragem do
+  servidor, e dois aparelhos podem se achar donos do mesmo canal. A degradação fica (o
+  rádio precisa funcionar em túnel); o silêncio sobre ela, não
 
 ## Localização e mapa (C2/C5)
 

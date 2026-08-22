@@ -119,7 +119,31 @@ class EscutaDeAtivacao(
     @Volatile
     private var mudoAte = 0L
 
-    /** `true` enquanto o laço de escuta está de pé. Alimenta a prontidão no perfil. */
+    /**
+     * `true` enquanto o laço de escuta está de pé. **Afordância de teste, e só.**
+     *
+     * O KDoc anterior dizia *"alimenta a prontidão no perfil"*, e era falso: `grep`
+     * de `.escutando` em `src/main` devolve **zero**. Quem alimenta a linha "Palavra de
+     * ativação" é `CopilotService.estadoDaEscuta`, outro objeto e outro tipo. Era a
+     * mesma frase, palavra por palavra, que estava errada no KDoc de
+     * `ColetorDePosicao.coletando` — duas propriedades diferentes herdaram a mesma
+     * mentira, o que sugere cópia de bloco em vez de descrição do que existe.
+     *
+     * **Por que fica, em vez de ser removida.** Ela lê a *verdade do laço* — o `Job`
+     * vivo —, enquanto [estado] é o valor **publicado**. Um teste que quer saber se a
+     * escuta realmente parou não deve perguntar ao estado publicado, porque essa é
+     * justamente a afirmação sob teste.
+     *
+     * **E as duas não podem divergir**, por construção: o `finally` de [escutar] leva
+     * `OUVINDO` para `EM_PAUSA`, não suspende, e por isso roda também no cancelamento.
+     * `EscutaDeAtivacaoTest.oLacoEOEstadoNaoDivergem` prende esse acoplamento — sem
+     * ele, ter duas fontes para o mesmo fato seria convite a uma delas envelhecer.
+     *
+     * A divergência que **existe** está um nível acima e não se conserta aqui:
+     * `CopilotService:107` espelha [estado] numa segunda cópia, e é a cópia que o
+     * perfil lê. Se aquele coletor morrer, ela congela no último valor com o laço já
+     * morto. Ligar esta propriedade não resolveria — o perfil não fala com esta classe.
+     */
     val escutando: Boolean get() = laco?.isActive == true
 
     /**
