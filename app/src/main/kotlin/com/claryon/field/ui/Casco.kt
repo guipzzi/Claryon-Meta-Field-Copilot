@@ -61,9 +61,19 @@ fun CascoTatico(
     noAr: Boolean,
     conteudo: @Composable (Modifier) -> Unit,
 ) {
+    // **O sinal do piso, nos dois sentidos.** Migrado do `tween(180)` digitado à
+    // mão para os tokens que existiam sem chamador nenhum desde que foram escritos.
+    //
+    // `noAr` vem de `RadioViewModel._noAr`, que só é ligado depois de o rádio
+    // assumir a fala — é estado do RÁDIO, não do dedo, que é a condição que o KDoc
+    // de `PisoConcedido` impõe para ele poder ser composto.
+    //
+    // Acender usa `PisoConcedido` e apagar usa `PisoNegado`, que é mais rápido: uma
+    // moldura âmbar que sai devagar diz "talvez você ainda esteja no ar", e essa é
+    // a ambiguidade que a moldura existe para não ter.
     val intensidade by animateFloatAsState(
         targetValue = if (noAr) 1f else 0f,
-        animationSpec = tween(durationMillis = 180),
+        animationSpec = if (noAr) Movimento.PisoConcedido() else Movimento.PisoNegado(),
         label = "moldura-no-ar",
     )
 

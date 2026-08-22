@@ -56,6 +56,14 @@ class UtteranceTest {
             }
         }
         // A citação mais longa que o corpus produz, para o teto valer no pior caso.
+        // Consulta EXTERNA. As duas entram aqui pela mesma razão que as de norma:
+        // o teto de 7 palavras precisa ser varrido nelas, e a spec da consulta
+        // externa acrescenta uma exigência própria — a fala não pode se rebaixar
+        // ("segundo a internet"), porque o sinal de credibilidade é a AUSÊNCIA de
+        // citação, não uma ressalva que custa sílaba.
+        add(ActionOutcome.LugarEncontrado(LugarProximo("Hospital Getúlio Vargas", 800)))
+        CategoriaDeLugar.entries.forEach { add(ActionOutcome.LugarNaoEncontrado(it)) }
+
         add(ActionOutcome.NormaEncontrada("Art. 359-M-B do CP", "Decreto-Lei 2.848/1940"))
         add(ActionOutcome.NormaNaoEncontrada)
         add(ActionOutcome.NaoEntendi)

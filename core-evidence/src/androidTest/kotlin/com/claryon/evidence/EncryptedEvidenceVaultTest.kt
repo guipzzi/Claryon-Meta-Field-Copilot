@@ -185,6 +185,91 @@ class EncryptedEvidenceVaultTest {
     }
 
     /**
+     * O mesmo byte adulterado, mas conferido pelo caminho que a **corregedoria**
+     * usaria: sem o [CustodyManifest] em memória, lendo o manifesto do próprio
+     * diretório.
+     *
+     * O teste acima passa o manifesto que o cofre acabou de devolver — o que só
+     * existe no processo que gravou. Um perito recebe um diretório, e é a
+     * sobrecarga de um argumento só de [EncryptedEvidenceVault.verificar] que
+     * ele exercita. Sem este teste, a sobrecarga do perito ficava provada apenas
+     * no caminho feliz ([verificaLendoOManifestoDoDisco]).
+     */
+    @Test
+    fun adulterarUmByte_apontaOSegmento_lendoOManifestoDoDisco() = runBlocking {
+        val vault = cofre()
+        val handle = abrir(vault)
+        repeat(4) { i -> vault.append(handle, ByteArray(BYTES_POR_JANELA) { (it + i).toByte() }) }
+        vault.finalize(handle)
+        assertEquals(Integridade.Integra, vault.verificar(handle))
+
+        val alvo = File(dirDe(handle), "seg_00001.enc")
+        RandomAccessFile(alvo, "rw").use { raf ->
+            val pos = raf.length() / 2
+            raf.seek(pos)
+            val b = raf.readByte()
+            raf.seek(pos)
+            raf.writeByte(b.toInt() xor 0x01)
+        }
+
+        assertEquals(Integridade.Quebrada(1), vault.verificar(handle))
+    }
+
+    /**
+     * **O limite da cadeia, exercitado em vez de prometido.**
+     *
+     * O KDoc de [Manifesto] admite em uma frase que o manifesto não é assinado e
+     * que "quem tiver acesso de escrita ao diretório pode reescrevê-lo". Este
+     * teste mostra o que essa frase custa, e o ataque **não precisa de chave
+     * nenhuma**: basta apagar os últimos segmentos e as linhas correspondentes.
+     *
+     * A cadeia sobrevivente é aritmeticamente perfeita — cada elo ancora no
+     * anterior — e [EncryptedEvidenceVault.verificar] responde
+     * [Integridade.Integra]. O que sumiu foi o **fim** da ocorrência, e nada no
+     * diretório registra que ele existiu.
+     *
+     * [HashChain.verificar] percorre o maior dos dois tamanhos justamente para
+     * pegar truncamento; mas aquilo só funciona quando o manifesto continua
+     * inteiro. Contra quem edita os dois, hash encadeado não tem o que fazer:
+     * integridade não é autenticidade. Fechar isto exige assinar o manifesto com
+     * uma chave que o app não possa usar para forjar — âncora externa (servidor
+     * ou HSM da corregedoria), não o mesmo Keystore que já grava os segmentos.
+     *
+     * Este teste é permanente e afirma o estado atual. Quando a assinatura
+     * existir, ele **falha** — e é assim que se descobre que a documentação
+     * precisa mudar junto.
+     */
+    @Test
+    fun manifestoNaoAssinado_truncarAOcorrenciaPassaPorIntegra() = runBlocking {
+        val vault = cofre()
+        val handle = abrir(vault)
+        repeat(5) { i -> vault.append(handle, ByteArray(BYTES_POR_JANELA) { (it + i).toByte() }) }
+        val original = (vault.finalize(handle) as Result.Success).value
+        assertEquals(5, original.chain.size)
+        assertEquals(Integridade.Integra, vault.verificar(handle))
+
+        // O ataque: apagar os dois últimos segmentos e as duas últimas linhas
+        // `S` do manifesto. Nenhuma chave é usada.
+        val dir = dirDe(handle)
+        File(dir, "seg_00004.enc").delete()
+        File(dir, "seg_00003.enc").delete()
+        val manifesto = File(dir, Manifesto.NOME)
+        var restantes = 3
+        val podadas = manifesto.readLines().filter { linha ->
+            if (linha.startsWith("S\t")) (restantes-- > 0) else true
+        }
+        manifesto.writeText(podadas.joinToString("\n", postfix = "\n"))
+
+        val lido = Manifesto.ler(dir)!!
+        assertEquals("o manifesto agora declara uma gravação mais curta", 3, lido.cadeia.size)
+        assertEquals(
+            "a cadeia truncada é internamente consistente — e é esse o problema",
+            Integridade.Integra,
+            vault.verificar(handle),
+        )
+    }
+
+    /**
      * Segmento no disco sem linha no manifesto é o resultado de morrer entre os
      * dois passos da escrita. É o modo de falha que a **ordem** escolheu ter, e
      * precisa ser reportado como benigno — não como adulteração, que é o que um

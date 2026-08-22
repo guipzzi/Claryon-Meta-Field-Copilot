@@ -6,6 +6,8 @@ import com.claryon.agent.Intent
 import com.claryon.agent.IntentExecutor
 import com.claryon.agent.ModoOperacao
 import com.claryon.agent.BuscaDePar
+import com.claryon.agent.CategoriaDeLugar
+import com.claryon.agent.BuscaDeLugar
 import com.claryon.agent.Ocorrencia
 import com.claryon.agent.PlacaValidator
 import com.claryon.agent.Prioridade
@@ -120,6 +122,17 @@ class ClaryonIntentExecutor(
     private val minhaPosicao: suspend () -> Coordenada? = { null },
     /** Onde está um par, já relativo a mim. Ver [BuscaDePar]. */
     private val localizarPar: suspend (String) -> BuscaDePar = { BuscaDePar.Indisponivel },
+
+    /**
+     * **Procura um lugar pela fonte EXTERNA.** Injetada, como [localizarPar]: o
+     * executor declara o que precisa e não conhece Overpass, HTTP nem raio.
+     *
+     * O padrão devolve [BuscaDeLugar.SemRede] — sem ninguém ligar, a cascata termina
+     * na recusa falada, que é exatamente o comportamento de antes desta capacidade
+     * existir. Nenhuma regressão por omissão.
+     */
+    private val procurarLugar: suspend (CategoriaDeLugar) -> BuscaDeLugar =
+        { BuscaDeLugar.SemRede },
     private val permissaoDeLocal: () -> Boolean = { true },
     /**
      * Troca de talk group. Devolve o **nome de exibição** do grupo em que ficamos,
@@ -287,6 +300,14 @@ class ClaryonIntentExecutor(
         // bruta do par **nunca** chega ao aparelho de outro agente.
         is Intent.ConsultarPosicao -> consultarPosicao(intent.indicativo)
 
+        // C2 — lugar por fonte EXTERNA, o último degrau da cascata.
+        //
+        // Só chega aqui o que a fonte local não respondeu: `specs/consulta-externa.spec.md`
+        // manda tentar local primeiro, sempre. E o que atravessa a rede é a CATEGORIA
+        // mais um raio — nunca a transcrição, nunca a rua, nunca a cidade. Ver
+        // `HigieneDaConsulta`.
+        is Intent.ConsultarLugar -> consultarLugar(intent.categoria)
+
         // C3 — alerta de ocorrência classificada.
         is Intent.AlertarOcorrencia -> alertar(intent.ocorrencia)
 
@@ -427,6 +448,36 @@ class ClaryonIntentExecutor(
     }
 
     // ── C2: posição de um par ─────────────────────────────────────────────────
+
+    /**
+     * **O último degrau da cascata, e ele não se apresenta.**
+     *
+     * `specs/consulta-externa.spec.md` §4: a resposta INTERNA se credencia pela
+     * citação (*"Art. 306, Lei 9.503"*); a externa apenas responde. A ausência de
+     * citação é o sinal, e não custa sílaba nenhuma dentro do teto de 7 palavras.
+     *
+     * Os quatro desfechos de [BuscaDeLugar] não colapsam, pela mesma razão de
+     * [BuscaDePar]: *nada por perto* é o sistema funcionando, *sem rede* e *prazo
+     * estourado* são falhas — e as três pedem ações diferentes do agente.
+     */
+    private suspend fun consultarLugar(categoria: CategoriaDeLugar): ActionOutcome =
+        when (val b = procurarLugar(categoria)) {
+            is BuscaDeLugar.Encontrado -> ActionOutcome.LugarEncontrado(b.lugar)
+
+            // Teve rede e não há nada no raio. NÃO é falha — o mesmo raciocínio de
+            // `ParNaoLocalizado`: tratar ausência como erro ensina o agente a duvidar
+            // do aparelho quando ele acertou.
+            BuscaDeLugar.NadaPorPerto -> ActionOutcome.LugarNaoEncontrado(categoria)
+
+            // Estas duas SÃO falha, e soam como falha. Separadas porque as ações são
+            // opostas: sem rede o agente anda até pegar sinal; prazo estourado ele
+            // repete a pergunta. Colapsar as duas devolveria a "Consulta indisponível."
+            // que a `FalhaDaCamera` existiu para matar.
+            BuscaDeLugar.SemRede ->
+                ActionOutcome.Falhou(FalhaOperacional.CONSULTA_SEM_REDE)
+            BuscaDeLugar.PrazoEstourado ->
+                ActionOutcome.Falhou(FalhaOperacional.CONSULTA_DEMOROU)
+        }
 
     private suspend fun consultarPosicao(indicativo: String): ActionOutcome {
         // Permissão é a única pré-condição local que faz sentido aqui.

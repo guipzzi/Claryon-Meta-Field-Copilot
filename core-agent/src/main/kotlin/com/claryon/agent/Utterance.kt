@@ -197,6 +197,37 @@ fun utteranceFor(outcome: ActionOutcome): Utterance = when (outcome) {
     ActionOutcome.NormaNaoEncontrada ->
         Utterance.Falar("Não achei na norma.", Priority.RESPOSTA)
 
+    // ── Fonte EXTERNA: responde, e NÃO se apresenta ────────────────────────────
+    //
+    // *"Hospital Getúlio Vargas, a 800 metros."* — sem "segundo a internet", sem
+    // "encontrei na web", sem "aproximadamente". A proposta original da spec era o
+    // contrário; o dono do projeto a inverteu em 22/08, e o teto de sete palavras
+    // torna o argumento concreto:
+    //
+    //   - ressalva custa sílaba dentro de um orçamento de SETE palavras;
+    //   - ressalva repetida vira ruído que o agente aprende a ignorar — e ele
+    //     ignora junto a informação que vinha depois dela;
+    //   - o sinal de credibilidade JÁ EXISTE e é grátis: a **citação**. Resposta
+    //     interna diz "Art. 306, Lei 9.503"; resposta externa não diz nada disso.
+    //     **A ausência da citação é o sinal.**
+    //
+    // `Falar` puro, sem earcon, e isso também é decisão: earcon distinto marcaria a
+    // origem no som — seria a mesma ressalva, só que instrumental. O agente aprende
+    // a distinção pelo conteúdo, como já aprende com a `Procedencia` da base
+    // veicular.
+    //
+    // Há teste varrendo estes dois ramos atrás de termo de rebaixamento
+    // (`FalaDeFonteExternaTest`), porque uma regra de produto que depende de
+    // ninguém acrescentar "provavelmente" numa string é uma regra que não existe.
+    is ActionOutcome.LugarEncontrado ->
+        Utterance.Falar(FalaDeLugar.para(outcome.lugar), Priority.RESPOSTA)
+
+    // Teve rede e não há nada no raio. **Não é earcon de falha**: nada falhou —
+    // mesmo raciocínio de `ParNaoLocalizado` e de `NormaNaoEncontrada`. Tratar
+    // ausência como erro ensina o agente a duvidar do aparelho quando ele acertou.
+    is ActionOutcome.LugarNaoEncontrado ->
+        Utterance.Falar(outcome.categoria.falaDeAusencia, Priority.RESPOSTA)
+
     ActionOutcome.NaoEntendi ->
         Utterance.SinalizarEFalar(Earcon.FALHA, "Não entendi, repita.", Priority.RESPOSTA)
 

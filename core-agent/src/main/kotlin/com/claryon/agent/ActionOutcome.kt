@@ -139,6 +139,34 @@ sealed interface ActionOutcome {
      */
     data object NormaNaoEncontrada : ActionOutcome
 
+    /**
+     * **Lugar encontrado por fonte EXTERNA — e ele responde sem se apresentar.**
+     *
+     * A fala é *"Hospital Getúlio Vargas, a 800 metros."*, sem *"segundo a
+     * internet"*. Decisão do dono do projeto em 22/08, e ela inverteu a proposta
+     * original da spec: gastar palavra falada com ressalva é caro dentro do teto
+     * de sete palavras, e ressalva repetida vira ruído que o agente aprende a
+     * ignorar.
+     *
+     * O sinal de credibilidade já existe e é a **citação**: resposta interna cita
+     * norma e número, resposta externa não cita nada. A ausência é o sinal.
+     *
+     * **Não falar não é não guardar.** Serviço de origem, trecho que fundamentou e
+     * carimbo de tempo vão para o registro de auditoria, no aparelho. O que este
+     * tipo carrega é só o que a fala usa — ver [LugarProximo].
+     */
+    data class LugarEncontrado(val lugar: LugarProximo) : ActionOutcome
+
+    /**
+     * **Teve rede, a fonte respondeu, e não há nada no raio.**
+     *
+     * Não é [Falhou], pela mesma razão que [ParNaoLocalizado] não é: o sistema
+     * funcionou. Devolver o "mais próximo" de um raio maior seria mandar um agente
+     * a pé para um hospital a doze quilômetros — a versão geoespacial de inventar
+     * artigo de lei.
+     */
+    data class LugarNaoEncontrado(val categoria: CategoriaDeLugar) : ActionOutcome
+
     /** Transcrição não casou com nenhuma intenção. Não é falha: é "repita". */
     data object NaoEntendi : ActionOutcome
 
@@ -172,6 +200,20 @@ enum class FalhaOperacional(val causaCurta: String) {
     SEM_GRAVACAO_ATIVA("Nada gravando."),
     PLACA_NAO_LIDA("Placa ilegível."),
     CONSULTA_INDISPONIVEL("Consulta indisponível."),
+
+    // ── Falhas da consulta EXTERNA, separadas por RECUPERAÇÃO ───────────────────
+    //
+    // Mesmo critério de agrupamento das falhas de câmera: o que separa duas falas
+    // não é a causa, é **o que o agente faz a seguir**. Aqui as ações são opostas —
+    // sem rede ele anda até pegar sinal; prazo estourado ele repete a pergunta no
+    // mesmo lugar. Colapsar as duas em `CONSULTA_INDISPONIVEL` devolveria a fala
+    // genérica que `FalhaDaCamera` existiu para matar, agora na cascata externa.
+    //
+    // E há um agravante específico desta camada: o rádio já confundia falta de rede
+    // com canal ocupado, e isso custou um defeito inteiro em 22/08. Repetir o erro
+    // aqui seria não ter aprendido com ele.
+    CONSULTA_SEM_REDE("Sem rede para consultar."),
+    CONSULTA_DEMOROU("Consulta demorou. Repita."),
 
     // ── Falhas de CÂMERA, agrupadas por RECUPERAÇÃO ─────────────────────────────
     //
@@ -213,6 +255,22 @@ enum class FalhaOperacional(val causaCurta: String) {
      */
     CAMERA_INDISPONIVEL("Câmera falhou. Tente de novo."),
     SEM_REDE("Sem rede."),
+
+    /**
+     * **A consulta externa passou do prazo de 2 s — e estourar o prazo é RECUSA,
+     * não espera.**
+     *
+     * Decisão 1 de `specs/consulta-externa.spec.md`, o mesmo prazo da consulta de
+     * posição. Um copiloto que fica calado esperando a rede é indistinguível de um
+     * copiloto morto, e num produto sem display o agente não tem como saber que
+     * ainda está pensando.
+     *
+     * Tem código próprio, e não [SEM_REDE], porque a ação do agente é a **oposta**:
+     * sem rede se resolve andando até pegar sinal; prazo estourado é sinal fraco ou
+     * servidor lento, e repetir o comando parado pode dar certo. Colapsar as duas
+     * mandaria o agente caminhar por um problema que já ia resolver sozinho.
+     */
+    CONSULTA_EXTERNA_LENTA("Demorou. Tente de novo."),
 
     /**
      * A consulta de posição precisa da posição **própria** para dizer distância e

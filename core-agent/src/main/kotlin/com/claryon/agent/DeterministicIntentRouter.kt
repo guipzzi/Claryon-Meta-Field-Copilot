@@ -29,6 +29,9 @@ class DeterministicIntentRouter : IntentRouter {
         // Classificado uma vez só: a varredura de gatilhos é a parte mais cara do
         // roteador e ele está no caminho crítico de 2 s entre fala e resposta.
         val ocorrencia = LexicoDeOcorrencias.classificar(transcricao)
+        // Pelo mesmo motivo, uma vez só: a pergunta geoespacial exige categoria E
+        // marcador de proximidade, e as duas varreduras estão no caminho crítico.
+        val lugar = categoriaDeLugar(texto)
         if (texto.isBlank()) return Intent.NaoReconhecida(transcricao)
 
         return when {
@@ -51,6 +54,30 @@ class DeterministicIntentRouter : IntentRouter {
             // resposta e a consulta nunca aconteceria. Mesmo raciocínio que pôs
             // CONSULTAR_PLACA_EXPLICITO antes do termo solto "placa".
             matches(texto, CONSULTAR_NORMA) -> Intent.ConsultarNorma(texto)
+
+            // **A cascata começa aqui, e a ORDEM neste `when` é a cascata.**
+            //
+            // `specs/consulta-externa.spec.md` §3: local primeiro, externa depois,
+            // recusa falada por último. As duas primeiras camadas não são um `if`
+            // em algum lugar do executor — são estas linhas:
+            //
+            //   1. CONSULTAR_NORMA vem ANTES. Se a pergunta tem marcador legal, ela
+            //      vai para o corpus embarcado, que responde em 618 ms e funciona
+            //      sem sinal. Offline é o caso normal em campo, não a exceção.
+            //   2. só o que não é norma chega aqui, e daqui é que sai rede.
+            //
+            // **`ocorrencia == null` é o portão, e ele não é defensivo.** "Tiroteio
+            // no hospital mais próximo" é um ALERTA, e sem esta condição viraria
+            // uma busca por hospital enquanto ninguém era avisado do tiroteio — o
+            // mesmo defeito que "modo abordagem" teve, e que este arquivo já
+            // registra duas vezes. A classificação já foi feita lá em cima, uma vez
+            // só; aqui ela só é consultada.
+            // Categoria E marcador de proximidade, os dois. "Levo o autor pra
+            // delegacia" não é pergunta; "delegacia mais próxima" é. Exigir os dois
+            // deixa de fora pergunta legítima dita de outro jeito, e isso é
+            // limitação CONHECIDA — o conserto é medir recall sobre fala real, como
+            // o KDoc de CONSULTAR_NORMA já registra, e não alargar por intuição.
+            ocorrencia == null && lugar != null -> Intent.ConsultarLugar(lugar)
 
             matches(texto, DETALHAR) -> Intent.Detalhar
             matches(texto, MODO_STANDBY) -> Intent.TrocarModo(ModoOperacao.STANDBY)
@@ -246,6 +273,24 @@ class DeterministicIntentRouter : IntentRouter {
         return null
     }
 
+    /**
+     * A categoria de lugar pedida, ou `null` — e o `null` é a resposta comum.
+     *
+     * **Exige os dois sinais.** A categoria sozinha não basta: *"conduzi o autor à
+     * delegacia"* e *"a vítima foi levada ao hospital"* são narração de ocorrência,
+     * ditas o tempo todo no rádio, e cada uma delas virando consulta externa é uma
+     * requisição de rede e uma resposta falada por cima do agente. O marcador de
+     * proximidade sozinho também não basta: *"a viatura mais próxima"* é pergunta
+     * sobre um par, e ela pertence a `CONSULTAR_POSICAO`.
+     *
+     * Onde os dois aparecem, a intenção é inequívoca — e é o único caso em que este
+     * produto manda alguma coisa para fora do aparelho por iniciativa da fala.
+     */
+    private fun categoriaDeLugar(texto: String): CategoriaDeLugar? {
+        if (!matches(texto, PROXIMIDADE)) return null
+        return LUGARES.firstOrNull { (_, gatilhos) -> matches(texto, gatilhos) }?.first
+    }
+
     private fun matches(texto: String, padroes: List<String>): Boolean =
         padroes.any { texto.contains(it) }
 
@@ -299,6 +344,44 @@ class DeterministicIntentRouter : IntentRouter {
         val MODO_ATIVO = listOf("modo ativo", "modo patrulha")
 
         val CONSULTAR_POSICAO = listOf("onde esta", "onde ta", "posicao de", "localizar", "cade a", "cade o")
+
+        /**
+         * **Marcador de proximidade — metade do portão da única consulta que sai do
+         * aparelho.**
+         *
+         * Locuções inteiras, nunca a palavra solta. "perto" sozinho aparece em
+         * *"o suspeito está perto da esquina"*; "próximo" sozinho aparece em
+         * *"próximo passo"* e em *"o próximo turno"*. Cada termo largo aqui é uma
+         * ocorrência de rádio virando requisição HTTP — o mesmo argumento, medido,
+         * que manteve `CONSULTAR_NORMA` estreito.
+         */
+        val PROXIMIDADE = listOf(
+            "mais proximo", "mais proxima", "mais perto",
+            "aqui perto", "perto daqui", "por perto", "aqui do lado",
+        )
+
+        /**
+         * **As categorias que o copiloto sabe procurar, e os termos que as
+         * disparam.** Vocabulário FECHADO, como todo o resto deste roteador.
+         *
+         * A ordem é do mais específico para o mais genérico, pela mesma razão de
+         * `LexicoDeOcorrencias.GATILHOS`: *"posto de saúde"* tem de ser testado
+         * antes de qualquer coisa que também case, senão a categoria mais precisa
+         * se perde.
+         *
+         * **Sinal de três letras não entra.** "UPA" chegou a ser candidata e saiu:
+         * o casamento aqui é por `contains`, e "upa" está dentro de "ocupação",
+         * "poupança" e "preocupado" — três palavras de fala corrente que passariam
+         * a mandar uma consulta pela rede. Sigla curta só voltaria com casamento por
+         * limite de palavra, que é mudança de mecanismo, não de lista.
+         */
+        val LUGARES: List<Pair<CategoriaDeLugar, List<String>>> = listOf(
+            CategoriaDeLugar.POSTO_DE_SAUDE to listOf(
+                "posto de saude", "posto medico", "unidade de pronto atendimento",
+            ),
+            CategoriaDeLugar.HOSPITAL to listOf("hospital", "pronto socorro", "pronto-socorro"),
+            CategoriaDeLugar.DELEGACIA to listOf("delegacia", "distrito policial"),
+        )
 
         /**
          * Troca de talk group. **Verbo + preposição**, não o verbo solto: "mudar"

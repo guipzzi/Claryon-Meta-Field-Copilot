@@ -347,27 +347,66 @@ class CopilotService : Service() {
      * processo morre. Degradar (subir só com o que pode) é o comportamento
      * correto: o pipeline continua e a falta de sensor vira falha audível na
      * feature, não crash do app.
+     *
+     * ## Por que existe um `try/catch` aqui, e não só o filtro
+     *
+     * O filtro é a defesa; o `catch` é o que impede que uma falha dele mate o
+     * app. Três coisas podem escapar ao filtro, e nenhuma é hipotética:
+     *
+     *  1. **Corrida.** O agente revoga a permissão nos ajustes entre o
+     *     `checkSelfPermission` e o `startForeground`. O Android mata o processo
+     *     do app quando uma permissão é revogada, mas a ordem não é garantida.
+     *  2. **Máscara vazia.** Sem nenhum tipo concedido, `tipos` é `0`, e para
+     *     `targetSdk >= 34` subir FGS sem tipo é `MissingForegroundServiceTypeException`.
+     *     Alcançável hoje: Standby com Bluetooth **e** localização negados —
+     *     Standby não pede microfone nem câmera, e as duas outras somem.
+     *  3. **Regra nova do sistema** numa versão futura do Android.
+     *
+     * Cair aqui não pode virar tela preta. `stopSelf()` desarma o prazo de ~5 s
+     * do `startForegroundService` (que mataria o processo com
+     * `ForegroundServiceDidNotStartInTimeException`) e o app volta para a
+     * interface, sem copiloto em segundo plano — que é a capacidade perdida, e
+     * ela fica no log em vez de virar crash na frente do agente.
      */
     private fun entrarEmPrimeiroPlano(modo: ModoOperacao) {
-        val tipos = PowerPolicy.tiposDeServico(modo)
-            .filter { temPermissaoPara(it) }
-            .fold(0) { acc, t -> acc or t.androidFlag() }
+        val concedidos = PowerPolicy.tiposDeServico(modo).filter { temPermissaoPara(it) }
+        val tipos = concedidos.fold(0) { acc, t -> acc or t.androidFlag() }
         val notificacao = construirNotificacao(modo)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(ID_NOTIFICACAO, notificacao, tipos)
-        } else {
-            startForeground(ID_NOTIFICACAO, notificacao)
+        try {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                startForeground(ID_NOTIFICACAO, notificacao)
+            } else {
+                // Máscara vazia é ilegal no Android 14+; não adianta tentar.
+                if (tipos == 0 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                    throw IllegalStateException(
+                        "nenhum tipo de FGS concedido para o modo $modo — " +
+                            "faltam as permissões de runtime de todos eles",
+                    )
+                }
+                startForeground(ID_NOTIFICACAO, notificacao, tipos)
+            }
+        } catch (e: Exception) {
+            // `Exception` e não só `SecurityException`: `MissingForegroundServiceTypeException`
+            // e `ForegroundServiceStartNotAllowedException` são irmãs dela por
+            // `IllegalStateException`, e derrubam o app do mesmo jeito.
+            Log.e(
+                TAG,
+                "não foi possível promover o serviço a primeiro plano no modo $modo " +
+                    "(tipos concedidos: $concedidos) — o copiloto não roda em segundo plano",
+                e,
+            )
+            stopSelf()
         }
     }
 
-    /** Permissão de runtime que cada tipo de FGS exige (além da do manifest). */
+    /**
+     * Permissão de runtime que cada tipo de FGS exige (além da do manifest).
+     *
+     * `true` quando o tipo não exige nenhuma — hoje **nenhum** tipo que usamos
+     * está nesse caso. Ver [permissaoDeRuntimeDe].
+     */
     private fun temPermissaoPara(tipo: TipoServico): Boolean {
-        val permissao = when (tipo) {
-            TipoServico.CONNECTED_DEVICE -> return true // não exige runtime
-            TipoServico.MICROPHONE -> android.Manifest.permission.RECORD_AUDIO
-            TipoServico.CAMERA -> android.Manifest.permission.CAMERA
-            TipoServico.LOCATION -> android.Manifest.permission.ACCESS_FINE_LOCATION
-        }
+        val permissao = permissaoDeRuntimeDe(tipo) ?: return true
         return checkSelfPermission(permissao) == android.content.pm.PackageManager.PERMISSION_GRANTED
     }
 
@@ -523,4 +562,49 @@ private fun TipoServico.androidFlag(): Int = when (this) {
     TipoServico.MICROPHONE -> ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
     TipoServico.CAMERA -> ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
     TipoServico.LOCATION -> ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+}
+
+/**
+ * Permissão de runtime que o Android exige para **subir** o FGS com cada tipo —
+ * `null` se o tipo não exige nenhuma.
+ *
+ * ## O que `connectedDevice` custa, e por que a resposta antiga estava errada
+ *
+ * Aqui havia `CONNECTED_DEVICE -> return true // não exige runtime`. Falso a
+ * partir do Android 14, e o preço era o app morrer na primeira operação com
+ * Bluetooth negado. Reproduzido em emulador API 35, `targetSdk = 35`, com todas
+ * as permissões concedidas **menos** `BLUETOOTH_CONNECT` — e o próprio sistema
+ * enuncia a regra na exceção:
+ *
+ * ```
+ * java.lang.SecurityException: Starting FGS with type connectedDevice
+ *   targetSDK=35 requires permissions:
+ *   all of  [android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE]
+ *   any of  [BLUETOOTH_ADVERTISE, BLUETOOTH_CONNECT, BLUETOOTH_SCAN,
+ *            CHANGE_NETWORK_STATE, CHANGE_WIFI_STATE, CHANGE_WIFI_MULTICAST_STATE,
+ *            NFC, TRANSMIT_IR, UWB_RANGING, USB Device, USB Accessory]
+ * ```
+ *
+ * Ou seja: é um **"qualquer uma de"**, e o que decide não é o tipo, é o que
+ * ESTE manifest declara. Das onze da lista, `AndroidManifest.xml` declara
+ * exatamente **uma**: `BLUETOOTH_CONNECT` (linha 9). `android.permission.BLUETOOTH`
+ * (linha 8) é a legada e **não** está na lista. Com `minSdk = 31`,
+ * `BLUETOOTH_CONNECT` é sempre permissão de runtime — não há ramo de versão a
+ * fazer, e negá-la deixa o app sem nenhuma qualificadora.
+ *
+ * Acrescentar `CHANGE_NETWORK_STATE` ao manifest satisfaria a regra sem diálogo
+ * nenhum (é `normal`, concedida na instalação) e faria o crash sumir. **Não é o
+ * que este projeto quer:** o tipo `connectedDevice` existe para declarar ao
+ * sistema e ao agente que há uma sessão com os óculos aberta. Declará-lo
+ * enquanto o Bluetooth está negado — quando não pode haver sessão nenhuma — é
+ * pedir ao sistema um selo que a realidade não sustenta. Degradar é honesto;
+ * contornar é mentir para o Android.
+ *
+ * @see CopilotService.entrarEmPrimeiroPlano
+ */
+internal fun permissaoDeRuntimeDe(tipo: TipoServico): String? = when (tipo) {
+    TipoServico.CONNECTED_DEVICE -> android.Manifest.permission.BLUETOOTH_CONNECT
+    TipoServico.MICROPHONE -> android.Manifest.permission.RECORD_AUDIO
+    TipoServico.CAMERA -> android.Manifest.permission.CAMERA
+    TipoServico.LOCATION -> android.Manifest.permission.ACCESS_FINE_LOCATION
 }

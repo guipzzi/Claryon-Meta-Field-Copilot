@@ -119,6 +119,37 @@ sealed interface Intent {
      */
     data class ConsultarNorma(val pergunta: String) : Intent
 
+    /**
+     * **Consultar um lugar público próximo — o degrau externo da cascata.**
+     *
+     * *"Claryon, qual o hospital mais próximo?"* A resposta não está no corpus de
+     * leis nem na base veicular: é dado geoespacial, e a spec
+     * `specs/consulta-externa.spec.md` a colocou como o **segundo** degrau, depois
+     * do local e antes da recusa falada.
+     *
+     * ## O parâmetro é o enum, e a ausência de `String` é a garantia de privacidade
+     *
+     * Repare no que esta intenção **não** carrega: a transcrição. Não é
+     * economia — é o §5 da spec dito como tipo. A consulta que sai do aparelho é
+     * **reconstruída a partir da intenção**, e o único jeito de garantir que
+     * nenhum pedaço da fala do agente chegue a um servidor de terceiro é não
+     * haver, em lugar nenhum do caminho, um campo onde ela caiba.
+     *
+     * É o mesmo desenho de `PontoDoRastro`, que não tem onde guardar coordenada de
+     * par, e de `utteranceFor`, que não tem sobrecarga que aceite [Intent]. A
+     * garantia vem da assinatura, não da disciplina de quem escreve o próximo diff.
+     *
+     * De *"Claryon, estou na Rui Barbosa em Niterói, qual o hospital mais
+     * próximo"* sai `ConsultarLugar(HOSPITAL)` — e o que atravessa a rede é o
+     * termo `"hospital"` mais um raio. Nem a rua, nem a cidade, nem a frase.
+     *
+     * ## Vocabulário FECHADO, como o resto do roteador
+     *
+     * [CategoriaDeLugar] tem três entradas. Cada uma que se acrescentar é um termo
+     * a mais que sai do aparelho pela rede — decisão de spec, não de diff.
+     */
+    data class ConsultarLugar(val categoria: CategoriaDeLugar) : Intent
+
     /** Nada reconhecido — carrega a transcrição bruta para diagnóstico. */
     data class NaoReconhecida(val transcricao: String) : Intent
 }

@@ -2,7 +2,6 @@ package com.claryon.field.ui.telas
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -55,6 +54,8 @@ import com.claryon.field.ui.componentes.TextoDado
 import com.claryon.field.ui.componentes.TextoIndicativo
 import com.claryon.field.ui.tema.Cores
 import com.claryon.field.ui.tema.Espaco
+import com.claryon.field.ui.tema.Movimento
+import com.claryon.field.ui.tema.duracaoAcessivel
 
 /**
  * **Mapa da guarnição.**
@@ -348,9 +349,17 @@ private fun GavetaDaGuarnicao(
     motivoDaMinhaPosicao: String?,
     modifier: Modifier = Modifier,
 ) {
+    // `Movimento.MEDIO` + `Morfose` no lugar de `tween(260, FastOutSlowInEasing)`:
+    // a alça já está na tela e muda de orientação, que é a definição de morfose
+    // aqui. `FastOutSlowInEasing` é a curva do Material, e a auditoria de 22/08 a
+    // encontrou em três lugares desta tela — a única gramática de movimento do
+    // aplicativo importada de fora do vocabulário próprio.
     val giro by animateFloatAsState(
-        targetValue = if (aberta) 180f else 0f,
-        animationSpec = tween(durationMillis = 260, easing = FastOutSlowInEasing),
+        targetValue = if (aberta) MEIA_VOLTA else 0f,
+        animationSpec = tween(
+            duracaoAcessivel(Movimento.MEDIO),
+            easing = Movimento.Morfose,
+        ),
         label = "giro-da-alca",
     )
 
@@ -387,10 +396,18 @@ private fun GavetaDaGuarnicao(
             }
         }
 
+        // A gaveta é remanejo de layout — `Movimento.MEDIO` com `Morfose`, que é
+        // o que o vocabulário nomeia para "gaveta, expansão e remanejo". O fade
+        // acompanha em `CURTO` na entrada e `MICRO` na saída: a superfície some
+        // antes de terminar de encolher, senão a lista pisca no último quadro.
         AnimatedVisibility(
             visible = aberta,
-            enter = expandVertically(tween(260, easing = FastOutSlowInEasing)) + fadeIn(tween(180)),
-            exit = shrinkVertically(tween(220, easing = FastOutSlowInEasing)) + fadeOut(tween(120)),
+            enter = expandVertically(
+                tween(duracaoAcessivel(Movimento.MEDIO), easing = Movimento.Morfose),
+            ) + fadeIn(tween(duracaoAcessivel(Movimento.CURTO), easing = Movimento.Saida)),
+            exit = shrinkVertically(
+                tween(duracaoAcessivel(Movimento.MEDIO), easing = Movimento.Morfose),
+            ) + fadeOut(tween(duracaoAcessivel(Movimento.MICRO))),
         ) {
             Column {
                 Fio()
@@ -553,9 +570,17 @@ private fun LinhaDePar(par: ParNoMapa, focado: Boolean, aoTocar: () -> Unit) {
     // Transição em vez de salto: o marcador que envelhece na tela aberta esmaece
     // suavemente, e o movimento comunica "isto está ficando velho" melhor que
     // qualquer rótulo.
+    //
+    // **Era um `tween(600)` digitado, sem curva.** Os 600 ms batiam com
+    // `Movimento.DECAIMENTO` dígito por dígito e não havia referência entre os dois
+    // — a duplicata clássica, que diverge no primeiro ajuste. `DecaimentoPorIdade`
+    // existia desde que o vocabulário foi escrito e **não tinha um único chamador**;
+    // este é o momento que ele nomeia, e a curva `Constante` que ele traz é o
+    // conteúdo: esmaecimento linear lê como *"tempo passou"*, e com curva lê como
+    // *"algo aconteceu"* — leituras opostas, e aqui a primeira é a verdadeira.
     val opacidade by animateFloatAsState(
         targetValue = opacidadeAlvo,
-        animationSpec = tween(durationMillis = 600),
+        animationSpec = Movimento.DecaimentoPorIdade(),
         label = "frescor",
     )
 
@@ -618,3 +643,11 @@ private fun LinhaDePar(par: ParNoMapa, focado: Boolean, aoTocar: () -> Unit) {
         }
     }
 }
+
+/**
+ * Meia volta — a alça da gaveta aponta para baixo fechada e para cima aberta.
+ *
+ * Nomeada porque `180f` solto num `animateFloatAsState` é indistinguível de um
+ * número de opacidade, de largura ou de rumo, e esta tela tem os três.
+ */
+private const val MEIA_VOLTA = 180f

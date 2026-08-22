@@ -12,7 +12,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
-import kotlin.math.abs
 
 /**
  * **Vocabulário de movimento do Claryon Field.**
@@ -29,24 +28,47 @@ import kotlin.math.abs
  * Disso saem três regras operacionais:
  *
  *  1. **Nada de movimento livre para representar trabalho.** Se há progresso
- *     verdadeiro, o movimento é função dele ([faseDoPulso]). Se não há número de
- *     progresso, não há animação — há um rótulo dizendo o que está acontecendo.
+ *     verdadeiro, o movimento é função dele. Se não há número de progresso, não há
+ *     animação — há um rótulo dizendo o que está acontecendo.
  *  2. **Nada de movimento otimista.** Estado que depende de resposta do servidor
  *     não anima na hora do toque. Ver [PisoConcedido] e a ausência deliberada de
  *     um "piso pendente".
- *  3. **Movimento só onde carrega informação.** Não há transição de tela, não há
- *     entrada escalonada de lista, não há brilho.
+ *  3. **Movimento só onde carrega informação.** Não há entrada escalonada de
+ *     lista e não há brilho.
  *
  * ---
- * ### Os três momentos que o `ROADMAP` nomeia
+ * ### Os quatro momentos, e quem os desenha
  *
- * | momento | por que se move | token |
- * |---|---|---|
- * | o pulso do "no ar" | o agente precisa saber, **sem olhar**, que está transmitindo | [PulsoNoAr] + [faseDoPulso] |
- * | piso concedido/negado | é a diferença entre falar e falar no vazio | [PisoConcedido] / [PisoNegado] |
- * | esmaecimento por idade | posição velha tem de **parecer** velha | [DecaimentoPorIdade] |
+ * | momento | por que se move | token | chamador em `src/main` |
+ * |---|---|---|---|
+ * | piso concedido | é a diferença entre falar e falar no vazio | [PisoConcedido] | `Casco.kt`, `BarraDePtt.kt` |
+ * | piso negado / devolvido | o âmbar tem de **sair** antes de a mão reagir | [PisoNegado] | `Casco.kt`, `BarraDePtt.kt` |
+ * | esmaecimento por idade | posição velha tem de **parecer** velha | [DecaimentoPorIdade] | `TelaDoMapa.kt` |
+ * | retorno de toque | o dedo desceu, e o aparelho sabe disso com certeza | [MICRO] + [Sutil] | `Comuns.kt` (`Modifier.tocavel`) |
  *
- * Fora desses três, o padrão é `IMEDIATO`.
+ * Fora desses quatro e da passagem entre páginas, o padrão é [IMEDIATO].
+ *
+ * ---
+ * ### 22/08 — o pulso do "no ar" saiu daqui, e a razão é a regra
+ *
+ * Este arquivo definia `PulsoNoAr()`, `BATIDA_NO_AR` e `faseDoPulso()` para a
+ * batida do âmbar. Auditados em 22/08: **zero chamadores em `src/main`**, os três.
+ * Escritos, nunca construídos — o oitavo caso do padrão que o `CLAUDE.md` §6 nomeia.
+ *
+ * Não foram ligados, e sim removidos, porque **não existe produtor honesto para
+ * eles neste aparelho**. `faseDoPulso` pedia `quadrosNoAr` — quadros de 20 ms
+ * confirmados no ar —, e a única grandeza que chega à barra é
+ * `EstadoDoPtt.NoAr.decorridoMs`, que `RadioViewModel` calcula por
+ * `System.currentTimeMillis()`. Alimentar a batida com o relógio da tela é
+ * exatamente a mentira que o KDoc de `PulsoNoAr` já denunciava sobre si mesmo: o
+ * relógio continua andando com o rádio mudo, e o agente leria "estou transmitindo"
+ * de um canal que morreu.
+ *
+ * **O que os traz de volta**, e é uma coisa só: um contador de quadros publicado
+ * por `RadioTatico` e carregado em `EstadoDoPtt.NoAr`. Enquanto ele não existir, a
+ * ausência de batida é a informação correta — o "no ar" já tem cor, moldura de tela
+ * cheia, cronômetro e forma de onda com amplitude real, que são quatro canais
+ * verdadeiros.
  */
 object Movimento {
 
@@ -77,9 +99,6 @@ object Movimento {
      */
     const val DECAIMENTO = 600
 
-    /** Período de uma batida do "no ar" em condição nominal. Ver [faseDoPulso]. */
-    const val BATIDA_NO_AR = 1_000
-
     // ── Curvas ───────────────────────────────────────────────────────────────
 
     /**
@@ -109,23 +128,7 @@ object Movimento {
     /** Sutil — o `ease` do CSS. Só para mudança de cor de estado. */
     val Sutil: Easing = CubicBezierEasing(0.25f, 0.1f, 0.25f, 1f)
 
-    // ── Os três momentos, como specs prontos ─────────────────────────────────
-
-    /**
-     * **O pulso do "no ar".**
-     *
-     * Batida, não respiração: [Constante], porque o que ele representa é
-     * passagem de tempo de transmissão — o mesmo dado que o cronômetro mostra em
-     * número. O período de 1 s lê como pulso em repouso: vivo, sem alarme.
-     *
-     * **Este spec sozinho é uma mentira.** Ele roda pelo relógio da tela, e o
-     * relógio da tela continua andando com o rádio mudo. Use-o **apenas** com a
-     * fase vinda de [faseDoPulso], que é contada em quadros que de fato saíram.
-     */
-    fun <T> PulsoNoAr(): InfiniteRepeatableSpec<T> = infiniteRepeatable(
-        animation = tween(durationMillis = BATIDA_NO_AR, easing = Constante),
-        repeatMode = RepeatMode.Reverse,
-    )
+    // ── Os momentos, como specs prontos ──────────────────────────────────────
 
     /**
      * **Piso concedido.** O sinal de "pode falar".
@@ -145,12 +148,29 @@ object Movimento {
         tween(durationMillis = MICRO, easing = Saida)
 
     /**
-     * **Piso negado.** Mais rápido que o concedido, e em outra propriedade.
+     * **Piso negado — e piso devolvido.** Mais rápido que o concedido, e em outra
+     * propriedade.
      *
      * Deliberadamente **não** é o concedido em câmera lenta. Se negar fosse
      * conceder devagar, o intervalo entre os dois seria ambíguo — e é exatamente
      * nesse intervalo que o agente decide começar a falar. Negar recolhe; a
      * recusa termina antes de a mão reagir.
+     *
+     * ---
+     * ### Por que ele também desenha a SAÍDA do ar, e não só a recusa
+     *
+     * Ligado em 22/08 nos dois sentidos do sinal âmbar: [PisoConcedido] quando ele
+     * acende, este quando ele apaga. Soltar o botão não é "recusa", e mesmo assim
+     * o recolhimento é a leitura certa — pelo motivo mais forte que existe nesta
+     * interface.
+     *
+     * Âmbar que sai devagar diz *"talvez você ainda esteja no ar"*, e essa é a
+     * única ambiguidade que o produto não pode ter: uma transmissão acidental
+     * difunde a fala do agente **e de quem está ao lado dele** para a guarnição
+     * inteira. O sinal que anuncia isso precisa aparecer com convicção e sumir com
+     * pressa. Os dois casos — o canal foi negado e o canal deixou de ser seu —
+     * pedem a mesma frase visual, porque significam a mesma coisa para o dedo:
+     * **não fale.**
      */
     fun <T> PisoNegado(): FiniteAnimationSpec<T> =
         tween(durationMillis = 90, easing = Saida)
@@ -160,41 +180,79 @@ object Movimento {
      *
      * [Constante], porque envelhecer é tempo, e [DECAIMENTO] porque o lento é o
      * significado. Ver a nota em [DECAIMENTO].
+     *
+     * Ligado em `TelaDoMapa.kt`, no `alpha` da linha de par: é o token do
+     * `Frescor` — `ATUAL` a 1, `ESMAECIDO` a 0,45, `ANTIGO` a 0,28. A tela já
+     * fazia esse esmaecimento com um `tween(600)` digitado à mão e sem curva; os
+     * 600 ms coincidiam com [DECAIMENTO] por acaso, que é como dois números iguais
+     * divergem no primeiro ajuste.
      */
     fun <T> DecaimentoPorIdade(): FiniteAnimationSpec<T> =
         tween(durationMillis = DECAIMENTO, easing = Constante)
 
-    // ── A honestidade do pulso, como função pura ─────────────────────────────
+    /**
+     * **Respiro de presença** — o único movimento perpétuo que este sistema tem.
+     *
+     * Vive em `PontoDeEstado(pulsando = true)`, e em nenhum outro lugar: marca a
+     * linha de **quem está no ar agora**, na tela da guarnição e na do mapa.
+     *
+     * ---
+     * ### Por que ele sobrevive à regra que matou o pulso do "no ar"
+     *
+     * A regra 1 proíbe movimento livre para representar trabalho, e foi ela que
+     * removeu `PulsoNoAr()` em 22/08. A distinção não é de desenho, é de **o que
+     * cada um afirma**:
+     *
+     *  - o pulso removido afirmava *"quadros estão saindo agora"* — uma afirmação
+     *    sobre a saída do rádio, que o relógio da tela não sustenta e que
+     *    continuaria animando alegremente sobre um canal morto;
+     *  - este afirma *"esta é a linha viva"*, e quem sustenta a afirmação **não é
+     *    o movimento — é a existência do ponto**. `quemFala` vira `null` no fim da
+     *    transmissão e o ponto some inteiro. Não há estado em que ele respire sobre
+     *    algo falso, porque não há estado em que ele esteja na tela sobre algo falso.
+     *
+     * ### Os 900 ms
+     *
+     * Herdados do `tween(900)` que estava digitado dentro de `PontoDeEstado`, e
+     * mantidos: mais lento que [LONGO] o bastante para ler como respiração em vez
+     * de alarme, e a auditoria não tinha motivo medido para mexer num número que já
+     * estava na tela. O que mudou foi o endereço — número de movimento mora no
+     * vocabulário de movimento, senão o próximo ajuste acha metade dos lugares.
+     *
+     * [Sutil] e não [Constante]: respiração acelera e desacelera; o linear daria a
+     * serra de um indicador de carga, que é a leitura errada.
+     */
+    fun <T> RespiroDePresenca(): InfiniteRepeatableSpec<T> = infiniteRepeatable(
+        animation = tween(durationMillis = RESPIRO_DE_PRESENCA, easing = Sutil),
+        repeatMode = RepeatMode.Reverse,
+    )
+
+    /** Meia respiração do ponto de presença. Ver [RespiroDePresenca]. */
+    const val RESPIRO_DE_PRESENCA = 900
 
     /**
-     * **A fase do pulso do "no ar", contada em quadros que saíram.**
+     * **Passagem entre páginas** — a pilha local da tela da guarnição.
      *
-     * Devolve uma onda triangular de 0 a 1 derivada de [quadrosNoAr]. O pulso
-     * **é o contador de quadros tornado visível**: a 50 quadros/s medidos no
-     * aparelho, 50 quadros fecham uma batida de 1 s.
+     * Este arquivo dizia *"não há transição de tela"*. A regra caiu em 22/08, por
+     * decisão do dono do produto, e cai **por escrito** porque tinha precedência.
      *
-     * A propriedade que importa é a que ele tem **quando dá errado**: se o rádio
-     * parar de emitir, [quadrosNoAr] para de subir e o pulso congela. O âmbar
-     * continua aceso — o canal segue aberto e o dedo segue no botão —, mas o
-     * movimento morre, e a visão periférica capta a parada sem que o agente
-     * precise olhar um número. Um `infiniteRepeatable` no lugar disto continuaria
-     * pulsando alegremente sobre um rádio mudo.
+     * O argumento que a derruba não é estético: as três páginas da guarnição
+     * (conversa, grupo, guarnições) são uma **pilha**, não um seletor. Sem
+     * movimento, abrir o grupo e fechá-lo produzem o mesmo quadro — a tela nova
+     * simplesmente substitui a velha —, e o agente perde a única pista de qual
+     * gesto o traz de volta. A direção É a informação: o que entra pela direita
+     * sai pela direita, e o polegar aprende o caminho de volta sem ler.
      *
-     * Função pura de propósito: dá para testar a parada sem tela, sem rádio e sem
-     * relógio.
+     * A regra 3 continua valendo onde ela nasceu, e não foi afrouxada: **a barra
+     * inferior de destinos não anima.** Aquilo é seletor de nível um — guarnição,
+     * mapa e perfil não estão empilhados, nenhum "volta" para outro, e uma
+     * transição ali inventaria uma hierarquia que não existe.
      *
-     * @param quadrosNoAr quadros de 20 ms confirmados no ar nesta transmissão.
-     * @param quadrosPorBatida quadros que fecham um ciclo. 50 = 1 s a 50 quadros/s.
+     * [MEDIO] com [Morfose]: é remanejo de superfície que já está na tela, que é
+     * exatamente o que [Morfose] existe para descrever.
      */
-    fun faseDoPulso(quadrosNoAr: Long, quadrosPorBatida: Int = 50): Float {
-        require(quadrosPorBatida > 0) { "quadrosPorBatida tem de ser positivo" }
-        if (quadrosNoAr <= 0L) return 0f
-        val meio = quadrosPorBatida / 2f
-        val dentroDoCiclo = (quadrosNoAr % quadrosPorBatida).toFloat()
-        // Triângulo: sobe até o meio do ciclo, desce até o fim. Sem descontinuidade
-        // na virada, senão a batida "estala" a cada volta.
-        return 1f - abs(dentroDoCiclo - meio) / meio
-    }
+    fun <T> PassagemDePagina(): FiniteAnimationSpec<T> =
+        tween(durationMillis = MEDIO, easing = Morfose)
 }
 
 /**

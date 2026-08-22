@@ -152,6 +152,27 @@ class RadioTatico(
      * apertar o PTT e ser recusado.
      */
     private val aoMudarQuemFala: (String?) -> Unit = {},
+    /**
+     * **A fala de um colega terminou pela metade** — o emissor sumiu e o final não
+     * chegou.
+     *
+     * Existe porque o conserto de 22/08 parou no meio do caminho. `FimDaFala`
+     * distingue `ENCERRADA_PELO_EMISSOR` de `CORTADA_NO_MEIO` desde
+     * `core-net/Receptor.kt`, e o ramo abaixo já usava a distinção para **falar**
+     * ao agente — earcon mais `FALA_DO_COLEGA_CORTADA`. O balão, não: a tela
+     * desenhava a fala truncada exatamente igual à inteira, campo por campo.
+     *
+     * O ouvido é o canal certo no instante do corte, e é o único que o agente de
+     * óculos tem. Ele também é o canal que **não sobrevive**: quem estava numa
+     * abordagem, com o rádio da viatura por cima, ou simplesmente não ouviu, sobe
+     * no histórico dez minutos depois e lê uma frase incompleta como se fosse a
+     * frase toda. É a diferença entre *"o suspeito está desarm—"* e o que aquilo
+     * ia terminar dizendo.
+     *
+     * Só o identificador viaja: quem decide como um dado ausente aparece é a
+     * interface, e a mesma regra já governa [AUTOR_NAO_CONFIRMADO].
+     */
+    private val aoFalaCortada: (transmissaoId: String) -> Unit = {},
     private val agoraMs: () -> Long = { System.currentTimeMillis() },
     private val sampleRateHz: Int = 8_000,
     /**
@@ -804,12 +825,19 @@ class RadioTatico(
                 // **Fala cortada não pode chegar como fala inteira.** Quem ouviu
                 // precisa saber que o final não veio antes de decidir uma abordagem
                 // com base no que entendeu.
+                //
+                // Dois canais, e os dois são necessários por motivos diferentes: o
+                // earcon avisa **agora**, para quem está de óculos com as mãos
+                // ocupadas; a marca no balão avisa **depois**, para quem sobe no
+                // histórico e não estava ouvindo. Até 22/08 só o primeiro existia,
+                // e o segundo é o que sobrevive ao turno.
                 if (evento.motivo == FimDaFala.CORTADA_NO_MEIO) {
                     emitirComSupressao(
                         utteranceFor(
                             ActionOutcome.Falhou(FalhaOperacional.FALA_DO_COLEGA_CORTADA),
                         ),
                     )
+                    aoFalaCortada(evento.transmissaoId)
                 }
             }
 

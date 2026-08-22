@@ -1,8 +1,7 @@
 package com.claryon.field.ui.componentes
 
-import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -39,8 +38,10 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.claryon.field.ui.tema.Cores
 import com.claryon.field.ui.tema.Espaco
+import com.claryon.field.ui.tema.Movimento
 import com.claryon.field.ui.tema.Regua
 import com.claryon.field.ui.tema.Tipo
+import com.claryon.field.ui.tema.duracaoAcessivel
 
 /**
  * Rótulo de seção: caixa-alta, monoespaçada, espaçada.
@@ -149,30 +150,43 @@ fun IconeTatico(
 /**
  * Ponto de estado.
  *
- * Quando [pulsando], respira devagar — usado só para "recebendo agora". A
+ * Quando [pulsando], respira devagar — usado só para "está no ar agora". A
  * pulsação é cara em atenção; reservá-la a uma coisa faz dela informação em vez
  * de enfeite.
+ *
+ * O tamanho padrão é [Regua.Ponto] e não um `7.dp` próprio: o literal duplicava o
+ * token, palavra por palavra, num arquivo que não o importava. A duração e a curva
+ * saíram do `tween(900)` digitado aqui para [Movimento.RespiroDePresenca] — o KDoc
+ * de lá explica por que este é o único movimento perpétuo que o sistema aceita, e
+ * por que ele sobreviveu à remoção do pulso do "no ar" em 22/08.
  */
 @Composable
 fun PontoDeEstado(
     cor: Color,
-    tamanho: Dp = 7.dp,
+    tamanho: Dp = Regua.Ponto,
     pulsando: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val pulso by rememberInfiniteTransition(label = "pulso").animateFloat(
-        initialValue = 0.35f,
+        initialValue = ALFA_MINIMO_DO_RESPIRO,
         targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(900),
-            repeatMode = RepeatMode.Reverse,
-        ),
+        animationSpec = Movimento.RespiroDePresenca(),
         label = "alfa-pulso",
     )
     val alfa = if (pulsando) pulso else 1f
 
     Box(modifier.size(tamanho).clip(CircleShape).background(cor.copy(alpha = alfa)))
 }
+
+/**
+ * O fundo do respiro do ponto de presença.
+ *
+ * 0,35 e não 0: o ponto **não pode sumir** no vale da respiração. Quem olha de
+ * relance no vale leria "ninguém no ar", que é o oposto do que o ponto está ali
+ * para dizer — e a visão periférica, que é a que capta movimento, é justamente a
+ * que pega o quadro errado.
+ */
+private const val ALFA_MINIMO_DO_RESPIRO = 0.35f
 
 /**
  * Faixa de prioridade — fio vertical na borda esquerda.
@@ -463,6 +477,27 @@ fun Vazio(etiqueta: String, explicacao: String, modifier: Modifier = Modifier) {
  * comeu o "T" de `TALK GROUP`, porque o rótulo nasce exatamente no canto superior
  * esquerdo do nó e o arco passa por cima dele. Passar a forma ao fundo resolve os
  * dois lados: o realce ganha o mesmo raio dos balões e a tipografia fica intacta.
+ *
+ * ---
+ * ### 22/08 — o retorno de toque ganhou tempo, e é assimétrico de propósito
+ *
+ * O realce era um `if` seco: aparecia e sumia no mesmo quadro. Isso é a ausência de
+ * `Movimento` no lugar em que `Movimento.MICRO` está literalmente definido para
+ * servir — *"retorno de toque, troca de cor, fio que cresce"* —, e [Movimento.MICRO]
+ * não tinha um único chamador em `src/main` até este conserto. Este é **o** controle
+ * tocável do sistema: cada botão, aba, pílula, bloco e linha de lista passa por
+ * aqui, então ligar o token num lugar só liga a interface inteira.
+ *
+ * **A entrada é [Movimento.IMEDIATO] e a saída é [Movimento.MICRO], e a assimetria
+ * é a informação.** Retorno de toque que chega 120 ms depois do dedo é retorno
+ * atrasado, e atraso em painel se lê como aparelho travando — o oposto do que o
+ * realce existe para dizer. Mas o rastro que **fica** depois de o dedo sair é o que
+ * confirma *"foi aqui que eu toquei"* para quem está de luva, no banco de uma
+ * viatura em movimento, e não viu o próprio toque. Descer na hora, subir com calma.
+ *
+ * Nada de otimismo aqui: o dedo é o único fato que este aparelho conhece com
+ * certeza no instante do toque, e é sobre ele — e só sobre ele — que o realce
+ * afirma alguma coisa. Ver a regra 2 no KDoc de [Movimento].
  */
 @Composable
 fun Modifier.tocavel(
@@ -472,11 +507,18 @@ fun Modifier.tocavel(
 ): Modifier {
     val interacao = remember { MutableInteractionSource() }
     val pressionado by interacao.collectIsPressedAsState()
+    val realce = pressionado && habilitado
+    val saida = duracaoAcessivel(Movimento.MICRO)
+    val cor by animateColorAsState(
+        targetValue = if (realce) Cores.Pressionado else Color.Transparent,
+        animationSpec = tween(
+            durationMillis = if (realce) Movimento.IMEDIATO else saida,
+            easing = Movimento.Sutil,
+        ),
+        label = "realce-de-toque",
+    )
     return this
-        .background(
-            color = if (pressionado && habilitado) Cores.Pressionado else Color.Transparent,
-            shape = forma,
-        )
+        .background(color = cor, shape = forma)
         .clickable(
             interactionSource = interacao,
             indication = null,

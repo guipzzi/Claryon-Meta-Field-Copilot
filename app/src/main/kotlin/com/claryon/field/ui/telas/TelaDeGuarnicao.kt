@@ -1,9 +1,12 @@
 package com.claryon.field.ui.telas
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -95,6 +98,26 @@ data class FalaNoGrupo(
     /** 1, 2 ou 3 quando a fala carrega alerta classificado; `null` quando é conversa. */
     val prioridade: Int?,
     val entrega: Entrega,
+    /**
+     * **A rede cortou esta fala no meio, e o final não chegou.**
+     *
+     * `true` só quando o receptor concluiu `FimDaFala.CORTADA_NO_MEIO`: o emissor
+     * sumiu — túnel, bateria, app morto — sem que nada anunciasse o fim, e o
+     * `core-net/Receptor.kt` desistiu depois de esperar a janela inteira de jitter.
+     *
+     * **Não é derivável de nenhum outro campo desta classe**, e é por isso que ela
+     * existe. `texto` incompleto é indistinguível de texto completo curto; `entrega`
+     * fala do envio deste aparelho e não da recepção; e `quadros perdidos` chega
+     * **zero** no caso truncado, porque o receptor não sabe contar quadros que
+     * nunca existiram (ver `Receptor.kt` e `CaosDeRecepcaoComNParesTest`). Quem
+     * sabe é o motivo do fim, e ele só existe num evento que passava direto.
+     *
+     * Padrão `false`: fala do servidor chega pelo histórico, que não guarda o
+     * motivo do fim, e afirmar corte sem o evento seria inventar. Uma fala truncada
+     * que este aparelho não ouviu ao vivo aparece como inteira — é uma perda
+     * conhecida, e a alternativa (marcar tudo por suspeita) é pior.
+     */
+    val cortadaPelaRede: Boolean = false,
 ) {
     /**
      * Entregue ≠ perdido. O agente precisa saber a diferença — e a diferença
@@ -268,10 +291,23 @@ fun TelaDeGuarnicao(
             )
         }
 
-        when (pagina) {
-            PaginaDaGuarnicao.CONVERSA -> Unit
-
-            PaginaDaGuarnicao.GRUPO -> TelaDoGrupo(
+        // **A passagem entre páginas, ligada em 22/08 a pedido do dono do produto.**
+        //
+        // As três páginas são uma PILHA, não um seletor, e sem movimento abrir e
+        // fechar produziam o mesmo quadro: a página nova simplesmente substituía a
+        // conversa. A direção é a informação — o grupo entra pela direita porque se
+        // vai "para dentro" dele, a lista de guarnições entra pela esquerda porque
+        // o gesto que a chama é o de **voltar**, e o polegar aprende o caminho de
+        // volta sem ler nenhum rótulo.
+        //
+        // A barra inferior de destinos continua sem transição, e isso não é
+        // esquecimento: ver o KDoc de `Movimento.PassagemDePagina`.
+        AnimatedVisibility(
+            visible = pagina == PaginaDaGuarnicao.GRUPO,
+            enter = deslizarEntrando(DA_DIREITA),
+            exit = deslizarSaindo(DA_DIREITA),
+        ) {
+            TelaDoGrupo(
                 canal = canal,
                 guarnicao = guarnicao,
                 escuta = escuta,
@@ -279,8 +315,14 @@ fun TelaDeGuarnicao(
                 aoSairDaEscuta = aoSairDaEscuta,
                 aoFechar = { pagina = PaginaDaGuarnicao.CONVERSA },
             )
+        }
 
-            PaginaDaGuarnicao.GUARNICOES -> TelaDeGuarnicoes(
+        AnimatedVisibility(
+            visible = pagina == PaginaDaGuarnicao.GUARNICOES,
+            enter = deslizarEntrando(DA_ESQUERDA),
+            exit = deslizarSaindo(DA_ESQUERDA),
+        ) {
+            TelaDeGuarnicoes(
                 guarnicoes = guarnicoes,
                 aoEntrarEm = aoEntrarEm,
                 aoFechar = { pagina = PaginaDaGuarnicao.CONVERSA },
@@ -288,6 +330,29 @@ fun TelaDeGuarnicao(
         }
     }
 }
+
+/** De onde a página entra. `+1` é a borda direita, `-1` a esquerda. */
+private const val DA_DIREITA = 1
+
+private const val DA_ESQUERDA = -1
+
+/**
+ * A página entra deslizando da própria borda, opaca desde o primeiro quadro.
+ *
+ * **Sem `fadeIn`**, e é decisão: estas páginas são superfícies opacas que cobrem a
+ * conversa, e uma superfície translúcida em trânsito deixa o histórico do canal
+ * legível por baixo dela por 240 ms. Num painel que o agente lê de relance, dois
+ * textos sobrepostos por um quarto de segundo é pior que nenhum.
+ */
+private fun deslizarEntrando(lado: Int) = slideInHorizontally(
+    animationSpec = Movimento.PassagemDePagina(),
+    initialOffsetX = { largura -> lado * largura },
+)
+
+private fun deslizarSaindo(lado: Int) = slideOutHorizontally(
+    animationSpec = Movimento.PassagemDePagina(),
+    targetOffsetX = { largura -> lado * largura },
+)
 
 // ── Cabeçalho ────────────────────────────────────────────────────────────────
 

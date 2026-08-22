@@ -1,6 +1,5 @@
 package com.claryon.field.ui.componentes
 
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -46,7 +45,10 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.claryon.field.ui.tema.Cores
 import com.claryon.field.ui.tema.Espaco
+import com.claryon.field.ui.tema.Movimento
+import com.claryon.field.ui.tema.Regua
 import com.claryon.field.ui.tema.Tipo
+import com.claryon.field.ui.tema.duracaoAcessivel
 
 /** O que a barra mostra. Estado do rádio, não do botão. */
 sealed interface EstadoDoPtt {
@@ -121,15 +123,24 @@ fun BarraDePtt(
         }
     }
 
-    val alturaAlvo = if (noAr) 160.dp else 136.dp
+    val alturaAlvo = if (noAr) ALTURA_NO_AR else ALTURA_EM_REPOUSO
+    // A barra **muda de tamanho** estando na tela, que é a definição de morfose no
+    // vocabulário deste projeto — `Movimento.Morfose`, e não a curva linear que
+    // estava digitada aqui. Era o único remanejo de layout do aplicativo com curva
+    // constante, e constante é a curva do que representa TEMPO.
     val altura by animateFloatAsState(
         targetValue = alturaAlvo.value,
-        animationSpec = tween(durationMillis = 160, easing = LinearEasing),
+        animationSpec = tween(
+            duracaoAcessivel(Movimento.CURTO),
+            easing = Movimento.Morfose,
+        ),
         label = "altura-ptt",
     )
+    // O fio superior virando âmbar É o sinal do piso — mesma régua da moldura do
+    // casco, e pelo mesmo motivo. Ver `Movimento.PisoNegado`.
     val brilho by animateFloatAsState(
         targetValue = if (noAr) 1f else 0f,
-        animationSpec = tween(durationMillis = 140),
+        animationSpec = if (noAr) Movimento.PisoConcedido() else Movimento.PisoNegado(),
         label = "brilho-ptt",
     )
 
@@ -139,11 +150,23 @@ fun BarraDePtt(
             .background(if (noAr) Cores.Elevado else Cores.Painel)
             .drawBehind {
                 // Fio superior: em repouso é estrutura; no ar vira o sinal.
+                //
+                // **`toPx()` e não `2f`/`1f`.** Os literais eram PIXELS, e a régua
+                // deste sistema é em `dp`: num aparelho a 2,75× de densidade, o fio
+                // de estrutura saía com 1/3 da espessura que `Regua.Fio` promete e
+                // o sinal com 2/3 — o único fio da interface fora da grade, e
+                // justamente o que sangra de borda a borda. `Regua.FioDeSinal` tem
+                // este lugar nomeado no próprio KDoc: *"só a moldura e o topo da
+                // barra de PTT no ar"*.
                 drawLine(
                     color = lerpCor(Cores.Traco, Cores.NoAr, brilho),
                     start = Offset(0f, 0f),
                     end = Offset(size.width, 0f),
-                    strokeWidth = if (noAr) 2f else 1f,
+                    strokeWidth = if (noAr) {
+                        Regua.FioDeSinal.toPx()
+                    } else {
+                        Regua.Fio.toPx()
+                    },
                 )
             }
             .height(altura.dp)
@@ -299,13 +322,21 @@ private fun BlocoDeFala(
     detalhe: String? = null,
 ) {
     val avanco = pressao.coerceIn(0f, 1f)
+    // **O bloco recusando é o piso negado, e agora ele diz isso pelo token.**
+    //
+    // O `tween(90)` que estava aqui era, dígito por dígito, a duração de
+    // `Movimento.PisoNegado()` — dois lugares com o mesmo número e nenhuma
+    // referência entre eles, que é a duplicata que este projeto persegue.
+    //
+    // Habilitado usa `PisoConcedido`: o canal voltou a aceitar o dedo. Desabilitado
+    // usa `PisoNegado`: o canal recusou, e a recusa termina antes de a mão reagir.
     val fundo by animateColorAsState(
         targetValue = when {
             !habilitado -> Cores.Painel
             avanco > 0f -> Cores.Tinta
             else -> Cores.Elevado
         },
-        animationSpec = tween(durationMillis = 90),
+        animationSpec = if (habilitado) Movimento.PisoConcedido() else Movimento.PisoNegado(),
         label = "fundo-bloco",
     )
     val tinta = when {
@@ -317,7 +348,7 @@ private fun BlocoDeFala(
     Row(
         Modifier
             .fillMaxWidth()
-            .height(if (detalhe == null) 60.dp else 72.dp)
+            .height(if (detalhe == null) BLOCO_DE_UMA_LINHA else BLOCO_COM_DETALHE)
             // `clip` ANTES do fundo e do desenho, e a ordem é o resultado: a barra
             // de pressão é um retângulo reto tirado da base, e é o recorte que a
             // faz acompanhar o canto em vez de furar o bloco.
@@ -428,6 +459,29 @@ private fun DiscoDoMicrofone(cor: Color, habilitado: Boolean) {
  * ser lida de relance.
  */
 private val TAMANHO_DO_DISCO = 44.dp
+
+// ── As alturas da barra, nomeadas ────────────────────────────────────────────
+//
+// Eram `160.dp` e `136.dp` soltos numa expressão ternária, e `60.dp`/`72.dp` soltos
+// noutra. Números de layout sem nome são o que faz um ajuste de espaçamento virar
+// caça ao literal — e a auditoria de 22/08 os encontrou exatamente assim.
+//
+// **Não entram em `Espaco`, e a razão é a mesma que separou `Regua` dele:** a
+// escala de espaçamento nomeia o VÃO entre coisas, e isto é o TAMANHO de uma peça.
+// Um alvo tocável de 136 dp não é "seis vezes o `Padrao`"; é a altura que a barra
+// de fala precisa ter para o polegar achá-la sem mirar.
+
+/** Repouso. Alto o bastante para ser o alvo do polegar sem mira. */
+private val ALTURA_EM_REPOUSO = 136.dp
+
+/** No ar. Cresce para caber a forma de onda ao vivo sem espremer o cronômetro. */
+private val ALTURA_NO_AR = 160.dp
+
+/** O bloco de fala com uma linha. */
+private val BLOCO_DE_UMA_LINHA = 60.dp
+
+/** Com a linha de detalhe — a causa da recusa, ou quem detém o canal. */
+private val BLOCO_COM_DETALHE = 72.dp
 
 @Composable
 private fun ConteudoOcupado(porQuem: String, canto: Dp) {
