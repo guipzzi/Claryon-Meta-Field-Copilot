@@ -54,6 +54,17 @@ class BarramentoTatico {
     }
 
     /**
+     * O cadastro do grupo, do ponto de vista do árbitro.
+     *
+     * É o que `public.memberships` é para as funções de piso, e é consultado
+     * pelos MESMOS dois pontos: `pedir_canal` desde a `0005`, `renovar_canal`
+     * desde a `0024`. Sem ele, [PisoServidor] concederia e renovaria piso para
+     * quem já saiu da guarnição — que foi exatamente o defeito observado.
+     */
+    fun ehMembro(talkGroupId: String, agenteId: String): Boolean =
+        pares.any { it.agenteId == agenteId && it.talkGroupId == talkGroupId && it.noGrupo }
+
+    /**
      * Difunde para todo par do mesmo talk group **menos o remetente**.
      *
      * Não voltar para quem enviou é o comportamento do broadcast do Supabase e é
@@ -187,8 +198,19 @@ class ParDeRadio(
 class PisoServidor(
     private val relogio: () -> Long,
     ttlMs: Long = ControleDePiso.TTL_PADRAO_MS,
+    /**
+     * De onde sai o pertencimento. `null` = não há cadastro a consultar, e a
+     * política roda permissiva — é o caso dos testes que não modelam entrada e
+     * saída de grupo.
+     *
+     * **Passar o barramento é o que torna o defeito 7 observável na bancada**, e
+     * o que faz esta classe continuar espelhando o Postgres depois da `0024`.
+     */
+    barramento: BarramentoTatico? = null,
 ) {
-    val politica = ControleDePiso(ttlMs)
+    val politica = ControleDePiso(ttlMs) { tg, agente ->
+        barramento?.ehMembro(tg, agente) ?: true
+    }
     private val serializacao = Mutex()
 
     /** Quantos pedidos o servidor atendeu — inclusive os recusados. */
@@ -226,10 +248,10 @@ class PisoServidor(
  *    (`ClientesDePiso.kt:77-79`): na dúvida, calar.
  *  - `renovar` sem rede devolve `false` (`ClientesDePiso.kt:103-108`, onde
  *    `rpcBooleano` devolve `null` e o `== true` o converte).
- *  - `liberar` sem rede **não faz nada e não conta a ninguém**
- *    (`ClientesDePiso.kt:110-112`): o retorno de `rpcBooleano` é descartado, o
- *    `runCatching` de `:151-157` engole a exceção, e a assinatura da interface é
- *    `Unit`. Não há como o chamador saber que o canal não voltou ao grupo.
+ *  - `liberar` sem rede devolve [ResultadoDaLiberacao.NaoDevolvido]. Até 22/08 ele
+ *    **não fazia nada e não contava a ninguém**: o retorno de `rpcBooleano` era
+ *    descartado, o `runCatching` do encerramento engolia a exceção e a assinatura
+ *    da interface era `Unit` — três camadas para o mesmo fato invisível.
  */
 class ClienteDePisoDoPar(
     private val par: ParDeRadio,
@@ -252,11 +274,9 @@ class ClienteDePisoDoPar(
         transmissaoId: String,
         prioridade: PrioridadeTransmissao,
     ): ResultadoDoPedido {
-        if (!par.rede) {
-            return ResultadoDoPedido.Ocupado(
-                Concessao(talkGroupId, "?", transmissaoId, prioridade, expiraEmMs = 0),
-            )
-        }
+        // Sem rede o pedido não alcança o árbitro. **`SemRede`, não `Ocupado`**:
+        // ninguém disse que está falando — nós é que não conseguimos perguntar.
+        if (!par.rede) return ResultadoDoPedido.SemRede
         // A identidade vem do PAR, nunca do parâmetro — é o que o servidor faz com
         // `private.current_agent_id()`.
         return servidor.pedir(talkGroupId, par.agenteId, transmissaoId, prioridade)
@@ -265,10 +285,12 @@ class ClienteDePisoDoPar(
     override suspend fun renovar(concessao: Concessao): Boolean =
         if (!par.rede) false else servidor.renovar(concessao)
 
-    override suspend fun liberar(concessao: Concessao) {
+    override suspend fun liberar(concessao: Concessao): ResultadoDaLiberacao {
         liberacoesTentadas++
-        if (!par.rede || liberarFalha) return // silencioso, por construção
+        if (!par.rede) return ResultadoDaLiberacao.NaoDevolvido("sem rede")
+        if (liberarFalha) return ResultadoDaLiberacao.NaoDevolvido("liberar_canal não respondeu")
         servidor.liberar(concessao)
+        return ResultadoDaLiberacao.Devolvido
     }
 }
 

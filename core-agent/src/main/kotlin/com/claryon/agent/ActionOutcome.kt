@@ -232,6 +232,58 @@ enum class FalhaOperacional(val causaCurta: String) {
      */
     CANAL_OCUPADO("Canal ocupado."),
 
+    /**
+     * **O pedido de canal não alcançou o árbitro.**
+     *
+     * Tem código próprio, e não [CANAL_OCUPADO], porque a ação do agente é a
+     * **oposta**: canal ocupado se resolve esperando o colega soltar o botão;
+     * pedido sem resposta se resolve andando até pegar sinal. Até 22/08 as duas
+     * saíam com o mesmo evento e o mesmo tom, e o agente embaixo de um viaduto
+     * esperava por uma vez que nunca chegaria.
+     *
+     * Também não é [SEM_REDE], que é a queda genérica: aqui o rádio pode estar de
+     * pé — o RPC do piso é HTTP e o áudio é WebSocket, e um cai sem o outro.
+     */
+    PEDIDO_DE_CANAL_SEM_RESPOSTA("Sem sinal. Nada foi transmitido."),
+
+    /**
+     * O árbitro respondeu **não**: sem autorização neste canal.
+     *
+     * Nem ocupado, nem sem rede — houve rede e houve resposta. Manda o agente
+     * conferir credencial e guarnição, não procurar torre.
+     */
+    CANAL_SEM_AUTORIZACAO("Sem acesso a este canal."),
+
+    /**
+     * **A fala acabou e o canal não voltou ao grupo.**
+     *
+     * Do lado de quem falou está tudo normal: a voz saiu, o botão foi solto. A
+     * guarnição inteira fica muda até o TTL de 30 s vencer, e só uma P1 fura.
+     * Quem causou é o único que pode agir — repetindo a soltura com sinal.
+     */
+    CANAL_NAO_DEVOLVIDO("Canal preso. Confira a rede."),
+
+    /**
+     * **A fala do colega foi cortada no meio pela rede** — o final não chegou.
+     *
+     * Não é falha deste aparelho, e ainda assim é earcon: quem ouviu precisa saber
+     * que o que ele tem está incompleto antes de decidir uma abordagem com base
+     * nisso. Uma fala inteira e uma fala truncada chegavam à tela como o mesmo
+     * evento, campo a campo.
+     */
+    FALA_DO_COLEGA_CORTADA("Transmissão do colega cortada."),
+
+    /**
+     * **O piso está sendo arbitrado em RAM deste aparelho, não pelo servidor.**
+     *
+     * Acontece quando não há sessão: `RadioViewModel` cai em `ClienteDePisoLocal`,
+     * e dois aparelhos podem se achar donos do mesmo canal e falar por cima. O
+     * rádio precisa funcionar em túnel e subsolo, então a degradação fica — o que
+     * não pode ficar é ela sendo **silenciosa**, como era até 22/08, quando o
+     * único sinal era uma linha de `Log.w`.
+     */
+    PISO_SEM_ARBITRO("Sem servidor. Piso local."),
+
     NADA_A_REPETIR("Nada a repetir."),
 
     /**

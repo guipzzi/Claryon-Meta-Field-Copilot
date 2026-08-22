@@ -12,6 +12,7 @@ import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -105,13 +106,18 @@ class CaosDeRecepcaoComNParesTest {
     /**
      * **Alfa entra num túnel no meio da frase.**
      *
-     * Observado: Bravo ouve a metade que chegou, e depois **2 000 ms de nada**
-     * antes de o receptor concluir que acabou. O evento que ele recebe é
-     * [EventoRecepcao.Terminou] — o mesmo, com os mesmos campos, que uma fala
-     * encerrada normalmente produz. **Não há marcação de fala truncada.**
+     * Bravo ouve a metade que chegou, e depois **2 000 ms de nada** antes de o
+     * receptor concluir que acabou. Os 2 s são tolerância de jitter e continuam
+     * sendo: cortar antes descartaria fala boa que atrasou na rede.
+     *
+     * O que mudou em 22/08 é o desfecho. O evento era [EventoRecepcao.Terminou]
+     * com os mesmos campos de uma fala encerrada normalmente, e quem ouviu não
+     * tinha como saber que perdeu o final — repare que `perdidos` vem **zero**
+     * justamente aqui, porque o receptor não sabe contar quadros que nunca
+     * existiram. Agora o `motivo` diz.
      */
     @Test
-    fun aRedeDeAlfaCaiNoMeioDaFala_bravoOuveAMetade_eSoDescobre2sDepois() = runTest {
+    fun aRedeDeAlfaCaiNoMeioDaFala_bravoOuveAMetade_eODesfechoDizQueFoiCorte() = runTest {
         val escopo = escopoDeTeste(this)
         val barramento = BarramentoTatico()
         val alfa = ParDeRadio("alfa", barramento)
@@ -135,14 +141,21 @@ class CaosDeRecepcaoComNParesTest {
             assertEquals("tx-1", fim!!.transmissaoId)
             assertEquals(10, fim.quadros)
             assertEquals(
-                "OBSERVADO: zero quadros contados como PERDIDOS numa fala cortada ao meio — " +
-                    "o corte não aparece em nenhum campo",
+                "zero quadros contados como PERDIDOS numa fala cortada ao meio — o " +
+                    "receptor não sabe contar o que nunca existiu, e é por isso que " +
+                    "o corte precisa de campo próprio",
                 0,
                 fim.perdidos,
             )
+            assertEquals(
+                "o corte tem de aparecer no desfecho: quem ouviu precisa saber que o " +
+                    "final não veio antes de decidir uma abordagem com base nele",
+                FimDaFala.CORTADA_NO_MEIO,
+                fim.motivo,
+            )
             assertTrue(
-                "OBSERVADO: 2 s de silêncio até o receptor concluir que a fala acabou " +
-                    "(${escuta.eventos.size} eventos, corte em $quandoCortou)",
+                "e são 2 s de tolerância de jitter até concluir — número declarado, " +
+                    "não indecisão (${escuta.eventos.size} eventos, corte em $quandoCortou)",
                 currentTime - quandoCortou >= 2_000,
             )
         } finally {
@@ -151,15 +164,20 @@ class CaosDeRecepcaoComNParesTest {
     }
 
     /**
-     * **O contra-teste que prova o achado acima**, e ele é uma igualdade, não uma
-     * descrição: a fala encerrada normalmente e a fala cortada pela rede produzem
-     * dois [EventoRecepcao.Terminou] **iguais**, campo a campo.
+     * **O contra-teste do conserto, e ele é uma DESIGUALDADE.**
      *
-     * Se algum dia existir marcação de truncamento, este teste cai — e cair é o
-     * comportamento certo: é assim que alguém descobre que o achado foi consertado.
+     * As duas corridas mudam uma coisa só: se a rede do emissor cai antes do
+     * último quadro. Antes de 22/08 os dois [EventoRecepcao.Terminou] eram
+     * **iguais campo a campo**, e o teste que existia aqui travava essa igualdade
+     * como achado.
+     *
+     * Agora ele exige que difiram — e que difiram **no motivo**, não por acidente
+     * de contagem: `quadros` é o mesmo nos dois, e é justamente por isso que a
+     * contagem nunca serviu para distinguir. Se alguém remover o campo, ou passar
+     * a preenchê-lo com um valor fixo, este teste cai.
      */
     @Test
-    fun oFimNormalEOFimPorRedeCaida_saoIndistinguiveisParaQuemOuve() = runTest {
+    fun oFimNormalEOFimPorRedeCaida_saoDISTINGUIVEISPeloMotivo() = runTest {
         suspend fun desfechoCom(corteNoMeio: Boolean): EventoRecepcao.Terminou {
             val escopo = escopoDeTeste(this)
             val barramento = BarramentoTatico()
@@ -184,14 +202,71 @@ class CaosDeRecepcaoComNParesTest {
         val normal = desfechoCom(corteNoMeio = false)
         val truncado = desfechoCom(corteNoMeio = true)
 
-        assertEquals(
-            "OBSERVADO: uma fala inteira e uma fala cortada ao meio pela rede chegam " +
-                "à camada de cima como o MESMO evento — não há como a tela marcar corte",
+        assertNotEquals(
+            "uma fala inteira e uma fala cortada ao meio não podem chegar à camada " +
+                "de cima como o MESMO evento — sem diferença, a tela não tem como marcar",
             normal,
             truncado,
         )
-        assertEquals(10, normal.quadros)
+        assertEquals(FimDaFala.ENCERRADA_PELO_EMISSOR, normal.motivo)
+        assertEquals(FimDaFala.CORTADA_NO_MEIO, truncado.motivo)
+        assertEquals(
+            "e a diferença NÃO está na contagem: são 10 quadros ouvidos nos dois. " +
+                "É por isso que contar nunca bastou.",
+            normal.quadros,
+            truncado.quadros,
+        )
         assertEquals(0, truncado.perdidos)
+    }
+
+    /**
+     * **O `fim de transmissão` do transporte deixa de ser descartado.**
+     *
+     * O `ultimo` se perde: ele é um quadro como qualquer outro. Quando isso
+     * acontece com o emissor vivo, o transporte ainda entrega
+     * `EventoDeRede.FimDeTransmissao` — e o `Receptor` o ignorava com o comentário
+     * "o quadro `ultimo` encerra", que é verdade só quando ele chega.
+     *
+     * O teste crava as duas metades: o desfecho é **encerramento**, não corte
+     * (o emissor de fato terminou), e a conclusão sai em **centenas** de
+     * milissegundos em vez dos 2 s de tolerância de jitter.
+     */
+    @Test
+    fun oUltimoQuadroSePerde_masOFimDeTransmissaoChega_eNaoSaoOs2sNemUmCorte() = runTest {
+        val escopo = escopoDeTeste(this)
+        val barramento = BarramentoTatico()
+        val alfa = ParDeRadio("alfa", barramento)
+        val bravo = ParDeRadio("bravo", barramento)
+        val escuta = escutar(bravo, escopo)
+
+        try {
+            alfa.anunciar(anuncio("tx-1"))
+            // Dez quadros, e o `ultimo` NUNCA sai — perdido no caminho.
+            repeat(10) { alfa.enviar(quadro("tx-1", it)) }
+            advanceTimeBy(400)
+            assertTrue("o fim ainda não pode ter saído", escuta.terminou.isEmpty())
+
+            val quandoOEmissorSoltou = currentTime
+            alfa.encerrar("tx-1")
+            advanceTimeBy(400)
+
+            val fim = escuta.terminou.singleOrNull()
+            assertNotNull("o fim anunciado tem de encerrar a fala", fim)
+            assertEquals(
+                "o emissor SOLTOU o botão: isto não é corte, e chamá-lo de corte " +
+                    "ensinaria o agente a desconfiar de fala inteira",
+                FimDaFala.ENCERRADA_PELO_EMISSOR,
+                fim!!.motivo,
+            )
+            assertTrue(
+                "e a conclusão sai em ${currentTime - quandoOEmissorSoltou} ms — o " +
+                    "bastante para drenar o jitter, longe dos 2 s de quem sumiu",
+                currentTime - quandoOEmissorSoltou < 1_000,
+            )
+            assertEquals(10, fim.quadros)
+        } finally {
+            escopo.cancel()
+        }
     }
 
     // ── 2. A rede cai do lado de quem OUVE ────────────────────────────────────
@@ -244,13 +319,18 @@ class CaosDeRecepcaoComNParesTest {
      * que entrou**, sem PLC para o que perdeu — reconstruir 300 ms de fala que
      * nunca chegou seria inventar áudio.
      *
-     * O que **não** é aceitável e o teste registra: Charlie perde o
-     * [EventoRecepcao.Chegando], porque o anúncio já passou. Na tela isso significa
-     * uma voz tocando **sem autor**, e `RadioTatico.tratarRecepcao` só chama
-     * `aoMudarQuemFala` no `Chegando`. Charlie ouve alguém e não sabe quem.
+     * **CONSERTADO (22/08).** Charlie continua perdendo o
+     * [EventoRecepcao.Chegando] — o anúncio já passou, e não há como recuperá-lo.
+     * O que não podia continuar é o que isso produzia: voz tocando com a tela
+     * dizendo que ninguém falava, porque `RadioTatico.tratarRecepcao` só chamava
+     * `aoMudarQuemFala` no `Chegando`.
+     *
+     * Agora o receptor emite [EventoRecepcao.ChegandoSemAnuncio] — a admissão
+     * honesta de "alguém está falando e eu ainda não sei quem" —, e é dela que o
+     * `RadioTatico` parte para perguntar ao servidor de quem é o piso.
      */
     @Test
-    fun charlieEntraNoMeioDaFala_ouveDoPontoEmQueEntrou_eSemSaberQuemFala() = runTest {
+    fun charlieEntraNoMeioDaFala_ouveDoPontoEmQueEntrou_eSabeQueAlguemFala() = runTest {
         val escopo = escopoDeTeste(this)
         val barramento = BarramentoTatico()
         val alfa = ParDeRadio("alfa", barramento)
@@ -286,11 +366,56 @@ class CaosDeRecepcaoComNParesTest {
             )
             assertTrue("Bravo sabe quem fala", deBravo.chegando.isNotEmpty())
             assertTrue(
-                "OBSERVADO: Charlie ouve uma voz sem nenhum evento de autoria — " +
-                    "na tela, som sem autor",
+                "Charlie não pode receber `Chegando`: o anúncio passou antes de ele " +
+                    "entrar, e fabricar um seria inventar autoria",
                 deCharlie.chegando.isEmpty(),
             )
-            assertTrue("mas o fim ele recebe", deCharlie.terminou.isNotEmpty())
+            val semAnuncio = deCharlie.eventos
+                .filterIsInstance<EventoRecepcao.ChegandoSemAnuncio>()
+                .singleOrNull()
+            assertNotNull(
+                "mas ele TEM de saber que alguém está falando — voz sem nenhum " +
+                    "evento de autoria é, na tela, som sem autor",
+                semAnuncio,
+            )
+            assertEquals("tx-1", semAnuncio!!.transmissaoId)
+            assertEquals(
+                "e o aviso vem ANTES do primeiro áudio: depois dele a tela já mentiu",
+                0,
+                deCharlie.eventos.indexOf(semAnuncio),
+            )
+            assertTrue("o fim ele recebe", deCharlie.terminou.isNotEmpty())
+        } finally {
+            escopo.cancel()
+        }
+    }
+
+    /**
+     * **O contra-teste: quem estava presente NÃO recebe o aviso de anonimato.**
+     *
+     * Se `ChegandoSemAnuncio` saísse em toda fala, o rótulo "origem não
+     * confirmada" apareceria sobre transmissões perfeitamente identificadas — e a
+     * tela passaria a mentir na direção oposta, ensinando o agente a ignorar o
+     * rótulo justamente quando ele importa.
+     */
+    @Test
+    fun quemOuviuOAnuncio_naoRecebeAvisoDeFalaSemAutor() = runTest {
+        val escopo = escopoDeTeste(this)
+        val barramento = BarramentoTatico()
+        val alfa = ParDeRadio("alfa", barramento)
+        val bravo = ParDeRadio("bravo", barramento)
+        val escuta = escutar(bravo, escopo)
+
+        try {
+            alfa.anunciar(anuncio("tx-1", autor = "alfa"))
+            repeat(10) { alfa.enviar(quadro("tx-1", it, ultimo = it == 9)) }
+            advanceTimeBy(500)
+
+            assertEquals(1, escuta.chegando.size)
+            assertTrue(
+                "fala anunciada não pode chegar como fala sem autor",
+                escuta.eventos.none { it is EventoRecepcao.ChegandoSemAnuncio },
+            )
         } finally {
             escopo.cancel()
         }

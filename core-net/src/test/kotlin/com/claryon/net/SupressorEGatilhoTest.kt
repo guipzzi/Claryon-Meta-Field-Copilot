@@ -38,36 +38,53 @@ class SupressorDeSaidaPropriaTest {
         assertFalse(s.suprimido(999))
     }
 
+    /**
+     * **A recepção em curso é registrada BLOCO A BLOCO**, e a margem emenda um no
+     * outro. É o que substituiu a janela sem fim que `abrir`/`fechar` mantinham.
+     *
+     * O teste exige as duas metades: continuidade enquanto os blocos chegam, e
+     * fim automático quando param. Sem a segunda, a janela sem fim passaria igual
+     * — e é exatamente ela que descartava a fala do agente seguinte.
+     */
     @Test
-    fun recepcaoEmCurso_suprimeAteFechar() {
-        // A cauda de uma transmissão recebida vazaria de volta ao grupo — o
-        // controle de piso cobre o miolo, esta janela cobre o fim.
+    fun recepcaoEmCurso_ehUmaJanelaPorBloco_eEmendaPelaMargem() {
         val s = supressor()
-        s.abrir(inicioMs = 2_000)
+        // 40 blocos de 20 ms, de 2 000 a 2 800 ms — uma fala recebida de 800 ms.
+        repeat(40) { s.registrar(inicioMs = 2_000 + it * 20L, duracaoMs = 20) }
 
-        assertTrue(s.suprimido(2_500))
-        assertTrue(s.suprimido(9_999))
-
-        s.fechar(fimMs = 10_000)
-        assertTrue("a margem ainda vale", s.suprimido(10_050))
-        assertFalse(s.suprimido(10_100))
+        assertTrue("começo da fala recebida", s.suprimido(2_000))
+        assertTrue(
+            "o miolo não pode ter buraco: dois blocos de 20 ms emendam pela margem",
+            (2_000..2_800 step 7).all { s.suprimido(it.toLong()) },
+        )
+        assertTrue("a cauda ainda é suprimida", s.suprimido(2_850))
     }
 
+    /**
+     * **O achado 5 da bateria de caos, no nível da política.**
+     *
+     * Os blocos param de chegar em 2 800 ms — a fala foi cortada pela rede. O
+     * `Receptor` só concluirá isso 2 s depois, e é aí que a janela ANTIGA era
+     * fechada. Se a supressão durar até lá, os primeiros 2 s do próximo agente a
+     * apertar o PTT são descartados com a barra no ar e sem tom nenhum.
+     *
+     * O número é duro de propósito: a supressão tem de acabar com a margem, não
+     * com a conclusão de outro mecanismo.
+     */
     @Test
-    fun abrirDuasVezes_naoPerdeOInicioOriginal() {
+    fun quandoOsBlocosParam_aSupressaoAcabaComAMargem_eNaoComOReceptor() {
         val s = supressor()
-        s.abrir(2_000)
-        s.abrir(5_000) // evento duplicado do player
-        s.fechar(6_000)
+        repeat(40) { s.registrar(inicioMs = 2_000 + it * 20L, duracaoMs = 20) }
+        val ultimoFim = 2_000L + 39 * 20 + 20 // 2 800
 
-        assertTrue("a janela tem de cobrir desde o primeiro início", s.suprimido(2_500))
-    }
-
-    @Test
-    fun fecharSemAbrir_naoExplode() {
-        val s = supressor()
-        s.fechar(1_000)
-        assertFalse(s.suprimido(1_000))
+        assertFalse(
+            "passada a margem, a captura volta na hora — e não 2 s depois",
+            s.suprimido(ultimoFim + 81),
+        )
+        assertFalse(
+            "muito menos quando o receptor conclui, aos 2 s",
+            s.suprimido(ultimoFim + 2_000),
+        )
     }
 
     @Test

@@ -19,6 +19,7 @@ import com.claryon.net.DecisaoDeGatilho
 import com.claryon.net.DecisaoDeSoltura
 import com.claryon.net.EventoPtt
 import com.claryon.net.EventoRecepcao
+import com.claryon.net.FimDaFala
 import com.claryon.net.GatilhoPtt
 import com.claryon.net.PreRollBuffer
 import com.claryon.net.PrioridadeTransmissao
@@ -55,8 +56,13 @@ import java.util.UUID
  * microfones. Todo som que produzimos é um som que vamos capturar. Aqui isso se
  * traduz em três ligações concretas:
  *
- *  1. **Toda reprodução abre uma janela no [SupressorDeSaidaPropria]** — earcon,
- *     fala do copiloto, e a voz recebida de outro agente.
+ *  1. **Toda reprodução registra uma janela DE DURAÇÃO DECLARADA no
+ *     [SupressorDeSaidaPropria]** — earcon, fala do copiloto, e a voz recebida de
+ *     outro agente. A voz recebida não tem duração conhecida de antemão, então ela
+ *     é registrada **bloco a bloco**, com a duração de cada bloco decodificado.
+ *     Havia uma janela sem fim, aberta no anúncio e fechada em `Terminou`; ela
+ *     sobrevivia ao som que a justificava por até 2 s e engolia a fala do agente
+ *     seguinte inteira. Ver o KDoc de [SupressorDeSaidaPropria].
  *  2. **O pré-roll só é alimentado fora dessas janelas.** Sem isso, o tom de
  *     início — que é alta energia — seria detectado pelo VAD retroativo como
  *     "início da fala" e ancoraria a transmissão no bipe: o recurso que existe
@@ -185,6 +191,9 @@ class RadioTatico(
 
     private var alimentacao: Job? = null
 
+    /** O aviso de piso local sai uma vez por instância, não a cada reentrada. */
+    private var avisouPisoLocal = false
+
     /** Prioridade da transmissão em curso — o evento de fim não a carrega. */
     private var prioridadeCorrente: Int = 2
 
@@ -261,6 +270,24 @@ class RadioTatico(
         // porque não há gesto. Ver `abrirPorVoz`.
         rotaAtiva = rota
         escopo.launch { transporte.conectar(talkGroupCorrente) }
+
+        // **O modo degradado se declara, e uma vez por abertura de rádio.**
+        //
+        // Sem sessão, `RadioViewModel` cai em `ClienteDePisoLocal` e o piso passa a
+        // ser arbitrado em RAM deste processo: dois aparelhos podem se achar donos
+        // do mesmo canal e falar por cima — que é o defeito que o controle de piso
+        // existe para impedir. Até 22/08 o único sinal disso era um `Log.w`, e log
+        // não chega a quem está de óculos numa ocorrência.
+        //
+        // Na abertura e não no toque: o agente precisa saber ANTES de contar com o
+        // rádio, e repetir a cada PTT treinaria a ignorar o aviso.
+        if (!piso.arbitradoPeloServidor && !avisouPisoLocal) {
+            avisouPisoLocal = true
+            Log.w(TAG, "piso LOCAL: sem arbitragem do servidor entre aparelhos")
+            emitirComSupressao(
+                utteranceFor(ActionOutcome.Falhou(FalhaOperacional.PISO_SEM_ARBITRO)),
+            )
+        }
 
         // **Aquece o codec agora, não no primeiro toque.**
         // `MediaCodec.createEncoderByType` + `configure` + `start` aconteciam na
@@ -551,15 +578,47 @@ class RadioTatico(
 
             is EventoPtt.Transmitindo -> Unit // silêncio = pode falar (comportamento de rádio)
 
+            // **Três recusas, três falas.** O earcon era o mesmo nos três casos, e
+            // o tom sozinho não distingue "espere o colega" de "ande até pegar
+            // sinal" de "você não tem acesso a este canal" — três gestos
+            // diferentes, um bipe só. A fala vem de `utteranceFor`, a partir de um
+            // desfecho tipado, e nunca de texto construído aqui.
             is EventoPtt.CanalOcupado -> {
                 gatilho.cancelar(agoraMs())
-                sinalizar(Earcon.FALHA, Priority.RESPOSTA)
+                emitirComSupressao(utteranceFor(ActionOutcome.Falhou(FalhaOperacional.CANAL_OCUPADO)))
+            }
+
+            EventoPtt.SemRede -> {
+                gatilho.cancelar(agoraMs())
+                emitirComSupressao(
+                    utteranceFor(
+                        ActionOutcome.Falhou(FalhaOperacional.PEDIDO_DE_CANAL_SEM_RESPOSTA),
+                    ),
+                )
+            }
+
+            is EventoPtt.PedidoRecusado -> {
+                Log.w(TAG, "pedido de canal recusado: ${evento.motivo}")
+                gatilho.cancelar(agoraMs())
+                emitirComSupressao(
+                    utteranceFor(ActionOutcome.Falhou(FalhaOperacional.CANAL_SEM_AUTORIZACAO)),
+                )
             }
 
             EventoPtt.CanalPerdido -> {
                 // Perdeu a palavra; seguir falando é falar para o vazio.
                 gatilho.cancelar(agoraMs())
                 sinalizar(Earcon.FALHA, Priority.EMERGENCIA)
+            }
+
+            // A fala já foi ao ar; o que ficou preso é o canal do GRUPO — até 30 s
+            // de guarnição muda, e só quem causou pode agir. O gatilho **não** é
+            // cancelado: ele já foi solto, e é a soltura que dispara isto.
+            is EventoPtt.CanalNaoDevolvido -> {
+                Log.w(TAG, "canal não devolvido: ${evento.motivo}")
+                emitirComSupressao(
+                    utteranceFor(ActionOutcome.Falhou(FalhaOperacional.CANAL_NAO_DEVOLVIDO)),
+                )
             }
 
             EventoPtt.LimiteDeDuracao -> {
@@ -621,10 +680,33 @@ class RadioTatico(
             // preenche o balão que já existe, casando pelo `transmissaoId`.
             is EventoRecepcao.TextoDaFala -> aoTextoRecebido(evento.transmissaoId, evento.texto)
 
+            // **Alguém está falando e ainda não sabemos quem.** Ver
+            // `EventoRecepcao.ChegandoSemAnuncio`: o agente entrou no meio da fala,
+            // ou o anúncio se perdeu. Até 22/08 isto era voz tocando com a régua de
+            // presença dizendo que o canal estava em silêncio.
+            is EventoRecepcao.ChegandoSemAnuncio -> {
+                supressor.registrar(agoraMs(), ESPERA_PELO_PRIMEIRO_AUDIO_MS)
+                // Rótulo honesto AGORA, nome real DEPOIS: o rótulo de não
+                // confirmado é o mesmo da autoria que não fecha, e pela mesma
+                // razão — não é o nome errado, é a ausência dele.
+                aoMudarQuemFala(AUTOR_NAO_CONFIRMADO)
+                // O servidor sabe de quem é o piso desta transmissão
+                // (`autor_da_transmissao`, migração `0015`), e é a única fonte que
+                // não depende de um anúncio que já passou. Fora do caminho do
+                // áudio: ele já está tocando.
+                escopo.launch {
+                    val autorReal = conferirAutor(evento.transmissaoId)
+                    if (autorReal != null) {
+                        aoMudarQuemFala(resolverAutor(autorReal) ?: AUTOR_NAO_CONFIRMADO)
+                    }
+                }
+            }
+
             is EventoRecepcao.Chegando -> {
-                // Abre a janela de supressão ANTES do primeiro áudio: a voz que
-                // vai tocar não pode entrar na nossa resposta.
-                supressor.abrir(agoraMs())
+                // Cobre a espera pelo PRIMEIRO bloco decodificado. Daí em diante
+                // quem registra é cada bloco de áudio, com a duração dele — ver
+                // `EventoRecepcao.Audio` e o KDoc de `SupressorDeSaidaPropria`.
+                supressor.registrar(agoraMs(), ESPERA_PELO_PRIMEIRO_AUDIO_MS)
                 // **Resolve, não confia.** `autorIndicativo` é string livre: quem
                 // transmite escreve o nome que quiser, e até aqui a tela do colega
                 // mostrava. Agora o nome sai do cadastro que o servidor filtrou
@@ -659,6 +741,24 @@ class RadioTatico(
             }
 
             is EventoRecepcao.Audio -> {
+                // **A janela de supressão é registrada AQUI, bloco a bloco.**
+                //
+                // Antes era uma janela sem fim, aberta no anúncio e fechada em
+                // `Terminou`. Quem fechava não era quem tocava: numa fala cortada
+                // pela rede, `Terminou` só sai 2 s depois do último quadro, e nesses
+                // 2 s não havia som nenhum saindo — mas a captura do PRÓXIMO agente
+                // a apertar o PTT era descartada inteira, com a barra no ar e sem
+                // um tom sequer. Ver `SupressorDeSaidaPropria`.
+                //
+                // A duração vem do próprio bloco, que acabou de ser decodificado:
+                // é o número exato, e não uma estimativa. A margem do supressor
+                // emenda blocos consecutivos e cobre a cauda do alto-falante.
+                if (evento.taxaHz > 0) {
+                    supressor.registrar(
+                        agoraMs(),
+                        evento.pcm.size * 1_000L / evento.taxaHz,
+                    )
+                }
                 // Abertura preguiçosa: a taxa só se conhece no primeiro quadro
                 // decodificado — `CodecDeVoz.taxaDeSaidaHz` é 0 antes disso, e um
                 // track aberto em `entrarEmModoAtivo` nasceria com taxa errada.
@@ -691,11 +791,26 @@ class RadioTatico(
             }
 
             is EventoRecepcao.Terminou -> {
-                // Fecha a janela; a margem do supressor cobre a cauda.
-                supressor.fechar(agoraMs())
+                // Nada a fechar: a última janela registrada expira sozinha com a
+                // margem. É o que impede a espera do receptor de virar descarte da
+                // captura de quem fala em seguida.
                 aoMudarQuemFala(null)
                 fecharFluxoDeSaida()
-                Log.i(TAG, "recebida ${evento.transmissaoId}: ${evento.quadros} quadros, ${evento.perdidos} perdidos")
+                Log.i(
+                    TAG,
+                    "recebida ${evento.transmissaoId}: ${evento.quadros} quadros, " +
+                        "${evento.perdidos} perdidos, fim ${evento.motivo}",
+                )
+                // **Fala cortada não pode chegar como fala inteira.** Quem ouviu
+                // precisa saber que o final não veio antes de decidir uma abordagem
+                // com base no que entendeu.
+                if (evento.motivo == FimDaFala.CORTADA_NO_MEIO) {
+                    emitirComSupressao(
+                        utteranceFor(
+                            ActionOutcome.Falhou(FalhaOperacional.FALA_DO_COLEGA_CORTADA),
+                        ),
+                    )
+                }
             }
 
             EventoRecepcao.CanalDegradado -> {
@@ -739,5 +854,16 @@ class RadioTatico(
          * para menos deixa a própria fala vazar para a guarnição.
          */
         const val DURACAO_FALA_ESTIMADA_MS = 2_000L
+
+        /**
+         * Janela de supressão entre o anúncio e o primeiro bloco decodificado.
+         *
+         * **Bounded de propósito.** É o único trecho de reprodução cuja duração
+         * não se conhece de antemão, e a versão anterior o cobria com uma janela
+         * *sem fim* — que é exatamente o mecanismo que engoliu 2 s de fala do
+         * agente seguinte. 300 ms cobrem o aquecimento do track e a chegada do
+         * primeiro quadro; se ninguém falar depois disso, a janela morre sozinha.
+         */
+        const val ESPERA_PELO_PRIMEIRO_AUDIO_MS = 300L
     }
 }

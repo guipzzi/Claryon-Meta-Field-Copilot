@@ -106,7 +106,18 @@ class SessaoPttTest {
         }
 
         override suspend fun renovar(concessao: Concessao) = renovaOk
-        override suspend fun liberar(concessao: Concessao) { liberado = true }
+
+        /** `liberarDevolve = false` reproduz o `liberar_canal` que sai e não chega. */
+        var liberarDevolve = true
+
+        override suspend fun liberar(concessao: Concessao): ResultadoDaLiberacao {
+            liberado = true
+            return if (liberarDevolve) {
+                ResultadoDaLiberacao.Devolvido
+            } else {
+                ResultadoDaLiberacao.NaoDevolvido("liberar_canal não respondeu")
+            }
+        }
     }
 
     private fun concessao(tx: String) = Concessao(

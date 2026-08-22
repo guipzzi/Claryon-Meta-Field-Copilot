@@ -14,6 +14,22 @@ sealed interface EventoRecepcao {
     /** Alguém vai falar. Momento de aquecer a saída e tocar o clique de canal. */
     data class Chegando(val anuncio: AnuncioDeFala) : EventoRecepcao
 
+    /**
+     * **Áudio começou a tocar sem que o anúncio tivesse chegado.**
+     *
+     * Acontece de verdade e por dois caminhos: o agente liga o rádio (ou entra no
+     * talk group) no meio de uma fala, e o anúncio se perde. Nos dois, o áudio é
+     * reproduzido — calar uma voz que pode ser um pedido de apoio real seria a
+     * falha oposta e pior.
+     *
+     * Existe porque a alternativa observada era **voz sem autor**: `Chegando` só
+     * dispara no anúncio, e quem entrou depois dele ouvia alguém falando com a
+     * tela dizendo que ninguém falava. Este evento é a admissão honesta de
+     * "alguém está falando e eu ainda não sei quem" — e é o gancho para
+     * perguntar ao servidor de quem é o piso desta transmissão.
+     */
+    data class ChegandoSemAnuncio(val transmissaoId: String) : EventoRecepcao
+
     /** PCM pronto para o alto-falante, **na taxa do decodificador**. */
     data class Audio(val pcm: ShortArray, val taxaHz: Int) : EventoRecepcao {
         override fun equals(other: Any?) =
@@ -30,8 +46,21 @@ sealed interface EventoRecepcao {
      */
     data class TextoDaFala(val transmissaoId: String, val texto: String) : EventoRecepcao
 
-    /** Fim da fala. Fecha a janela de supressão depois da cauda. */
-    data class Terminou(val transmissaoId: String, val quadros: Int, val perdidos: Int) : EventoRecepcao
+    /**
+     * Fim da fala.
+     *
+     * @param motivo **como** a fala acabou. Sem ele, uma fala inteira e uma fala
+     *   cortada no meio pela rede chegavam à camada de cima como o mesmo evento,
+     *   campo a campo — quem ouviu não tinha como saber que perdeu o final, e
+     *   [perdidos] vem zerado justamente no caso truncado, porque o receptor não
+     *   sabe quantos quadros nunca existiram.
+     */
+    data class Terminou(
+        val transmissaoId: String,
+        val quadros: Int,
+        val perdidos: Int,
+        val motivo: FimDaFala,
+    ) : EventoRecepcao
 
     /**
      * Canal degradado: perda acima de 30%. **O agente precisa saber que o rádio
@@ -39,6 +68,27 @@ sealed interface EventoRecepcao {
      * apoio que talvez não tenha ouvido é pior que saber que não ouviu.
      */
     data object CanalDegradado : EventoRecepcao
+}
+
+/**
+ * **Como uma fala recebida terminou.** A distinção existe porque a ação de quem
+ * ouviu muda: fala encerrada é fala inteira; fala cortada pede *"repita o final"*.
+ */
+enum class FimDaFala {
+
+    /**
+     * O emissor encerrou: veio o quadro `ultimo`, ou o `fim de transmissão` do
+     * transporte. A frase chegou até o ponto final.
+     */
+    ENCERRADA_PELO_EMISSOR,
+
+    /**
+     * **O emissor sumiu no meio.** Túnel, bateria, app morto — nada anunciou o
+     * fim, e o receptor concluiu por silêncio depois de esperar a janela inteira
+     * de jitter. O último pedaço da fala **não** chegou, e o que a tela mostra
+     * está incompleto.
+     */
+    CORTADA_NO_MEIO,
 }
 
 /**
@@ -78,6 +128,18 @@ class Receptor(
     private var quadrosPerdidos = 0
     private var degradadoAvisado = false
 
+    /**
+     * O emissor avisou que acabou (`fim de transmissão` do transporte), mesmo que
+     * o quadro `ultimo` tenha se perdido.
+     *
+     * Com ele, a espera cai de [ESPERAS_ATE_DESISTIR] para [ESPERAS_APOS_FIM] — o
+     * bastante para drenar o que ainda estava no buffer de jitter — e o desfecho é
+     * [FimDaFala.ENCERRADA_PELO_EMISSOR], porque a fala de fato terminou. O
+     * evento chegava e era descartado com o comentário "o quadro `ultimo`
+     * encerra", que é verdade só quando ele chega.
+     */
+    @Volatile private var emissorAnunciouFim = false
+
     /** Começa a ouvir o talk group. Idempotente. */
     fun iniciar(aoEvento: suspend (EventoRecepcao) -> Unit) {
         if (coleta?.isActive == true) return
@@ -91,6 +153,7 @@ class Receptor(
                         quadrosTocados = 0
                         quadrosPerdidos = 0
                         degradadoAvisado = false
+                        emissorAnunciouFim = false
                         transmissaoCorrente = evento.anuncio.transmissaoId
                         aoEvento(EventoRecepcao.Chegando(evento.anuncio))
                         iniciarReproducao(aoEvento)
@@ -98,15 +161,29 @@ class Receptor(
 
                     is EventoDeRede.Quadro -> {
                         // Quadro sem anúncio acontece: o anúncio pode ter se
-                        // perdido. Começar mesmo assim é melhor que ficar mudo.
+                        // perdido, ou o agente entrou no grupo depois dele.
+                        // Começar mesmo assim é melhor que ficar mudo — mas
+                        // começar **em silêncio** era o defeito: a voz tocava e a
+                        // camada de cima não tinha evento nenhum para dizer que
+                        // alguém estava falando, muito menos quem.
                         if (transmissaoCorrente == null) {
                             transmissaoCorrente = evento.quadro.transmissaoId
+                            emissorAnunciouFim = false
+                            aoEvento(
+                                EventoRecepcao.ChegandoSemAnuncio(evento.quadro.transmissaoId),
+                            )
                             iniciarReproducao(aoEvento)
                         }
                         jitter.receber(evento.quadro)
                     }
 
-                    is EventoDeRede.FimDeTransmissao -> Unit // o quadro `ultimo` encerra
+                    // **Não é mais descartado.** O `ultimo` encerra quando chega;
+                    // quando ele se perde, este evento é a única prova de que a
+                    // fala terminou por vontade do emissor — e a diferença entre
+                    // esperar 2 s e esperar 200 ms para dizer isso à tela.
+                    is EventoDeRede.FimDeTransmissao -> {
+                        if (evento.transmissaoId == transmissaoCorrente) emissorAnunciouFim = true
+                    }
 
                     // **Fora do laço de reprodução, e é o ponto do item.** O texto
                     // não entra no buffer de jitter nem espera o áudio drenar: ele
@@ -172,25 +249,30 @@ class Receptor(
 
                     SaidaDoJitter.Aguardando -> {
                         esperasSeguidas++
-                        if (esperasSeguidas >= ESPERAS_ATE_DESISTIR) {
+                        // Duas esperas, porque são duas perguntas diferentes. Se o
+                        // emissor ANUNCIOU o fim, só falta drenar o jitter, e são
+                        // 200 ms. Se ele sumiu, a espera é a janela inteira de
+                        // tolerância — encurtá-la cortaria fala boa que atrasou.
+                        val limite =
+                            if (emissorAnunciouFim) ESPERAS_APOS_FIM else ESPERAS_ATE_DESISTIR
+                        if (esperasSeguidas >= limite) {
                             // Emissor sumiu no meio (bateria, túnel) e o `ultimo`
                             // nunca chegou. Encerrar é melhor que segurar o canal:
                             // a próxima fala precisa de um laço limpo.
-                            val id = transmissaoCorrente
-                            transmissaoCorrente = null
-                            if (id != null) {
-                                aoEvento(EventoRecepcao.Terminou(id, quadrosTocados, quadrosPerdidos))
-                            }
+                            encerrarFala(
+                                if (emissorAnunciouFim) {
+                                    FimDaFala.ENCERRADA_PELO_EMISSOR
+                                } else {
+                                    FimDaFala.CORTADA_NO_MEIO
+                                },
+                                aoEvento,
+                            )
                             return@launch
                         }
                     }
 
                     SaidaDoJitter.Fim -> {
-                        val id = transmissaoCorrente
-                        transmissaoCorrente = null
-                        if (id != null) {
-                            aoEvento(EventoRecepcao.Terminou(id, quadrosTocados, quadrosPerdidos))
-                        }
+                        encerrarFala(FimDaFala.ENCERRADA_PELO_EMISSOR, aoEvento)
                         return@launch
                     }
                 }
@@ -205,6 +287,16 @@ class Receptor(
         }
     }
 
+    private suspend fun encerrarFala(
+        motivo: FimDaFala,
+        aoEvento: suspend (EventoRecepcao) -> Unit,
+    ) {
+        val id = transmissaoCorrente ?: return
+        transmissaoCorrente = null
+        emissorAnunciouFim = false
+        aoEvento(EventoRecepcao.Terminou(id, quadrosTocados, quadrosPerdidos, motivo))
+    }
+
     private suspend fun emitir(r: Result<ShortArray>, aoEvento: suspend (EventoRecepcao) -> Unit) {
         val pcm = (r as? Result.Success)?.value ?: return
         if (pcm.isEmpty()) return
@@ -213,8 +305,19 @@ class Receptor(
     }
 
     private companion object {
-        /** 100 × 20 ms = 2 s de silêncio encerram o laço. */
+        /**
+         * 100 × 20 ms = 2 s de silêncio encerram o laço quando **nada** anunciou o
+         * fim. É tolerância de jitter, não indecisão: cortar antes descartaria
+         * fala boa que atrasou na rede.
+         */
         const val ESPERAS_ATE_DESISTIR = 100
+
+        /**
+         * 10 × 20 ms = 200 ms, quando o emissor **anunciou** o fim e só falta
+         * drenar o buffer. Aqui não há fala futura para esperar: o que não chegou
+         * em 200 ms não vai chegar antes de a próxima transmissão começar.
+         */
+        const val ESPERAS_APOS_FIM = 10
     }
 
     fun parar() {
@@ -223,5 +326,6 @@ class Receptor(
         reproducao = null
         coleta = null
         transmissaoCorrente = null
+        emissorAnunciouFim = false
     }
 }

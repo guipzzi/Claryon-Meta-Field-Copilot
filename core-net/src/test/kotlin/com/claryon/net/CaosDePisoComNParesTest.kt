@@ -164,20 +164,23 @@ class CaosDePisoComNParesTest {
     }
 
     /**
-     * **A recusa por FALTA DE REDE se disfarça de canal ocupado.**
+     * **CONSERTADO (22/08): falta de rede tem desfecho próprio.**
      *
-     * `ClienteDePisoRemoto.pedir` (`ClientesDePiso.kt:73-79`) devolve
-     * `Ocupado(detentor = "?")` quando o RPC não volta — e a decisão de calar em vez
-     * de presumir concedido está certa. O que o teste registra é o efeito colateral:
-     * `SessaoPtt` traduz isso no **mesmo** [EventoPtt.CanalOcupado] que um canal de
-     * fato ocupado produz, e `RadioTatico` no **mesmo** tom de falha.
+     * `ClienteDePisoRemoto.pedir` devolvia `Ocupado(detentor = "?")` quando o RPC
+     * não voltava. A decisão de calar em vez de presumir concedido sempre esteve
+     * certa; o defeito era o que chegava ao agente: o **mesmo** [EventoPtt] e o
+     * **mesmo** tom de um canal de fato ocupado.
      *
-     * Em campo as duas causas pedem ações opostas: canal ocupado se resolve
-     * **esperando**, falta de rede se resolve **andando**. O agente ouve o mesmo
-     * bipe nos dois casos; o único sinal do detentor `"?"` morre dentro do evento.
+     * Em campo as duas causas pedem ações opostas — canal ocupado se resolve
+     * **esperando** o colega soltar; falta de rede se resolve **andando** até
+     * pegar sinal. Um agente embaixo de um viaduto esperava por uma vez que nunca
+     * chegaria.
+     *
+     * Agora são [EventoPtt.SemRede] e [EventoPtt.CanalOcupado], e o `RadioTatico`
+     * fala frases diferentes para cada um.
      */
     @Test
-    fun oPedidoSemRede_chegaAoAgenteComOMesmoTomDeCanalOcupado() = runTest {
+    fun oPedidoSemRede_temDesfechoProprio_eNaoSeDisfarcaDeCanalOcupado() = runTest {
         val servidor = PisoServidor(relogio = { currentTime })
         val barramento = BarramentoTatico()
         val alfa = ParDeRadio("alfa", barramento)
@@ -190,16 +193,63 @@ class CaosDePisoComNParesTest {
             }
         advanceUntilIdle()
 
-        val ocupado = eventos.filterIsInstance<EventoPtt.CanalOcupado>().single()
         assertEquals(
-            "OBSERVADO: rede caída chega como CanalOcupado, com detentor desconhecido — " +
-                "mesmo evento e mesmo tom de um canal legitimamente ocupado",
-            "?",
-            ocupado.porQuem,
+            "rede caída tem de chegar como SemRede — o desfecho que manda ANDAR",
+            1,
+            eventos.count { it is EventoPtt.SemRede },
+        )
+        assertTrue(
+            "e NUNCA como CanalOcupado, que é o desfecho que manda ESPERAR",
+            eventos.none { it is EventoPtt.CanalOcupado },
         )
         assertNull(
             "e o servidor nunca soube do pedido: não há ninguém com a palavra",
             servidor.detentor(gta),
+        )
+        assertTrue("nada pode ter ido ao fio", alfa.enviados.isEmpty())
+    }
+
+    /**
+     * **O contra-teste do conserto acima, e ele é uma DESIGUALDADE.**
+     *
+     * As duas recusas correm na mesma bancada, mudando só a causa, e o teste exige
+     * que os desfechos difiram. Se alguém reintroduzir o `Ocupado(detentor = "?")`
+     * do caminho sem rede, os dois conjuntos de eventos voltam a ser iguais e este
+     * teste cai — que é o único jeito de o defeito não voltar em silêncio.
+     */
+    @Test
+    fun canalOcupadoEFaltaDeRede_produzemDesfechosDIFERENTES() = runTest {
+        suspend fun desfechosCom(rede: Boolean): List<EventoPtt> {
+            val servidor = PisoServidor(relogio = { currentTime })
+            val barramento = BarramentoTatico()
+            val alfa = ParDeRadio("alfa", barramento)
+            val bravo = ParDeRadio("bravo", barramento)
+            // Canal legitimamente ocupado por Bravo, nos dois cenários.
+            ClienteDePisoDoPar(bravo, servidor)
+                .pedir(gta, "bravo", "tx-bravo", PrioridadeTransmissao.P2_APOIO)
+            alfa.rede = rede
+
+            val eventos = mutableListOf<EventoPtt>()
+            sessaoDe(alfa, ClienteDePisoDoPar(alfa, servidor), { currentTime })
+                .transmitir("tx-alfa", PrioridadeTransmissao.P2_APOIO, "Alfa Um", fala(4)) {
+                    eventos += it
+                }
+            advanceUntilIdle()
+            return eventos
+        }
+
+        val comRede = desfechosCom(rede = true)
+        val semRede = desfechosCom(rede = false)
+
+        assertEquals(
+            "com rede, o canal está ocupado por Bravo",
+            listOf(EventoPtt.CanalOcupado("bravo")),
+            comRede.filter { it is EventoPtt.CanalOcupado || it is EventoPtt.SemRede },
+        )
+        assertEquals(
+            "sem rede, nem sabemos que Bravo existe",
+            listOf<EventoPtt>(EventoPtt.SemRede),
+            semRede.filter { it is EventoPtt.CanalOcupado || it is EventoPtt.SemRede },
         )
     }
 
@@ -319,17 +369,24 @@ class CaosDePisoComNParesTest {
     // ── 5. O `liberar_canal` que falha em silêncio ────────────────────────────
 
     /**
-     * **O buraco apontado em `ClientesDePiso.kt:110-112` + `:151-157`.**
+     * **CONSERTADO (22/08): o buraco de `ClientesDePiso.kt:110-112` + `:142-157`
+     * + `SessaoPtt.kt:377`.**
      *
      * Aqui a rede do RÁDIO está de pé — os quadros saem, a fala é ouvida, a sessão
-     * encerra com [EventoPtt.Encerrada] e nada indica problema. O que falhou foi o
-     * RPC `liberar_canal`, que é HTTP e independente do WebSocket.
+     * encerra normalmente. O que falhou foi o RPC `liberar_canal`, que é HTTP e
+     * independente do WebSocket.
      *
-     * Observado: **nenhum evento** distingue este caso do encerramento normal. O
-     * agente que falou acha que devolveu o canal; a guarnição fica muda 30 s.
+     * Antes: **nenhum evento** distinguia este caso do encerramento limpo, em três
+     * camadas somadas — `rpcBooleano` sem `onFailure`, o retorno descartado, e o
+     * `runCatching` do encerramento engolindo. O agente que falou achava que tinha
+     * devolvido o canal, e a guarnição ficava muda 30 s.
+     *
+     * O canal continua preso — isso é consequência da rede, e nenhum evento
+     * conserta. O que muda é que **alguém sabe**, e o único que pode agir é
+     * avisado enquanto ainda está pensando no rádio.
      */
     @Test
-    fun oLiberarQueFalha_naoProduzEventoNenhum_eAGuarnicaoNaoSabe() = runTest {
+    fun oLiberarQueFalha_produzEventoProprio_antesDeEncerrada() = runTest {
         var agora = 0L
         val servidor = PisoServidor(relogio = { agora })
         val barramento = BarramentoTatico()
@@ -346,36 +403,76 @@ class CaosDePisoComNParesTest {
 
         assertTrue("a fala foi ao ar normalmente", eventos.any { it is EventoPtt.Encerrada })
         assertTrue("e Bravo ouviu", bravo.recebidos.any { it is EventoDeRede.Quadro })
+
+        val naoDevolvido = eventos.indexOfFirst { it is EventoPtt.CanalNaoDevolvido }
+        assertTrue("a devolução falha tem de produzir evento", naoDevolvido >= 0)
         assertTrue(
-            "NENHUM evento denuncia que o canal não voltou — este é o achado",
-            eventos.none { it is EventoPtt.QuadrosNaoEntregues || it is EventoPtt.CanalPerdido },
+            "e ANTES de Encerrada: depois dela o agente já voltou a atenção para a " +
+                "ocorrência, e o tom chega no vazio",
+            naoDevolvido < eventos.indexOfFirst { it is EventoPtt.Encerrada },
         )
-        assertEquals("mas o servidor ainda acha que Alfa fala", "alfa", servidor.detentor(gta)?.agenteId)
+        assertEquals("o canal de fato ficou preso", "alfa", servidor.detentor(gta)?.agenteId)
 
         agora = 1_000
         assertTrue(
-            "e Bravo, que ouviu a fala inteira TERMINAR, é recusado",
+            "e Bravo, que ouviu a fala inteira TERMINAR, é recusado — a diferença " +
+                "é que agora Alfa foi avisado de que causou isso",
             ClienteDePisoDoPar(bravo, servidor)
                 .pedir(gta, "bravo", "tx-b", PrioridadeTransmissao.P2_APOIO)
                 is ResultadoDoPedido.Ocupado,
         )
     }
 
+    /**
+     * **O contra-teste: a devolução que FUNCIONA não pode produzir o mesmo evento.**
+     *
+     * Sem ele, `CanalNaoDevolvido` emitido sempre passaria — e um tom de falha ao
+     * fim de toda transmissão treina o agente a ignorar o tom, que é a forma mais
+     * cara de "consertar" um silêncio.
+     */
+    @Test
+    fun oLiberarQueFunciona_naoProduzEventoDeCanalPreso() = runTest {
+        var agora = 0L
+        val servidor = PisoServidor(relogio = { agora })
+        val barramento = BarramentoTatico()
+        val alfa = ParDeRadio("alfa", barramento)
+
+        val eventos = mutableListOf<EventoPtt>()
+        sessaoDe(alfa, ClienteDePisoDoPar(alfa, servidor), { agora })
+            .transmitir("tx-alfa", PrioridadeTransmissao.P2_APOIO, "Alfa Um", flow {
+                repeat(4) { agora += 20; emit(ShortArray(amostrasPorQuadro) { 3_000 }) }
+            }) { eventos += it }
+        advanceUntilIdle()
+
+        assertTrue(eventos.any { it is EventoPtt.Encerrada })
+        assertTrue(
+            "canal devolvido não pode soar como canal preso",
+            eventos.none { it is EventoPtt.CanalNaoDevolvido },
+        )
+        assertNull("e o canal voltou mesmo ao grupo", servidor.detentor(gta))
+    }
+
     // ── 6. Emergência durante fala de rotina ──────────────────────────────────
 
     /**
-     * **A janela de sobreposição que ninguém declarou: até `renovarACadaMs`.**
+     * **CONSERTADO (22/08) — o bloqueador: 4 640 ms de duas vozes no fio.**
      *
-     * Bravo toma o canal com P1 no instante *t*. Alfa só descobre no próximo
-     * `renovar`, que por padrão acontece a cada [SessaoPtt.RENOVAR_MS] = 5 000 ms.
-     * Nesse intervalo os **dois** transmitem, e Charlie recebe as duas vozes
-     * misturadas — que é exatamente o que o controle de piso existe para impedir.
+     * Bravo tomava o canal com P1 no instante *t*, e Alfa só descobria no próximo
+     * `renovar` — a cada [SessaoPtt.RENOVAR_MS] = 5 000 ms. Nesse intervalo os
+     * **dois** transmitiam: 232 quadros medidos, e Charlie recebia emergência e
+     * rotina misturadas. É exatamente o que o controle de piso existe para impedir.
      *
-     * O teste mede a janela em quadros de 20 ms em vez de afirmar que ela é
-     * "pequena". Com renovação a cada 200 ms ela some; com 5 000 ms, não.
+     * O conserto usa um sinal que **já estava no fio**: o anúncio de fala do
+     * emissor P1 é difundido para o talk group inteiro, inclusive para quem está
+     * transmitindo. Ele vira o gatilho de uma confirmação imediata com o árbitro —
+     * e é a resposta do árbitro, nunca o anúncio, que corta a fala. Ver
+     * `SessaoPtt.vigiarTomadaDoPiso`.
+     *
+     * O teste mede a janela em quadros de 20 ms em vez de dizer que ela é
+     * "pequena": adjetivo esconde regressão, número não.
      */
     @Test
-    fun aEmergenciaTomaOCanal_masAVozAnteriorSegueNoArAteARenovacao() = runTest {
+    fun aEmergenciaTomaOCanal_eOInterrompidoSaiDoFioNaHora() = runTest {
         var agora = 0L
         val servidor = PisoServidor(relogio = { agora })
         val barramento = BarramentoTatico()
@@ -396,36 +493,53 @@ class CaosDePisoComNParesTest {
         }
         assertTrue("a bancada precisa de fala em curso para o teste valer", quadrosAntes > 0)
 
-        // Bravo aperta com P1.
-        val tomada = ClienteDePisoDoPar(bravo, servidor)
-            .pedir(gta, "bravo", "tx-bravo", PrioridadeTransmissao.P1_EMERGENCIA)
-        assertTrue("P1 toma de P2", tomada is ResultadoDoPedido.Tomado)
+        // **Bravo aperta com P1 numa sessão de verdade**, e não só pedindo o piso:
+        // é a sessão que ANUNCIA, e o anúncio é o sinal que fecha a janela. Um
+        // `pedir` cru mediria um mundo em que ninguém avisa ninguém.
+        val jobBravo = launch {
+            sessaoDe(bravo, ClienteDePisoDoPar(bravo, servidor), { agora })
+                .transmitir("tx-bravo", PrioridadeTransmissao.P1_EMERGENCIA, "Bravo Dois", flow {
+                    repeat(50) { delay(20); emit(ShortArray(amostrasPorQuadro) { 3_000 }) }
+                }) {}
+        }
 
-        advanceTimeBy(5_200) // além da renovação
-        job.join()
-
-        assertTrue(
-            "o interrompido tem de SABER — seguir falando para o vazio é pior que ser cortado",
-            eventosDeAlfa.any { it is EventoPtt.CanalPerdido },
-        )
+        advanceTimeBy(400) // MUITO antes dos 5 000 ms da renovação
         val depois = charlie.recebidos.count {
             it is EventoDeRede.Quadro && it.quadro.transmissaoId == "tx-alfa"
         } - quadrosAntes
+
         assertTrue(
-            "OBSERVADO: Alfa segue no fio depois de perder o piso — $depois quadros " +
-                "(${depois * 20} ms). A janela é o intervalo de renovação, não zero.",
-            depois > 0,
+            "o interrompido tem de SABER — seguir falando para o vazio é pior que " +
+                "ser cortado (eventos: $eventosDeAlfa)",
+            eventosDeAlfa.any { it is EventoPtt.CanalPerdido },
         )
         assertTrue(
-            "e a janela não pode passar do intervalo de renovação + o quadro em curso",
-            depois * 20 <= 5_000 + 40,
+            "a sobreposição foi de $depois quadros (${depois * 20} ms). O teto é o " +
+                "quadro em curso mais o tempo de uma confirmação com o árbitro — " +
+                "não o intervalo de renovação.",
+            depois <= 3,
         )
+
+        jobBravo.cancel()
+        job.join()
     }
 
-    /** O contra-teste: com renovação curta, a janela de sobreposição encolhe. */
+    /**
+     * **O contra-teste do bloqueador, e ele é uma DESIGUALDADE medida.**
+     *
+     * As duas corridas mudam **uma** coisa: se quem toma o canal anuncia a fala.
+     * Com anúncio, a vigia corta na hora. Sem anúncio — que é o que uma mensagem
+     * perdida no Realtime produz —, a descoberta volta a depender da renovação, e
+     * a janela volta a ser os 5 000 ms do defeito original.
+     *
+     * Vale duas vezes: prova que o conserto é a vigia (e não sorte de escalonador)
+     * **e** documenta honestamente a degradação quando o anúncio se perde. Se
+     * alguém desligar a vigia, as duas corridas voltam a dar o mesmo número e este
+     * teste cai.
+     */
     @Test
-    fun comRenovacaoCurta_aJanelaDeSobreposicaoEncolhe() = runTest {
-        suspend fun quadrosDepoisDaTomada(renovarACadaMs: Long): Int {
+    fun semOAnuncioDoInterruptor_aJanelaVoltaASerOIntervaloDeRenovacao() = runTest {
+        suspend fun quadrosDepoisDaTomada(comAnuncio: Boolean): Int {
             var agora = 0L
             val servidor = PisoServidor(relogio = { agora })
             val barramento = BarramentoTatico()
@@ -433,26 +547,53 @@ class CaosDePisoComNParesTest {
             val bravo = ParDeRadio("bravo", barramento)
             val charlie = ParDeRadio("charlie", barramento)
             val job = launch {
-                sessaoDe(alfa, ClienteDePisoDoPar(alfa, servidor), { agora }, renovarACadaMs = renovarACadaMs)
+                sessaoDe(alfa, ClienteDePisoDoPar(alfa, servidor), { agora }, renovarACadaMs = 5_000)
                     .transmitir("tx-alfa", PrioridadeTransmissao.P2_APOIO, "Alfa", flow {
                         repeat(500) { delay(20); agora += 20; emit(ShortArray(amostrasPorQuadro) { 3_000 }) }
                     }) {}
             }
             advanceTimeBy(400)
-            val antes = charlie.recebidos.count { it is EventoDeRede.Quadro }
-            ClienteDePisoDoPar(bravo, servidor)
-                .pedir(gta, "bravo", "tx-bravo", PrioridadeTransmissao.P1_EMERGENCIA)
+            val antes = charlie.recebidos.count {
+                it is EventoDeRede.Quadro && it.quadro.transmissaoId == "tx-alfa"
+            }
+
+            val pisoDeBravo = ClienteDePisoDoPar(bravo, servidor)
+            pisoDeBravo.pedir(gta, "bravo", "tx-bravo", PrioridadeTransmissao.P1_EMERGENCIA)
+            if (comAnuncio) {
+                bravo.anunciar(
+                    AnuncioDeFala(
+                        transmissaoId = "tx-bravo",
+                        autorIndicativo = "Bravo Dois",
+                        autorAgenteId = "bravo",
+                        prioridade = PrioridadeTransmissao.P1_EMERGENCIA,
+                    ),
+                )
+            }
+
             advanceTimeBy(6_000)
             job.join()
-            return charlie.recebidos.count { it is EventoDeRede.Quadro } - antes
+            return charlie.recebidos.count {
+                it is EventoDeRede.Quadro && it.quadro.transmissaoId == "tx-alfa"
+            } - antes
         }
 
-        val curta = quadrosDepoisDaTomada(200)
-        val longa = quadrosDepoisDaTomada(5_000)
+        val comAnuncio = quadrosDepoisDaTomada(comAnuncio = true)
+        val semAnuncio = quadrosDepoisDaTomada(comAnuncio = false)
+
         assertTrue(
-            "se as duas configurações não diferem, o teste não testa a renovação " +
-                "(curta=$curta, longa=$longa)",
-            curta < longa,
+            "se as duas corridas não diferem, a vigia não está fazendo nada " +
+                "(com anúncio=$comAnuncio quadros, sem anúncio=$semAnuncio)",
+            comAnuncio < semAnuncio,
+        )
+        assertTrue(
+            "com anúncio a sobreposição tem de ser de quadros, não de segundos " +
+                "($comAnuncio quadros = ${comAnuncio * 20} ms)",
+            comAnuncio <= 3,
+        )
+        assertTrue(
+            "e sem anúncio ela volta a ser a janela de renovação — degradação " +
+                "declarada, não escondida ($semAnuncio quadros)",
+            semAnuncio * 20 >= 4_000,
         )
     }
 
@@ -522,23 +663,26 @@ class CaosDePisoComNParesTest {
     // ── 8. O agente sai do grupo com o piso na mão ────────────────────────────
 
     /**
-     * **O piso não sabe o que é pertencer ao grupo.**
+     * **CONSERTADO (22/08, migração `0024`): renovar confere pertencimento.**
      *
-     * `pedir_canal` (`0005_controle_de_piso.sql:78-82`) recusa quem não é membro —
-     * mas só na hora de PEDIR. `renovar_canal` (`:135-151`) confere apenas
-     * `transmissao_id` + `agent_id` + validade; não há predicado de membership. E
-     * [ControleDePiso], a política que roda no aparelho, não tem a noção de grupo
-     * em lugar nenhum.
+     * `pedir_canal` (`0005_controle_de_piso.sql:78-82`) recusava quem não é membro
+     * — mas só na hora de PEDIR. `renovar_canal` (`:135-151`) conferia apenas
+     * `transmissao_id` + `agent_id` + validade, e [ControleDePiso], a política que
+     * espelha o SQL, não tinha a noção de grupo em lugar nenhum.
      *
-     * Observado: Alfa sai da guarnição, para de ser ouvido (o barramento não
-     * entrega mais os quadros dele), **e continua detendo o canal**. A guarnição
-     * fica muda com o piso na mão de quem já não pertence a ela.
+     * Antes: Alfa saía da guarnição, parava de ser ouvido (o barramento não
+     * entrega mais os quadros dele) **e continuava detendo o canal**. A guarnição
+     * ficava muda com o piso na mão de quem já não pertencia a ela.
+     *
+     * Agora a renovação **apaga** a concessão, e não só a recusa: recusar deixaria
+     * a linha de pé até o TTL, e os 30 s de silêncio seriam pagos por quem ficou.
      */
     @Test
-    fun oAgenteQueSaiDoGrupoComOPisoNaMao_continuaSegurandoOCanal() = runTest {
+    fun oAgenteQueSaiDoGrupoComOPisoNaMao_perdeOCanalNaRenovacao() = runTest {
         var agora = 0L
-        val servidor = PisoServidor(relogio = { agora })
         val barramento = BarramentoTatico()
+        // **O árbitro consulta o cadastro**, como `renovar_canal` passou a fazer.
+        val servidor = PisoServidor(relogio = { agora }, barramento = barramento)
         val alfa = ParDeRadio("alfa", barramento)
         val bravo = ParDeRadio("bravo", barramento)
         val pisoDeAlfa = ClienteDePisoDoPar(alfa, servidor)
@@ -549,24 +693,118 @@ class CaosDePisoComNParesTest {
         alfa.noGrupo = false // removido do talk group no meio da fala
 
         agora = 4_000
-        assertTrue(
-            "OBSERVADO: quem já não é do grupo consegue RENOVAR o piso dele",
+        assertFalse(
+            "quem já não é do grupo não renova o piso dele",
             pisoDeAlfa.renovar(concessao),
         )
-        assertEquals("alfa", servidor.detentor(gta)?.agenteId)
+        assertNull(
+            "e a concessão sai na hora: esperar o TTL cobraria 30 s de silêncio de " +
+                "quem não fez nada",
+            servidor.detentor(gta),
+        )
         assertTrue(
-            "e a guarnição legítima é recusada",
+            "a guarnição legítima assume o canal imediatamente",
             ClienteDePisoDoPar(bravo, servidor)
                 .pedir(gta, "bravo", "tx-b", PrioridadeTransmissao.P2_APOIO)
-                is ResultadoDoPedido.Ocupado,
+                is ResultadoDoPedido.Concedido,
         )
-        // A entrega, essa sim, para — e para em SILÊNCIO.
+        // A entrega, essa sim, para — e para em SILÊNCIO. Não é o assunto deste
+        // conserto e continua registrado: é do transporte, não do piso.
         val envio = alfa.enviar(QuadroAudio("tx-alfa", 0, agora, ByteArray(3)))
         assertTrue(
             "com `ack: false` o aparelho não recebe recusa: ele ACHA que falou",
             envio is com.claryon.common.Result.Success,
         )
         assertTrue("mas ninguém ouve o ex-membro", bravo.recebidos.isEmpty())
+    }
+
+    /**
+     * O contra-teste: quem **continua** na guarnição renova normalmente.
+     *
+     * Sem ele, um `renovar` que devolvesse `false` sempre passaria no teste acima
+     * — e cortaria toda transmissão de rádio do produto na primeira renovação.
+     */
+    @Test
+    fun quemContinuaNoGrupo_renovaNormalmente() = runTest {
+        var agora = 0L
+        val barramento = BarramentoTatico()
+        val servidor = PisoServidor(relogio = { agora }, barramento = barramento)
+        val alfa = ParDeRadio("alfa", barramento)
+        val pisoDeAlfa = ClienteDePisoDoPar(alfa, servidor)
+
+        val concessao = (pisoDeAlfa.pedir(gta, "alfa", "tx-alfa", PrioridadeTransmissao.P2_APOIO)
+            as ResultadoDoPedido.Concedido).concessao
+
+        agora = 4_000
+        assertTrue("membro do grupo renova", pisoDeAlfa.renovar(concessao))
+        assertEquals("alfa", servidor.detentor(gta)?.agenteId)
+    }
+
+    /**
+     * **Quem não é do grupo também não PEDE** — e a recusa é tipada.
+     *
+     * `Ocupado` mandaria o agente esperar por uma vez que nunca chega; `SemRede`
+     * o mandaria procurar torre. A resposta honesta é a terceira.
+     */
+    @Test
+    fun quemNaoEhDoGrupo_recebeRecusaTipada_eNaoCanalOcupado() = runTest {
+        val barramento = BarramentoTatico()
+        val servidor = PisoServidor(relogio = { 0L }, barramento = barramento)
+        val alfa = ParDeRadio("alfa", barramento)
+        alfa.noGrupo = false
+
+        val r = ClienteDePisoDoPar(alfa, servidor)
+            .pedir(gta, "alfa", "tx-alfa", PrioridadeTransmissao.P2_APOIO)
+
+        assertTrue("recusa por autorização, não por ocupação: $r", r is ResultadoDoPedido.Recusado)
+        assertNull("e ninguém ficou com a palavra", servidor.detentor(gta))
+    }
+
+    /**
+     * **A migração `0024` existe e confere `memberships` — lido do arquivo.**
+     *
+     * A política em Kotlin espelha o SQL, mas quem decide em produção é o Postgres,
+     * e ele não roda nesta bancada (ver [BarramentoTatico], limitação 2). Ler a
+     * migração é a única verificação possível em JVM — e arquivo ausente reprova,
+     * pelo mesmo motivo do teste de identidade por parâmetro: uma trava que se
+     * declara inconclusiva é uma trava desligada.
+     */
+    @Test
+    fun aMigracao0024_poeMembershipEmRenovarCanal_semTocarNa0005() {
+        val raiz = generateSequence(java.io.File("").absoluteFile) { it.parentFile }
+            .firstOrNull { java.io.File(it, "servidor/migracoes").isDirectory }
+        assertNotNull("pasta de migrações não achada", raiz)
+
+        val nova = java.io.File(raiz, "servidor/migracoes/0024_renovar_confere_membership.sql")
+        assertTrue("a migração 0024 não existe: ${nova.absolutePath}", nova.isFile)
+
+        val corpo = nova.readText()
+        assertTrue(
+            "a 0024 tem de redefinir renovar_canal",
+            Regex("""create or replace function renovar_canal""", RegexOption.IGNORE_CASE)
+                .containsMatchIn(corpo),
+        )
+        assertTrue(
+            "sem consulta a memberships, a 0024 não conserta nada",
+            corpo.contains("public.memberships"),
+        )
+        assertTrue(
+            "e a concessão do ex-membro tem de SAIR, não só deixar de renovar",
+            Regex("""delete\s+from\s+public\.floor_grants""", RegexOption.IGNORE_CASE)
+                .containsMatchIn(corpo),
+        )
+        assertFalse(
+            "a identidade continua vindo do JWT, nunca por parâmetro (§2)",
+            Regex("""create or replace function renovar_canal\s*\(([^)]*)\)""", RegexOption.IGNORE_CASE)
+                .find(corpo)!!.groupValues[1].contains("agent", ignoreCase = true),
+        )
+
+        val antiga = java.io.File(raiz, "servidor/migracoes/0005_controle_de_piso.sql")
+        assertFalse(
+            "a 0005 é histórico aplicado e não pode ter sido reescrita — ambientes " +
+                "que já a rodaram divergiriam em silêncio",
+            antiga.readText().contains("public.memberships\n     where agent_id = v_eu and talk_group_id = v_grupo"),
+        )
     }
 
     // ── 9. JWT vencido no meio da sessão ──────────────────────────────────────

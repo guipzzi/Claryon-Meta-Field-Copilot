@@ -5,10 +5,13 @@ import android.util.Log
 import com.claryon.common.Result
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
@@ -25,8 +28,36 @@ sealed interface EventoPtt {
     /** Outro agente fala. Tom de ocupado, e o que foi capturado é descartado. */
     data class CanalOcupado(val porQuem: String) : EventoPtt
 
+    /**
+     * **O pedido de canal não alcançou o árbitro.** Nada foi ao ar.
+     *
+     * Separado de [CanalOcupado] em 22/08 porque as duas causas pedem gestos
+     * opostos — esperar o colega × andar até pegar sinal — e chegavam ao agente
+     * como o mesmo evento e o mesmo tom. Ver [ResultadoDoPedido.SemRede].
+     */
+    data object SemRede : EventoPtt
+
+    /**
+     * O árbitro respondeu **não**: o agente não tem autorização neste canal.
+     * Nem ocupado, nem sem rede. Ver [ResultadoDoPedido.Recusado].
+     */
+    data class PedidoRecusado(val motivo: String) : EventoPtt
+
     /** Uma emergência tomou o canal. Tom distinto: o agente parou de ser ouvido. */
     data object CanalPerdido : EventoPtt
+
+    /**
+     * **A fala acabou, mas o canal não voltou ao grupo.**
+     *
+     * O `liberar_canal` saiu do aparelho e não chegou. Do lado de quem falou
+     * está tudo normal — a voz foi ao ar, [Encerrada] veio —, e a guarnição
+     * inteira fica muda até o TTL de 30 s vencer. É o desfecho que faltava:
+     * antes, nenhum evento distinguia este caso do encerramento limpo.
+     *
+     * Sai **antes** de [Encerrada], para o tom de falha não chegar depois de o
+     * agente já ter tirado o dedo do botão e voltado a atenção para a ocorrência.
+     */
+    data class CanalNaoDevolvido(val motivo: String) : EventoPtt
 
     /** Teto de duração atingido — impede que um botão preso vire captação contínua. */
     data object LimiteDeDuracao : EventoPtt
@@ -50,7 +81,25 @@ interface ClienteDePiso {
     ): ResultadoDoPedido
 
     suspend fun renovar(concessao: Concessao): Boolean
-    suspend fun liberar(concessao: Concessao)
+
+    /**
+     * Devolve o canal ao grupo. **Tem retorno de propósito** — ver
+     * [ResultadoDaLiberacao]: `Unit` aqui era o primeiro dos três lugares em que
+     * uma devolução falha desaparecia sem log e sem tom.
+     */
+    suspend fun liberar(concessao: Concessao): ResultadoDaLiberacao
+
+    /**
+     * `true` quando quem arbitra o piso é o **servidor**, e não uma política em
+     * RAM deste processo.
+     *
+     * Existe porque o modo degradado é indistinguível do normal em runtime, e ele
+     * não é equivalente: com piso local, dois aparelhos podem se achar donos do
+     * mesmo canal e falar por cima. Quem opera precisa saber em qual dos dois
+     * está — o `RadioViewModel` cai no local quando não há sessão, e até 22/08 o
+     * único sinal disso era uma linha de log.
+     */
+    val arbitradoPeloServidor: Boolean get() = true
 }
 
 /**
@@ -151,6 +200,21 @@ class SessaoPtt(
                 aoEvento(EventoPtt.CanalOcupado(resultado.detentor.agenteId))
                 return
             }
+            // As três recusas descartam o mesmo áudio e produzem eventos
+            // DIFERENTES. O descarte é idêntico porque nada foi ao ar nos três
+            // casos; o evento difere porque o gesto que resolve cada um difere.
+            ResultadoDoPedido.SemRede -> {
+                preRoll.limpar()
+                telemetria?.contar(TelemetriaDoRadio.CANAL_NEGADO)
+                aoEvento(EventoPtt.SemRede)
+                return
+            }
+            is ResultadoDoPedido.Recusado -> {
+                preRoll.limpar()
+                telemetria?.contar(TelemetriaDoRadio.CANAL_NEGADO)
+                aoEvento(EventoPtt.PedidoRecusado(resultado.motivo))
+                return
+            }
             is ResultadoDoPedido.Concedido -> resultado.concessao
             is ResultadoDoPedido.Tomado -> {
                 telemetria?.contar(TelemetriaDoRadio.CANAL_TOMADO)
@@ -175,6 +239,16 @@ class SessaoPtt(
         var sequencia = 0
         var naoEntregues = 0
         var ultimaRenovacao = inicio
+
+        /**
+         * Ligada pela vigia quando o árbitro confirma que o piso é de outro.
+         *
+         * `AtomicBoolean` e não `var` capturada: a vigia e a captura podem rodar
+         * em threads diferentes do mesmo `Dispatchers.Default`, e uma bandeira que
+         * só é vista na próxima barreira de memória é uma bandeira que atrasa o
+         * corte justamente no caso que ela existe para cortar.
+         */
+        val pisoPerdido = java.util.concurrent.atomic.AtomicBoolean(false)
 
         /**
          * Marca a meta "toque → primeiro quadro entregue à rede" (≤ 120 ms) na
@@ -242,21 +316,45 @@ class SessaoPtt(
             // "30 s desde o toque". Mudança silenciosa de significado do aceite,
             // e para o lado errado: quanto mais lenta a rede, mais tempo de
             // captação o agente ganharia.
-            withTimeout((duracaoMaximaMs - (agoraMs() - inicio)).coerceAtLeast(1L)) {
-                pcmAoVivo.collect { bloco ->
-                    if (!currentCoroutineContext().isActive) return@collect
-
-                    if (agoraMs() - ultimaRenovacao >= renovarACadaMs) {
-                        ultimaRenovacao = agoraMs()
-                        // Perder o canal no meio da fala é informação operacional:
-                        // o agente precisa parar de falar para o vazio.
-                        if (!piso.renovar(concessao)) throw CanalTomado()
+            //
+            // **A vigia corre EM PARALELO com a captura**, e é ela que fecha a
+            // janela de sobreposição de vozes. Ver `vigiarTomadaDoPiso`.
+            coroutineScope {
+                val falando = this
+                val vigia = launch {
+                    vigiarTomadaDoPiso(transmissaoId, prioridade, concessao) {
+                        pisoPerdido.set(true)
+                        falando.cancel(CanalTomado())
                     }
+                }
+                try {
+                    withTimeout((duracaoMaximaMs - (agoraMs() - inicio)).coerceAtLeast(1L)) {
+                        pcmAoVivo.collect { bloco ->
+                            if (!currentCoroutineContext().isActive) return@collect
+                            // Segunda trava, e não redundância: se a vigia
+                            // descobriu a tomada entre dois blocos, o quadro
+                            // seguinte não vai ao fio nem que o cancelamento
+                            // ainda não tenha chegado até aqui.
+                            if (pisoPerdido.get()) throw CanalTomado()
 
-                    for (quadro in fatiar(bloco)) {
-                        naoEntregues += enviar(transmissaoId, { sequencia++ }, quadro)
-                        marcarPrimeiroQuadroSePreciso()
+                            if (agoraMs() - ultimaRenovacao >= renovarACadaMs) {
+                                ultimaRenovacao = agoraMs()
+                                // Perder o canal no meio da fala é informação operacional:
+                                // o agente precisa parar de falar para o vazio.
+                                if (!piso.renovar(concessao)) throw CanalTomado()
+                            }
+
+                            for (quadro in fatiar(bloco)) {
+                                naoEntregues += enviar(transmissaoId, { sequencia++ }, quadro)
+                                marcarPrimeiroQuadroSePreciso()
+                            }
+                        }
                     }
+                } finally {
+                    // A vigia coleta um `SharedFlow` que nunca completa: sem este
+                    // cancelamento, `coroutineScope` esperaria por ela para sempre
+                    // e soltar o PTT nunca encerraria a fala.
+                    vigia.cancel()
                 }
             }
         } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
@@ -269,6 +367,22 @@ class SessaoPtt(
             aoEvento(EventoPtt.LimiteDeDuracao)
         } catch (e: CanalTomado) {
             aoEvento(EventoPtt.CanalPerdido)
+        } catch (e: CancellationException) {
+            // **Cancelar o escopo da fala é como a vigia interrompe a captura**, e
+            // o que chega aqui pode ser a `CanalTomado` original ou a exceção de
+            // cancelamento que o `Job` fabrica por cima dela — depende de qual
+            // corrotina foi desenrolada primeiro. Decidir pelo tipo da exceção
+            // seria decidir por detalhe de implementação do `kotlinx.coroutines`;
+            // a bandeira é o fato.
+            //
+            // Sem a bandeira, o cancelamento é o do PTT solto — o desfecho normal —
+            // e tem de seguir propagando: engoli-lo faria `aoSoltar` parar de
+            // encerrar a transmissão.
+            if (pisoPerdido.get() && currentCoroutineContext().isActive) {
+                aoEvento(EventoPtt.CanalPerdido)
+            } else {
+                throw e
+            }
         } finally {
             // **Soltar o PTT é cancelamento**, e chamada suspensa em `finally`
             // sob cancelamento falha na hora. Sem `NonCancellable`, o último
@@ -277,7 +391,15 @@ class SessaoPtt(
             // rádio. O timeout impede que um socket morto trave o encerramento.
             withContext(NonCancellable) {
                 withTimeoutOrNull(ENCERRAMENTO_MS) {
-                    encerrar(transmissaoId, sequencia, concessao)
+                    val devolucao = encerrar(transmissaoId, sequencia, concessao)
+                    // **Antes de `Encerrada`, e de propósito.** Depois dela o
+                    // agente já tirou o dedo do botão e voltou a atenção para a
+                    // ocorrência; o tom que diz "o canal ficou preso" tem de
+                    // chegar enquanto ele ainda está pensando no rádio.
+                    if (devolucao is ResultadoDaLiberacao.NaoDevolvido) {
+                        Log.w(TAG, "canal não devolvido em $transmissaoId: ${devolucao.motivo}")
+                        aoEvento(EventoPtt.CanalNaoDevolvido(devolucao.motivo))
+                    }
                     if (naoEntregues > 0) aoEvento(EventoPtt.QuadrosNaoEntregues(naoEntregues))
                     aoEvento(
                         EventoPtt.Encerrada(
@@ -372,8 +494,25 @@ class SessaoPtt(
         return naoEntregues
     }
 
-    /** Último quadro, fim de transmissão e devolução do canal. Nunca lança. */
-    private suspend fun encerrar(transmissaoId: String, sequencia: Int, concessao: Concessao) {
+    /**
+     * Último quadro, fim de transmissão e devolução do canal. Nunca lança.
+     *
+     * **Devolve o desfecho da devolução em vez de engoli-lo.** O `runCatching`
+     * daqui era a terceira das três camadas em que um `liberar_canal` falho
+     * desaparecia (as outras duas são `ClientesDePiso.kt:110-112` e `:142-157`).
+     * Ele continua existindo — uma exceção de rede no encerramento não pode
+     * derrubar o PTT —, mas agora a exceção **vira desfecho** em vez de virar
+     * nada.
+     *
+     * O último quadro e o `encerrar` do transporte ficam num `runCatching`
+     * próprio: um socket que morreu não pode impedir a **tentativa** de devolver
+     * o canal, que é a parte que a guarnição inteira paga.
+     */
+    private suspend fun encerrar(
+        transmissaoId: String,
+        sequencia: Int,
+        concessao: Concessao,
+    ): ResultadoDaLiberacao {
         runCatching {
             // O `ultimo` fecha o grupo mesmo incompleto — segurá-lo esperando
             // companhia deixaria o receptor aguardando uma fala que já acabou, e
@@ -381,7 +520,60 @@ class SessaoPtt(
             val ultimo = QuadroAudio(transmissaoId, sequencia, agoraMs(), ByteArray(0), ultimo = true)
             agrupador.oferecer(ultimo)?.let { transporte.enviarGrupo(it) }
             transporte.encerrar(transmissaoId)
-            piso.liberar(concessao)
+        }.onFailure { Log.w(TAG, "encerramento do fio falhou em $transmissaoId: ${it.message}") }
+
+        return runCatching { piso.liberar(concessao) }
+            .getOrElse { ResultadoDaLiberacao.NaoDevolvido(it.message ?: "exceção ao liberar") }
+    }
+
+    /**
+     * **Vigia a tomada do piso por emergência — para o interrompido saber NA HORA.**
+     *
+     * O defeito que ela fecha, medido em 22/08 pela bateria de caos: uma P1 tomava
+     * o canal e o interrompido só descobria na renovação seguinte. Com
+     * [RENOVAR_MS] = 5 000 ms, isso deu **4 640 ms de duas vozes no fio** — 232
+     * quadros — e quem recebia ouvia emergência e rotina misturadas. É exatamente
+     * o que o controle de piso existe para impedir.
+     *
+     * ## Por que o anúncio é o GATILHO e não a decisão
+     *
+     * O anúncio de fala já é difundido para o talk group inteiro, inclusive para
+     * quem está transmitindo: **o sinal já estava no fio e ninguém o lia**. Não
+     * há RPC novo, não há função de servidor nova, não há tráfego novo.
+     *
+     * Mas ele não pode ser a decisão. `AnuncioDeFala` é escrito pelo emissor, e
+     * um cliente forjado que anunciasse P1 sem ter o piso calaria qualquer agente
+     * do grupo — uma negação de serviço barata contra a guarnição, a mesma classe
+     * de defeito que a proibição de "identidade por parâmetro" (§2) evita. Por
+     * isso o anúncio apenas **antecipa a pergunta**: quem responde é o árbitro,
+     * por `renovar`, e é a resposta dele que corta a fala.
+     *
+     * ## Por que só P1, e só quando eu não sou P1
+     *
+     * São as duas condições sob as quais o piso muda de mão sem eu soltar o botão
+     * ([ControleDePiso.pedir]). Perguntar ao árbitro a cada anúncio de rotina
+     * gastaria RPC por um caso que não existe.
+     */
+    private suspend fun vigiarTomadaDoPiso(
+        transmissaoId: String,
+        minhaPrioridade: PrioridadeTransmissao,
+        concessao: Concessao,
+        aoPerder: suspend () -> Unit,
+    ) {
+        // Emergência não toma de emergência: não há o que vigiar.
+        if (minhaPrioridade == PrioridadeTransmissao.P1_EMERGENCIA) return
+
+        transporte.eventos().collect { evento ->
+            val anuncio = (evento as? EventoDeRede.Anuncio)?.anuncio ?: return@collect
+            if (anuncio.transmissaoId == transmissaoId) return@collect
+            if (anuncio.autorAgenteId == agenteId) return@collect
+            if (anuncio.prioridade != PrioridadeTransmissao.P1_EMERGENCIA) return@collect
+
+            if (!piso.renovar(concessao)) {
+                Log.i(TAG, "piso tomado por ${anuncio.transmissaoId}; cortando $transmissaoId")
+                telemetria?.contar(PISO_PERDIDO_POR_EMERGENCIA)
+                aoPerder()
+            }
         }
     }
 
@@ -404,5 +596,14 @@ class SessaoPtt(
          * `QUADROS_ENVIADOS` — e é este o número que o aceite (d) pede.
          */
         const val MENSAGENS_ENVIADAS = "mensagens_enviadas"
+
+        /**
+         * Quantas vezes uma emergência cortou esta fala **antes** da renovação.
+         *
+         * Contador e não adjetivo: é o que permite dizer, depois de um turno, se
+         * a vigia de tomada disparou alguma vez — e se ela parou de disparar
+         * porque o defeito voltou.
+         */
+        const val PISO_PERDIDO_POR_EMERGENCIA = "piso_perdido_por_emergencia"
     }
 }

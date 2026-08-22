@@ -7,6 +7,7 @@ import com.claryon.common.ClaryonError
 import com.claryon.common.Earcon
 import com.claryon.common.Result
 import com.claryon.net.AnuncioDeFala
+import com.claryon.net.ClienteDePiso
 import com.claryon.net.ClienteDePisoLocal
 import com.claryon.net.CodecDeVoz
 import com.claryon.net.EventoDeRede
@@ -67,6 +68,21 @@ class RadioTaticoTest {
 
         override val taxaDeSaidaHz = 24_000
         override fun liberar() = Unit
+    }
+
+    /**
+     * Piso local, mas **declarado como arbitrado pelo servidor**.
+     *
+     * Desde 22/08, `RadioTatico` fala *"Sem servidor. Piso local."* ao entrar em
+     * modo ativo com `ClienteDePisoLocal` — e toda fala do copiloto abre janela de
+     * supressão, então a captura fica descartada pelos ~2 s seguintes. Este arquivo
+     * mede outra coisa (taxa, telemetria, transcrição) e apertaria o PTT dentro
+     * dessa janela. O modo degradado tem teste próprio em `CaosDoRadioComNParesTest`.
+     */
+    private class PisoDeBancada(
+        private val real: ClienteDePiso = ClienteDePisoLocal(),
+    ) : ClienteDePiso by real {
+        override val arbitradoPeloServidor: Boolean get() = true
     }
 
     private class TransporteFake : TransporteAoVivo {
@@ -193,7 +209,7 @@ class RadioTaticoTest {
             aoMudarQuemFala = { quemFalou += it },
             transporte = transporte,
             codec = CodecFake(),
-            piso = ClienteDePisoLocal(),
+            piso = PisoDeBancada(),
             pcmDoMicrofone = { microfone.fluxo() },
             abrirFluxoDeSaida = { taxaHz -> saida.abrir(taxaHz) },
             emitir = { u -> emitidos.add(u) },
