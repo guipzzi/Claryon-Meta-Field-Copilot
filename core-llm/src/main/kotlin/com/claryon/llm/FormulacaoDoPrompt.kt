@@ -227,6 +227,99 @@ class FormulacaoDoPrompt(
          */
         val PRODUCAO: FormulacaoDoPrompt = SEM_ROTULO
 
+        /**
+         * **F5 — a instrução em inglês, a saída em português.** Muda **uma**
+         * coisa em relação a [SEM_ROTULO]: o idioma da instrução.
+         *
+         * A hipótese não é estética. O Llama 3.2 1B viu ordens de grandeza mais
+         * instrução em inglês que em português, e obedecer instrução é
+         * exatamente o que ele faz pior aqui — a tabela de 22/08 mostra
+         * meta-comentário, preâmbulo e número de artigo apesar de as três coisas
+         * estarem proibidas em português, no `system`.
+         *
+         * Se a obediência melhorar, o defeito era de idioma da instrução. Se não
+         * melhorar, fica medido que não era — e essa refutação vale, porque
+         * "escreva o prompt em inglês" é o conselho mais repetido sobre modelo
+         * pequeno e este projeto nunca o tinha medido.
+         */
+        val INSTRUCAO_EM_INGLES: FormulacaoDoPrompt = FormulacaoDoPrompt(
+            nome = "F5-instrucao-em-ingles",
+            instrucao = """
+                You rewrite excerpts of Brazilian law for a police officer to hear
+                over an earpiece. Answer in two short sentences, in Brazilian
+                Portuguese, using only what is written in the text the user sends.
+                Do not cite article numbers. Start directly, no preamble, no quotes.
+            """.trimIndent(),
+        ) { pedido ->
+            buildString {
+                append(pedido.pergunta.trim().removeSuffix(".")).append("?\n\n")
+                append(pedido.trecho).append('\n')
+            }
+        }
+
+        /**
+         * **F6 — extração com o trecho no contexto.** É a formulação da Pista 2:
+         * a instrução deixa de pedir reescrita e passa a pedir **recorte**.
+         *
+         * Ela é escrita para casar com [GramaticaDaFonte], que só admite
+         * sequências contíguas da fonte. Sem a gramática, ela é só mais um
+         * prompt e vale medir assim — a diferença entre "pedi para copiar" e
+         * "só deixei copiar" é justamente o que a Pista 2 põe em julgamento.
+         *
+         * A instrução não menciona gramática, formato nem restrição técnica: o
+         * modelo não precisa saber que está numa jaula, precisa saber qual é a
+         * tarefa.
+         */
+        val EXTRACAO_COM_TRECHO: FormulacaoDoPrompt = FormulacaoDoPrompt(
+            nome = "F6-extracao-com-trecho",
+            instrucao = """
+                Você responde a um policial pelo fone, em português do Brasil.
+                Copie do texto enviado o pedaço curto que responde à pergunta,
+                palavra por palavra, sem mudar nada e sem acrescentar nada.
+                Comece direto, sem preâmbulo e sem aspas.
+            """.trimIndent(),
+        ) { pedido ->
+            buildString {
+                append(pedido.pergunta.trim().removeSuffix(".")).append("?\n\n")
+                append(pedido.trecho).append('\n')
+            }
+        }
+
+        /**
+         * **F7 — extração SEM o trecho no contexto.** Muda **uma** coisa em
+         * relação a [EXTRACAO_COM_TRECHO]: o artigo sai do prompt.
+         *
+         * ## Por que isto não é absurdo, e por que é a aposta de latência
+         *
+         * Numa geração livre, tirar a fonte do contexto seria pedir alucinação.
+         * **Com a gramática de [GramaticaDaFonte] na cadeia, a fonte não está no
+         * contexto mas está na jaula:** os únicos tokens sorteáveis são os do
+         * trecho, em ordem. O modelo não escolhe o que dizer — escolhe **onde
+         * começar** entre as fronteiras de cláusula do artigo, e faz isso pela
+         * probabilidade condicionada à pergunta.
+         *
+         * O prêmio é o orçamento inteiro: o prefill cai de ~500 tokens para menos
+         * de 60, e é o prefill que estoura o prazo de 2 500 ms sozinho.
+         *
+         * O risco está declarado e é o resultado a medir: sem ver o artigo, a
+         * escolha do começo pode virar sorteio. **É esta formulação, e não a
+         * gramática, que pode reprovar a Pista 2.**
+         *
+         * **Ela não entrega o trecho ao modelo, e por isso não entra em [TODAS]**
+         * — `FormulacaoDoPromptTest.toda_formulacaoEntregaOTrecho` guarda aquela
+         * lista, e a guarda com razão: numa formulação de geração livre, prompt
+         * sem trecho é pedido para inventar norma.
+         */
+        val EXTRACAO_SO_A_PERGUNTA: FormulacaoDoPrompt = FormulacaoDoPrompt(
+            nome = "F7-extracao-so-a-pergunta",
+            instrucao = """
+                Você responde a um policial pelo fone, em português do Brasil.
+                Responda com o pedaço curto da lei que responde à pergunta,
+                palavra por palavra, sem acrescentar nada.
+                Comece direto, sem preâmbulo e sem aspas.
+            """.trimIndent(),
+        ) { pedido -> pedido.pergunta.trim().removeSuffix(".") + "?\n" }
+
         /** A bancada inteira, na ordem em que uma coisa muda por vez. */
         val TODAS: List<FormulacaoDoPrompt> = listOf(
             ANDAIME_EM_CAIXA_ALTA,
@@ -234,6 +327,21 @@ class FormulacaoDoPrompt(
             SEM_A_PERGUNTA,
             PROIBICOES_EXPLICITAS,
             UMA_FRASE,
+        )
+
+        /**
+         * [TODAS] mais as três de 22/08 (noite): o teste de idioma da Pista 1 e as
+         * duas de extração da Pista 2.
+         *
+         * Existe separada porque [TODAS] é a bancada de **prompt de geração
+         * livre**, comparada uma-coisa-por-vez contra F0, e as três novas mudam a
+         * tarefa — não o jeito de pedi-la. Misturá-las naquela lista faria a
+         * tabela histórica de 22/08 comparar coisas diferentes.
+         */
+        val TODAS_MEDIDAS: List<FormulacaoDoPrompt> = TODAS + listOf(
+            INSTRUCAO_EM_INGLES,
+            EXTRACAO_COM_TRECHO,
+            EXTRACAO_SO_A_PERGUNTA,
         )
     }
 }

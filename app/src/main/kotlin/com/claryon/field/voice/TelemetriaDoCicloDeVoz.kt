@@ -67,7 +67,9 @@ class TelemetriaDoCicloDeVoz(private val capacidade: Int = CAPACIDADE) : Telemet
     enum class Transicao(val rotulo: String, val metaMs: Long?) {
         /**
          * **A meta da palavra de ativação**, do roadmap da Fase 2: *"fim de 'Hey
-         * Claryon' → início do earcon `OUVI_VOCE`, p95 ≤ 500 ms"*.
+         * Claryon' → início do earcon de despertar, p95 ≤ 500 ms"* (o earcon era
+         * `OUVI_VOCE` e passou a ser `DESPERTAR` em 22/08 — ver `AudioSignals.kt`;
+         * o instante medido é o mesmo).
          *
          * Ficou sem produtor até 20/08, e o relatório dizia isso com estas
          * palavras: *"wake word: sem produtor (WakeWordDetector é interface sem
@@ -88,7 +90,7 @@ class TelemetriaDoCicloDeVoz(private val capacidade: Int = CAPACIDADE) : Telemet
          * **Fim do comando → "ouvi, estou trabalhando".**
          *
          * Esta métrica quase morreu sem ninguém notar. No caminho da voz existem
-         * DOIS earcons `OUVI_VOCE` — o de "pode falar", na detecção, e este — e
+         * DOIS earcons de ciclo — o do despertar, na detecção, e este — e
          * `EARCON_PLAYED` era primeiro-marco-vence: o instante registrado era o do
          * primeiro, anterior ao fim da fala, e a conta dava negativo.
          *
@@ -161,8 +163,11 @@ class TelemetriaDoCicloDeVoz(private val capacidade: Int = CAPACIDADE) : Telemet
     /**
      * Instante do earcon da ATIVAÇÃO, separado do earcon do comando.
      *
-     * Os dois são `Earcon.OUVI_VOCE` e chegam pelo mesmo estágio, então
-     * primeiro-marco-vence fazia o segundo desaparecer. Com o produto **sem botão**
+     * Os dois chegam pelo MESMO estágio (`EARCON_PLAYED`), então
+     * primeiro-marco-vence fazia o segundo desaparecer. Até 22/08 eles eram, além
+     * disso, o mesmo som (`OUVI_VOCE` nos dois); hoje são `DESPERTAR` e
+     * `CANAL_FECHADO`, e o desempate continua sendo por ESTÁGIO — quem sabe
+     * distinguir é quem conhece o ciclo, não quem conhece o timbre. Com o produto **sem botão**
      * — a palavra de ativação é a única entrada —, isso deixaria
      * `FIM_DA_FALA_ATE_EARCON`, que é meta de aceite, sem uma única amostra em
      * produção. Não "com poucas": zero, para sempre, sem erro.

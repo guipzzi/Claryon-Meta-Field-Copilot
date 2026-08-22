@@ -173,20 +173,40 @@ object SaidaUnica {
     /**
      * Traduz "começou a tocar isto" em marco de telemetria.
      *
-     * O earcon `OUVI_VOCE` é o do ciclo de voz — os outros tons (falha do rádio,
-     * prioritária, gravando) não pertencem a nenhum ciclo e não devem virar
-     * `EARCON_PLAYED`, senão a meta "fim da fala → earcon" passaria a medir um
-     * bipe do rádio que aconteceu no meio de outra coisa.
+     * ## Quais earcons pertencem a um ciclo de voz — e por que a lista é fechada
+     *
+     * Os outros tons (falha do rádio, prioritária, gravando) não pertencem a ciclo
+     * nenhum e **não** podem virar `EARCON_PLAYED`: a meta "fim da fala → earcon"
+     * passaria a medir um bipe do rádio que aconteceu no meio de outra coisa.
+     *
+     * **Desde 22/08 são dois earcons e não um.** Antes o ciclo emitia `OUVI_VOCE`
+     * duas vezes — na detecção da palavra e no fechamento do VAD —, e o KDoc do
+     * `CopilotService` já dizia que os dois "dizem coisas diferentes" enquanto os
+     * dois eram o mesmo som. Com a gramática do dono eles passaram a ser
+     * [Earcon.DESPERTAR] (BOMMM, "Claryon acordou") e [Earcon.CANAL_FECHADO]
+     * (trimtrim, "você parou de falar, o canal fechou"). O desempate entre os dois
+     * marcos continua em `TelemetriaDoCicloDeVoz.mark`, por **estágio** e não por
+     * earcon — então o que muda aqui é só quais tons entram na conta.
+     *
+     * [Earcon.CANAL_ABERTO] fica **de fora de propósito**: ele soa entre os dois, e
+     * `EARCON_PLAYED` é primeiro-marco-vence com desempate por estágio. Se ele
+     * entrasse, o instante dele — anterior à fala do agente — ocuparia o slot do
+     * earcon do COMANDO, e `FIM_DA_FALA_ATE_EARCON` passaria a medir um número
+     * negativo. É a mesma armadilha que `AtivacaoAteEarconTest` já documenta, por
+     * outra porta.
      */
     private fun marcarReproducao(sound: Sound) {
         val agora = System.currentTimeMillis()
         when {
-            sound is Sound.Tone && sound.earcon == Earcon.OUVI_VOCE ->
+            sound is Sound.Tone && sound.earcon in EARCONS_DO_CICLO ->
                 telemetriaDoCiclo.marcarNoCicloCorrente(Telemetry.Stage.EARCON_PLAYED, agora)
             sound is Sound.Speech ->
                 telemetriaDoCiclo.marcarNoCicloCorrente(Telemetry.Stage.RESPONSE_FIRST_AUDIO, agora)
         }
     }
+
+    /** Os dois earcons que marcam um ciclo de voz. Ver [marcarReproducao]. */
+    private val EARCONS_DO_CICLO = setOf(Earcon.DESPERTAR, Earcon.CANAL_FECHADO)
 
     /**
      * **Aquece o TTS antes de o agente falar.**

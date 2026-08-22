@@ -2,7 +2,13 @@
 // Evidência SEMPRE em EncryptedFile + chave no Android Keystore; jamais em
 // storage inseguro. Cada segmento recebe SHA-256 encadeado (adulterar 1 byte
 // quebra a cadeia de forma detectável e demonstrável em juízo — verificado em
-// teste instrumentado). Implementação: EncryptedEvidenceVault + HashChain.
+// teste instrumentado). O encadeamento sozinho é CEGO A REMOÇÃO NO FIM: quem
+// apaga os últimos segmentos e as linhas correspondentes deixa uma cadeia
+// perfeita. Por isso o manifesto v3 leva ÂNCORA DE FIM (HMAC do Keystore) e a
+// conferência fecha por falta — sem âncora válida, não há veredito de
+// integridade. Leia AncoraDeFim antes de citar isso: ela para quem tem o disco,
+// não quem executa como o app.
+// Implementação: EncryptedEvidenceVault + HashChain + AncoraDeFim.
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)

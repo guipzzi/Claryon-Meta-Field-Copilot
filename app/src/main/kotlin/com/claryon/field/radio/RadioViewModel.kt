@@ -11,6 +11,7 @@ import com.claryon.field.audio.AudioDoAgente
 import com.claryon.field.audio.SaidaUnica
 import com.claryon.audio.GlassesAudioRoute
 import com.claryon.common.Earcon
+import com.claryon.sound.EarconSynthesizer
 import com.claryon.common.Result
 import com.claryon.field.BuildConfig
 import com.claryon.field.agent.ClaryonIntentExecutor.TrocaDeGrupo
@@ -38,6 +39,7 @@ import com.claryon.net.TransporteAoVivo
 import com.claryon.net.TransporteRealtime
 import com.claryon.field.voice.EscutaDoAgente
 import kotlinx.coroutines.CoroutineScope
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -120,6 +122,16 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _falas = MutableStateFlow<List<FalaNoGrupo>>(emptyList())
     val falas: StateFlow<List<FalaNoGrupo>> = _falas.asStateFlow()
+
+    init {
+        // **Fora da main thread, e fora do construtor de verdade.** Ler `filesDir`
+        // no construtor é literalmente o defeito que custou 965 ms ao `SyncManager`
+        // — e o achado de lá foi que tirar o `mkdirs()` não resolveu, porque a E/S
+        // era do próprio `filesDir`. A recarga do canal só acontece depois de rede,
+        // então não há corrida: o arquivo está em memória muito antes de existir um
+        // balão para marcar.
+        viewModelScope.launch(Dispatchers.IO) { cortesConhecidos.carregar() }
+    }
 
     /**
      * `{indicativo → idade da posição em segundos}` — só de quem TEM posição.
@@ -513,7 +525,10 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
                 },
                 // Os earcons do rádio saem do mudo. Ver `saidaDoRadio`.
                 emitir = { u -> saidaDoRadio.emitir(u) },
-                duracaoDoEarconMs = { e -> duracaoDoEarcon(e) },
+                // Duração REAL do PCM, não tabela. Ver `EarconSynthesizer.duracaoMs`:
+                // a tabela à mão que morava aqui já divergia de três earcons, e a
+                // janela de supressão fechava antes do som acabar.
+                duracaoDoEarconMs = { e -> EarconSynthesizer.duracaoMs(e) },
                 aoMudarQuemFala = { quem -> _quemFala.value = quem },
                 // Compartilhado com `SaidaUnica`: é o que faz a fala do
                 // copiloto (que toca pela MESMA fila) suprimir a captura do
@@ -717,6 +732,68 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
         _falas.value = comTexto(_falas.value, transmissaoId, texto, propria)
     }
 
+    /**
+     * **A rede cortou a fala de um colega no meio.**
+     *
+     * Fecha o caminho que parou no meio em 22/08: `FimDaFala.CORTADA_NO_MEIO` chegava
+     * ao **ouvido** — earcon mais `FALA_DO_COLEGA_CORTADA` — e não chegava ao
+     * **balão**, que desenhava a fala truncada campo por campo igual à inteira. Quem
+     * estava de capacete ou fora do alcance do fone não recebia o fato por caminho
+     * nenhum.
+     *
+     * ---
+     * ### O conjunto existe porque o servidor não guarda isto
+     *
+     * Marcar só a lista viva não bastaria, e o defeito seria pior que a ausência: o
+     * `carregarCanal` faz poll a cada 10 s e **reconstrói toda fala recebida a partir
+     * do servidor**, onde `cortadaPelaRede` nasce `false`. A marca apareceria e
+     * sumiria sozinha na próxima volta — um sinal que pisca é menos confiável que
+     * sinal nenhum, porque ensina o agente a duvidar do que a tela mostra.
+     *
+     * `transmissions` não tem coluna para o motivo do fim, e não é omissão a
+     * consertar aqui: o corte é um fato do **receptor** — o emissor sumiu sem
+     * anunciar nada, e é o `core-net/Receptor.kt` deste aparelho que conclui isso
+     * depois de esperar a janela de jitter inteira. Quem observou é quem guarda.
+     *
+     * Vive em RAM e morre com o processo, de propósito. Não é evidência e não vai
+     * para disco; e o `adotarCanalCorrente` o esvazia junto com `_falas`, porque id
+     * de transmissão de outra guarnição não tem o que marcar nesta.
+     *
+     * Idempotente nos dois níveis — o `Set` e `comCorteDaRede` —, porque `Terminou`
+     * chega uma vez por transmissão e recompor uma lista que rola custa quadro.
+     */
+    private fun marcarCorteDaRede(transmissaoId: String) {
+        _falas.value = comCorteDaRede(_falas.value, transmissaoId)
+        // Só grava quando o id é novo — `marcar` devolve `false` para repetido, e
+        // uma escrita por evento reentregue seria E/S no caminho de uma lista que
+        // rola. A gravação sai da main thread pelo mesmo motivo que derrubou 965 ms
+        // do `SyncManager`: E/S em `filesDir` não é barata só por ser pequena.
+        if (cortesConhecidos.marcar(transmissaoId)) {
+            viewModelScope.launch(Dispatchers.IO) { cortesConhecidos.gravar() }
+        }
+    }
+
+    /**
+     * Os ids que este aparelho **ouviu** terminarem no meio — em disco, não em RAM.
+     *
+     * Era um `mutableSetOf` de processo, e isso era um defeito com prazo: o serviço é
+     * `START_STICKY`, o sistema o recria, e depois disso uma fala cortada voltava a
+     * parecer inteira sem que nada na tela dissesse que a informação se perdeu. O
+     * aparelho **tinha** o fato, de primeira mão, e o esquecia.
+     *
+     * A escolha de gravar local em vez de mandar ao servidor está por extenso no
+     * KDoc de [CortesConhecidos], e o resumo é: o corte é conclusão do receptor, e
+     * dois receptores da mesma transmissão podem discordar com razão.
+     *
+     * **Não é limpo na troca de guarnição.** `transmissaoId` é único por transmissão,
+     * então id de outro canal não casa com balão nenhum deste — e limpar faria o
+     * agente que volta para a guarnição anterior perder marcas ainda válidas. Quem
+     * limita o crescimento é a poda por validade e teto, não o esquecimento.
+     */
+    private val cortesConhecidos = CortesConhecidos(
+        File(getApplication<Application>().filesDir, CortesConhecidos.NOME),
+    )
+
     private suspend fun carregarCanal(canal: String, historico: HistoricoDoCanal) {
         historico.falas(canal).onSuccess { lista ->
             // As inserções otimistas que o servidor ainda não ecoou sobrevivem à
@@ -736,6 +813,11 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
                     // deixaria de significar urgência.
                     prioridade = f.prioridade.takeIf { f.tipo == "alerta" },
                     entrega = FalaNoGrupo.Entrega.RECEBIDA,
+                    // **Sobrevive à recarga.** O servidor não guarda o motivo do fim
+                    // — `transmissions` não tem a coluna —, então sem esta linha a
+                    // marca aplicada ao vivo sumiria na volta seguinte do poll, dez
+                    // segundos depois. Ver `marcarCorteDaRede`.
+                    cortadaPelaRede = f.id in cortesConhecidos,
                 )
             } + locaisPendentes
         }
@@ -1115,10 +1197,18 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
      * eles servem ao `logcat` e à tela, que são outros públicos.
      */
     private suspend fun pisoDoCanal(agenteId: String): ClienteDePiso {
-        // **`tokenValido()`, não `tokenCorrente`.** O segundo é cache da última
-        // credencial JÁ validada, e logo depois do login ninguém validou nada
-        // ainda: a decisão caía em LOCAL e ficava assim o turno inteiro, porque é
-        // tomada uma vez só, aqui.
+        // **`tokenValido()`, não `tokenSemEsperar()`. E aqui ESPERAR é o certo.**
+        //
+        // A razão escrita aqui até 22/08 era outra e envelheceu: dizia que
+        // `tokenCorrente` era "cache da última credencial já validada". Ele deixou de
+        // ser campo — hoje lê o cofre e confere validade. A **escolha** continua
+        // certa; só o motivo mudou, e é este:
+        //
+        // Este ponto roda **uma vez por abertura de canal**, fora do caminho de voz.
+        // O que não pode esperar é o ciclo de voz — e é por isso que
+        // `CopilotoDoAgente` usa `tokenSemEsperar()`, que responde de memória e renova
+        // ao fundo. Aqui, esperar a renovação é preferível a decidir errado: a decisão
+        // é tomada uma vez só e vale o turno inteiro.
         //
         // O sintoma era visível e ninguém ligava os pontos: no emulador, um login
         // bem-sucedido era seguido de "piso LOCAL: sem sessão" um segundo depois.
@@ -1153,10 +1243,6 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
     var pisoRemoto: Boolean = false
         private set
 
-    private fun duracaoDoEarcon(earcon: Earcon): Long = when (earcon) {
-        Earcon.GRAVANDO -> 2_000L
-        else -> 320L
-    }
 
     override fun onCleared() {
         // ANTES de `fechar()`: o lambda registrado segura este ViewModel, e um

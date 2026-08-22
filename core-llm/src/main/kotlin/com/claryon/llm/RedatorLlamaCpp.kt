@@ -24,9 +24,82 @@ internal object NativoDoRedator {
         prazoMs: Int,
     ): String?
 
+    /**
+     * A mesma geração com a cadeia de amostragem montada por chamada e uma GBNF
+     * opcional. Ver o KDoc do lado C++ — inclusive a ordem da cadeia, que não é
+     * livre.
+     *
+     * [gramatica] `null` significa geração livre. GBNF que não compila devolve
+     * `null`, e **não** cai para geração livre: a queda silenciosa transformaria
+     * "extração garantida" em "extração quando deu".
+     */
+    external fun nativoRedigirComOpcoes(
+        handle: Long,
+        sistema: String,
+        usuario: String,
+        gramatica: String?,
+        maxTokens: Int,
+        prazoMs: Int,
+        temperatura: Float,
+        minP: Float,
+        penalidade: Float,
+        semente: Int,
+    ): String?
+
+    /** `[prefill_ms, gramatica_us, amostragem_us, prompt_tok, gerados, decode_rc]`. */
+    external fun nativoUltimasMetricas(handle: Long): LongArray?
+
+    /** Microssegundos para compilar [gramatica] [repeticoes] vezes, ou `-1`. */
+    external fun nativoMedirGramatica(handle: Long, gramatica: String, repeticoes: Int): Long
+
     external fun nativoLiberar(handle: Long)
     external fun nativoTamanhoDoModelo(handle: Long): Long
 }
+
+/**
+ * Os parâmetros da cadeia de amostragem, para que trocá-los seja medição e não
+ * alegação.
+ *
+ * O padrão reproduz **exatamente** a cadeia que `nativoCarregar` monta desde
+ * 20/08, e a justificativa daquela escolha está no C++: amostragem morna e não
+ * gulosa, porque guloso entra em laço (*"…o condutor. o condutor."*) quando o
+ * trecho é curto, e laço dentro de um teto de tempo vira resposta truncada.
+ *
+ * @property temperatura `0` liga o amostrador guloso de verdade
+ *   (`llama_sampler_init_greedy`), e não `temp(0)`, que divide por zero.
+ * @property minP corta a cauda absurda melhor que `top_p` em modelo pequeno.
+ * @property penalidade `1.0` desliga. Com gramática ela é suspeita: penalizar
+ *   repetição empurra o modelo para fora do trecho, e fora do trecho a gramática
+ *   não deixa ir — o efeito prático é sortear entre o que sobrou.
+ * @property semente fixa, e não `LLAMA_DEFAULT_SEED`: com semente aleatória,
+ *   medir duas vezes daria textos de tamanhos diferentes e a comparação entre
+ *   execuções deixaria de significar alguma coisa.
+ */
+data class OpcoesDeAmostragem(
+    val temperatura: Float = 0.3f,
+    val minP: Float = 0.05f,
+    val penalidade: Float = 1.1f,
+    val semente: Int = 1234,
+)
+
+/**
+ * O custo da última geração, decomposto — porque "2 510 ms" não diz se o tempo
+ * foi do prefill, da amostragem ou de compilar gramática, e as três têm conserto
+ * diferente.
+ *
+ * @property gramaticaUs `-1` quando não houve gramática. Não é `0`: zero seria um
+ *   custo medido.
+ * @property decodeRc `0` normal · `2` abortado pelo prazo **antes de o prompt
+ *   entrar** · outro valor, motor quebrado.
+ */
+data class MetricasDaGeracao(
+    val prefillMs: Long,
+    val gramaticaUs: Long,
+    val amostragemUs: Long,
+    val promptTok: Long,
+    val gerados: Long,
+    val decodeRc: Long,
+)
 
 /**
  * **A Etapa B rodando de verdade: llama.cpp, 100% no aparelho.**
@@ -69,6 +142,8 @@ class RedatorLlamaCpp(
     private val guarda: GuardaDaRedacao = GuardaDaRedacao(),
     private val despachante: CoroutineDispatcher = Dispatchers.Default,
     private val formulacao: FormulacaoDoPrompt = FormulacaoDoPrompt.PRODUCAO,
+    private val opcoes: OpcoesDeAmostragem? = null,
+    private val gramaticaDe: ((PedidoDeRedacao) -> String?)? = null,
 ) : Redator {
 
     @Volatile
@@ -108,14 +183,37 @@ class RedatorLlamaCpp(
     override suspend fun redigir(pedido: PedidoDeRedacao): String? = withContext(despachante) {
         if (handle == 0L && !preparar()) return@withContext null
 
+        // **O caminho de produção continua sendo o de sempre.** `nativoRedigir`
+        // usa a cadeia montada uma vez em `nativoCarregar`; `nativoRedigirComOpcoes`
+        // monta uma por chamada, o que é obrigatório quando há gramática (ela
+        // deriva do trecho e muda a cada consulta) e é o que a bancada usa para
+        // comparar braços sem recarregar 800 MB entre eles. Sem `opcoes` e sem
+        // `gramaticaDe`, nada muda — nem a cadeia, nem o estado que ela carrega.
+        val gbnf = gramaticaDe?.invoke(pedido)
         val gerado = runCatching {
-            NativoDoRedator.nativoRedigir(
-                handle,
-                formulacao.instrucao,
-                formulacao.usuario(pedido),
-                maxTokens,
-                prazoMs,
-            )
+            if (opcoes == null && gbnf == null) {
+                NativoDoRedator.nativoRedigir(
+                    handle,
+                    formulacao.instrucao,
+                    formulacao.usuario(pedido),
+                    maxTokens,
+                    prazoMs,
+                )
+            } else {
+                val o = opcoes ?: OpcoesDeAmostragem()
+                NativoDoRedator.nativoRedigirComOpcoes(
+                    handle,
+                    formulacao.instrucao,
+                    formulacao.usuario(pedido),
+                    gbnf,
+                    maxTokens,
+                    prazoMs,
+                    o.temperatura,
+                    o.minP,
+                    o.penalidade,
+                    o.semente,
+                )
+            }
         }.onFailure { Log.e(TAG, "redator: geração falhou", it) }.getOrNull()
             ?: return@withContext null
 
@@ -166,6 +264,85 @@ class RedatorLlamaCpp(
             )
         }
         aprovado
+    }
+
+    /**
+     * **Uma geração com formulação, amostragem e gramática escolhidas na chamada
+     * — e sem o guarda.** Devolve o texto CRU, ou `null`.
+     *
+     * ## Por que isto não é `redigir()` com mais parâmetros
+     *
+     * `redigir` é o contrato de produto: ele decide pela configuração da
+     * instância e passa o resultado pelo [GuardaDaRedacao]. Esta função existe
+     * para a bancada e faz o contrário — não julga nada, e deixa quem mede
+     * aplicar o guarda por fora, que é como o número de recusas vira dado em vez
+     * de sumir dentro de um `null`.
+     *
+     * ## E por que ela não é uma instância por braço
+     *
+     * Porque uma instância por braço é uma **carga de 800 MB por braço**: 2,4 s e
+     * 1,47 GiB de PSS cada vez, medidos em 22/08. Com oito braços sobre vinte
+     * perguntas isso é vinte minutos só de `mmap`, num emulador que já morreu no
+     * meio de bancada antes. A cadeia de amostragem é montada por chamada no
+     * `nativoRedigirComOpcoes`, então trocar de braço aqui **não** carrega estado
+     * de um para o outro — que era o motivo original de recarregar.
+     *
+     * O chamador é `app/src/androidTest/.../bench/DuasPistasDaEtapaBTest`. Não há
+     * chamador em `src/main`, e isso é intencional e não é a armadilha do
+     * `CLAUDE.md` §6: instrumento de medição não é capacidade de produto.
+     */
+    suspend fun redigirNaBancada(
+        pedido: PedidoDeRedacao,
+        formulacao: FormulacaoDoPrompt,
+        opcoes: OpcoesDeAmostragem,
+        gbnf: String?,
+        prazoMs: Int = this.prazoMs,
+        maxTokens: Int = this.maxTokens,
+    ): String? = withContext(despachante) {
+        if (handle == 0L && !preparar()) return@withContext null
+        runCatching {
+            NativoDoRedator.nativoRedigirComOpcoes(
+                handle,
+                formulacao.instrucao,
+                formulacao.usuario(pedido),
+                gbnf,
+                maxTokens,
+                prazoMs,
+                opcoes.temperatura,
+                opcoes.minP,
+                opcoes.penalidade,
+                opcoes.semente,
+            )
+        }.onFailure { Log.e(TAG, "redator: geração de bancada falhou", it) }.getOrNull()
+    }
+
+    /**
+     * As métricas da última geração desta instância, ou `null` se ainda não
+     * houve nenhuma. **Serve à bancada, não ao caminho crítico** — ler isto
+     * dentro do ciclo de voz não custaria nada, mas o produto não tem o que
+     * decidir com o número.
+     */
+    fun ultimasMetricas(): MetricasDaGeracao? {
+        val h = handle
+        if (h == 0L) return null
+        val v = runCatching { NativoDoRedator.nativoUltimasMetricas(h) }.getOrNull()
+        if (v == null || v.size < 6) return null
+        return MetricasDaGeracao(v[0], v[1], v[2], v[3], v[4], v[5])
+    }
+
+    /**
+     * Microssegundos para compilar [gbnf] [repeticoes] vezes contra o vocabulário
+     * deste modelo, ou `-1` quando ela não compila.
+     *
+     * Existe isolado da geração porque **o custo de compilar é o número que
+     * decide se a Pista 2 cabe no orçamento**, e medi-lo por dentro de uma
+     * geração o misturaria com prefill e amostragem.
+     */
+    fun medirGramatica(gbnf: String, repeticoes: Int = 1): Long {
+        val h = handle
+        if (h == 0L) return -1
+        return runCatching { NativoDoRedator.nativoMedirGramatica(h, gbnf, repeticoes) }
+            .getOrDefault(-1)
     }
 
     override fun liberar() {

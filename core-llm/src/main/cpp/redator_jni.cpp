@@ -20,6 +20,7 @@
 //   llama_vocab_is_eog(vocab, token)                                   :1096
 //   llama_set_abort_callback(ctx, cb, data)                            :1012
 //   llama_memory_clear(llama_get_memory(ctx), data)                    :730
+//   llama_sampler_init_grammar(vocab, grammar_str, grammar_root)       :1415
 #include <jni.h>
 
 #include <android/log.h>
@@ -50,11 +51,30 @@ void redirecionar_log(ggml_log_level nivel, const char * texto, void *) {
 
 std::atomic<bool> backend_iniciado{false};
 
+/// **O custo da ultima geracao, decomposto.** Existe porque "2 510 ms" nao diz
+/// se o tempo foi do prefill, da amostragem ou de compilar gramatica — e as tres
+/// tem conserto diferente. Sem esta decomposicao, medir a Pista 2 seria comparar
+/// dois totais e chutar a causa.
+///
+/// Escrito por `gerar()` e lido por `nativoUltimasMetricas`. Uma geracao por vez
+/// por sessao: o Kotlin serializa em `Dispatchers.Default` e a bancada e
+/// sequencial. Nao e estrutura concorrente e nao se pretende.
+struct Metricas {
+    int64_t prefill_ms    = -1;  // `llama_decode` do prompt inteiro.
+    int64_t gramatica_us  = -1;  // `llama_sampler_init_grammar`. -1 = sem gramatica.
+    int64_t amostragem_us = -1;  // soma de `llama_sampler_sample` na geracao.
+    int64_t prompt_tok    = -1;
+    int64_t gerados       = -1;
+    int64_t decode_rc     = -1;  // 0 ok · 2 abortado pelo prazo · outro = quebrado.
+};
+
 /// Tudo o que uma sessao de redacao precisa. Um por modelo carregado.
 struct Sessao {
     llama_model *   modelo = nullptr;
     llama_context * ctx    = nullptr;
     llama_sampler * smpl   = nullptr;
+
+    Metricas metricas;
 
     // Prazo da geracao corrente, em relogio monotonico. O `abort_callback` do
     // llama le isto a cada no do grafo: sem ele, um modelo que resolva divagar
@@ -67,6 +87,11 @@ struct Sessao {
 int64_t agora_ms() {
     using namespace std::chrono;
     return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
+}
+
+int64_t agora_us() {
+    using namespace std::chrono;
+    return duration_cast<microseconds>(steady_clock::now().time_since_epoch()).count();
 }
 
 bool abortar(void * dados) {
@@ -93,6 +118,120 @@ std::string pedaco(const llama_vocab * vocab, llama_token token) {
         return m <= 0 ? std::string{} : std::string(maior.data(), static_cast<size_t>(m));
     }
     return std::string(buf, static_cast<size_t>(n));
+}
+
+/// Formata `sistema` + `usuario` pelo template de chat do PROPRIO modelo.
+///
+/// **O template vem do modelo, nao de uma string escrita aqui.** Prompt no
+/// formato errado nao da erro: da resposta pior, em silencio — que e o modo de
+/// falha mais caro deste projeto.
+std::string montar_prompt(Sessao * s, const std::string & sistema, const std::string & usuario) {
+    const char * tmpl = llama_model_chat_template(s->modelo, /*name=*/nullptr);
+
+    llama_chat_message msgs[2] = {
+        {"system", sistema.c_str()},
+        {"user",   usuario.c_str()},
+    };
+    std::vector<char> buf(sistema.size() * 2 + usuario.size() * 2 + 1024);
+    int32_t n = llama_chat_apply_template(tmpl, msgs, 2, /*add_ass=*/true,
+                                          buf.data(), static_cast<int32_t>(buf.size()));
+    if (n > static_cast<int32_t>(buf.size())) {
+        buf.resize(static_cast<size_t>(n) + 1);
+        n = llama_chat_apply_template(tmpl, msgs, 2, true, buf.data(),
+                                      static_cast<int32_t>(buf.size()));
+    }
+    if (n <= 0) {
+        // Modelo sem template embutido: cai para um formato simples em vez de
+        // falhar. Degradar e melhor que mudez, e o Kotlin ainda filtra a saida.
+        LOGE("redator: modelo sem chat template (n=%d) — usando formato simples", n);
+        return sistema + "\n\n" + usuario + "\n";
+    }
+    return std::string(buf.data(), static_cast<size_t>(n));
+}
+
+/// Tokeniza, faz o prefill, gera com [smpl] e preenche `s->metricas`.
+///
+/// Devolve `false` so quando nao houve como gerar nada — inclusive quando o
+/// prazo mordeu ANTES de o prompt entrar, que e um caso distinto de "gerou
+/// vazio" e vira `decode_rc == 2` nas metricas.
+bool gerar(Sessao * s, const std::string & prompt, llama_sampler * smpl,
+           int32_t max_tokens, int32_t prazo_ms, std::string & saida) {
+
+    const llama_vocab * vocab = llama_model_get_vocab(s->modelo);
+
+    // Contexto limpo a cada redacao: uma resposta NUNCA pode carregar o trecho
+    // recuperado da pergunta anterior. Sem isto, "so fala sobre o que foi
+    // recuperado" vazaria entre perguntas e ninguem veria.
+    llama_memory_clear(llama_get_memory(s->ctx), /*data=*/true);
+
+    std::vector<llama_token> tokens(prompt.size() + 64);
+    int32_t n_tok = llama_tokenize(vocab, prompt.c_str(), static_cast<int32_t>(prompt.size()),
+                                   tokens.data(), static_cast<int32_t>(tokens.size()),
+                                   /*add_special=*/true, /*parse_special=*/true);
+    if (n_tok < 0) {
+        tokens.resize(static_cast<size_t>(-n_tok));
+        n_tok = llama_tokenize(vocab, prompt.c_str(), static_cast<int32_t>(prompt.size()),
+                               tokens.data(), static_cast<int32_t>(tokens.size()), true, true);
+    }
+    if (n_tok <= 0) {
+        LOGE("redator: tokenizacao devolveu %d", n_tok);
+        return false;
+    }
+    tokens.resize(static_cast<size_t>(n_tok));
+    s->metricas.prompt_tok = n_tok;
+
+    const int32_t teto = static_cast<int32_t>(llama_n_ctx(s->ctx));
+    if (n_tok >= teto) {
+        LOGE("redator: prompt de %d tokens nao cabe no contexto de %d", n_tok, teto);
+        return false;
+    }
+
+    s->prazo_ms.store(prazo_ms > 0 ? agora_ms() + prazo_ms : 0, std::memory_order_relaxed);
+
+    const int64_t t0 = agora_ms();
+    const int32_t r = llama_decode(s->ctx, llama_batch_get_one(tokens.data(), n_tok));
+    s->metricas.decode_rc  = r;
+    s->metricas.prefill_ms = agora_ms() - t0;
+    if (r != 0) {
+        // **Distinguir abortado de quebrado, porque a acao e diferente.** `2` e
+        // o codigo de abortado (llama.h:981), e aqui ele significa uma coisa so:
+        // o PRAZO acabou antes de o prompt entrar. Isso e diagnostico de
+        // aparelho lento — nao de bug —, e ficou meses invisivel na primeira
+        // versao deste arquivo, que logava "llama_decode falhou" para os dois.
+        LOGE("redator: llama_decode devolveu %d no prompt de %d tokens apos %lld ms%s",
+             r, n_tok, static_cast<long long>(s->metricas.prefill_ms),
+             r == 2 ? " (ABORTADO PELO PRAZO — aparelho lento para este modelo)" : "");
+        s->prazo_ms.store(0, std::memory_order_relaxed);
+        return false;
+    }
+    const int64_t t_prompt = s->metricas.prefill_ms;
+
+    int64_t amostragem_us = 0;
+    int32_t gerados = 0;
+    const int32_t limite = max_tokens > 0 ? max_tokens : 128;
+    for (; gerados < limite && n_tok + gerados < teto; ++gerados) {
+        const int64_t ta = agora_us();
+        const llama_token id = llama_sampler_sample(smpl, s->ctx, -1);
+        amostragem_us += agora_us() - ta;
+        if (llama_vocab_is_eog(vocab, id)) break;
+        saida += pedaco(vocab, id);
+        llama_token proximo = id;
+        if (llama_decode(s->ctx, llama_batch_get_one(&proximo, 1)) != 0) break;
+        if (abortar(s)) break;
+    }
+    const int64_t t_total = agora_ms() - t0;
+    s->prazo_ms.store(0, std::memory_order_relaxed);
+    s->metricas.gerados       = gerados;
+    s->metricas.amostragem_us = amostragem_us;
+
+    // Numero medido no aparelho, no logcat do projeto. E como o §6 do CLAUDE.md
+    // pede que latencia seja afirmada: lida, nao estimada.
+    LOGI("redator: prompt %d tok em %lld ms · gerou %d tok em %lld ms "
+         "(amostragem %lld us) (total %lld ms)",
+         n_tok, static_cast<long long>(t_prompt), gerados,
+         static_cast<long long>(t_total - t_prompt),
+         static_cast<long long>(amostragem_us), static_cast<long long>(t_total));
+    return true;
 }
 
 }  // namespace
@@ -194,103 +333,141 @@ Java_com_claryon_llm_NativoDoRedator_nativoRedigir(
     auto * s = reinterpret_cast<Sessao *>(handle);
     if (s == nullptr) return nullptr;
 
-    const std::string txt_sistema = paraUtf8(env, sistema);
-    const std::string txt_usuario = paraUtf8(env, usuario);
-
-    // **O template vem do modelo, nao de uma string escrita aqui.** Prompt no
-    // formato errado nao da erro: da resposta pior, em silencio — que e o modo
-    // de falha mais caro deste projeto.
-    const char * tmpl = llama_model_chat_template(s->modelo, /*name=*/nullptr);
-
-    llama_chat_message msgs[2] = {
-        {"system", txt_sistema.c_str()},
-        {"user",   txt_usuario.c_str()},
-    };
-    std::vector<char> buf(txt_sistema.size() * 2 + txt_usuario.size() * 2 + 1024);
-    int32_t n = llama_chat_apply_template(tmpl, msgs, 2, /*add_ass=*/true,
-                                          buf.data(), static_cast<int32_t>(buf.size()));
-    if (n > static_cast<int32_t>(buf.size())) {
-        buf.resize(static_cast<size_t>(n) + 1);
-        n = llama_chat_apply_template(tmpl, msgs, 2, true, buf.data(),
-                                      static_cast<int32_t>(buf.size()));
-    }
-    std::string prompt;
-    if (n <= 0) {
-        // Modelo sem template embutido: cai para um formato simples em vez de
-        // falhar. Degradar e melhor que mudez, e o Kotlin ainda filtra a saida.
-        LOGE("redator: modelo sem chat template (n=%d) — usando formato simples", n);
-        prompt = txt_sistema + "\n\n" + txt_usuario + "\n";
-    } else {
-        prompt.assign(buf.data(), static_cast<size_t>(n));
-    }
-
-    const llama_vocab * vocab = llama_model_get_vocab(s->modelo);
-
-    // Contexto limpo a cada redacao: uma resposta NUNCA pode carregar o trecho
-    // recuperado da pergunta anterior. Sem isto, "so fala sobre o que foi
-    // recuperado" vazaria entre perguntas e ninguem veria.
-    llama_memory_clear(llama_get_memory(s->ctx), /*data=*/true);
-
-    std::vector<llama_token> tokens(prompt.size() + 64);
-    int32_t n_tok = llama_tokenize(vocab, prompt.c_str(), static_cast<int32_t>(prompt.size()),
-                                   tokens.data(), static_cast<int32_t>(tokens.size()),
-                                   /*add_special=*/true, /*parse_special=*/true);
-    if (n_tok < 0) {
-        tokens.resize(static_cast<size_t>(-n_tok));
-        n_tok = llama_tokenize(vocab, prompt.c_str(), static_cast<int32_t>(prompt.size()),
-                               tokens.data(), static_cast<int32_t>(tokens.size()), true, true);
-    }
-    if (n_tok <= 0) {
-        LOGE("redator: tokenizacao devolveu %d", n_tok);
-        return nullptr;
-    }
-    tokens.resize(static_cast<size_t>(n_tok));
-
-    const int32_t teto = static_cast<int32_t>(llama_n_ctx(s->ctx));
-    if (n_tok >= teto) {
-        LOGE("redator: prompt de %d tokens nao cabe no contexto de %d", n_tok, teto);
-        return nullptr;
-    }
-
-    s->prazo_ms.store(prazo_ms > 0 ? agora_ms() + prazo_ms : 0, std::memory_order_relaxed);
-
-    const int64_t t0 = agora_ms();
-    const int32_t r = llama_decode(s->ctx, llama_batch_get_one(tokens.data(), n_tok));
-    if (r != 0) {
-        // **Distinguir abortado de quebrado, porque a acao e diferente.** `2` e
-        // o codigo de abortado (llama.h:981), e aqui ele significa uma coisa so:
-        // o PRAZO acabou antes de o prompt entrar. Isso e diagnostico de
-        // aparelho lento — nao de bug —, e ficou meses invisivel na primeira
-        // versao deste arquivo, que logava "llama_decode falhou" para os dois.
-        LOGE("redator: llama_decode devolveu %d no prompt de %d tokens apos %lld ms%s",
-             r, n_tok, static_cast<long long>(agora_ms() - t0),
-             r == 2 ? " (ABORTADO PELO PRAZO — aparelho lento para este modelo)" : "");
-        s->prazo_ms.store(0, std::memory_order_relaxed);
-        return nullptr;
-    }
-    const int64_t t_prompt = agora_ms() - t0;
+    s->metricas = Metricas{};
+    const std::string prompt = montar_prompt(s, paraUtf8(env, sistema), paraUtf8(env, usuario));
 
     std::string saida;
-    int32_t gerados = 0;
-    const int32_t limite = max_tokens > 0 ? max_tokens : 128;
-    for (; gerados < limite && n_tok + gerados < teto; ++gerados) {
-        const llama_token id = llama_sampler_sample(s->smpl, s->ctx, -1);
-        if (llama_vocab_is_eog(vocab, id)) break;
-        saida += pedaco(vocab, id);
-        llama_token proximo = id;
-        if (llama_decode(s->ctx, llama_batch_get_one(&proximo, 1)) != 0) break;
-        if (abortar(s)) break;
-    }
-    const int64_t t_total = agora_ms() - t0;
-    s->prazo_ms.store(0, std::memory_order_relaxed);
-
-    // Numero medido no aparelho, no logcat do projeto. E como o §6 do CLAUDE.md
-    // pede que latencia seja afirmada: lida, nao estimada.
-    LOGI("redator: prompt %d tok em %lld ms · gerou %d tok em %lld ms (total %lld ms)",
-         n_tok, static_cast<long long>(t_prompt), gerados,
-         static_cast<long long>(t_total - t_prompt), static_cast<long long>(t_total));
-
+    if (!gerar(s, prompt, s->smpl, max_tokens, prazo_ms, saida)) return nullptr;
     return env->NewStringUTF(saida.c_str());
+}
+
+/// **A mesma geracao, com a cadeia de amostragem montada POR CHAMADA — e com
+/// gramatica opcional.**
+///
+/// Existe por tres motivos, e nenhum deles e conveniencia:
+///
+///  1. **Gramatica e por consulta.** A da Pista 2 e derivada do TRECHO
+///     recuperado, entao ela muda a cada pergunta e nao ha como montar uma so no
+///     `nativoCarregar`. `llama_sampler_init_grammar` (llama.h:1415) compila GBNF
+///     contra o vocabulario; o custo dessa compilacao e um dos numeros pedidos, e
+///     por isso ele e cronometrado sozinho, em microssegundos.
+///  2. **Cadeia nova zera o estado.** `penalties` guarda os ultimos 64 tokens e
+///     `dist` carrega o RNG. Reusar a cadeia entre dois bracos de bancada faria o
+///     segundo comecar de um estado que o primeiro produziu, e a diferenca medida
+///     seria em parte a semente. O KDoc de `OrcamentoDaEtapaBNoAparelhoTest` ja
+///     registrava isso, e pagava carregando o modelo de novo — 2,4 s por braco.
+///  3. **Temperatura e penalidade viram parametro**, para que "a Pista 1 tentou
+///     amostragem" seja medicao e nao alegacao.
+///
+/// A ORDEM da cadeia importa e nao e livre: gramatica PRIMEIRO, sobre os logits
+/// crus. Depois dela vem penalidade, corte de cauda, temperatura e sorteio — a
+/// mesma ordem do `common_sampler` do upstream. Gramatica depois do corte
+/// poderia zerar o conjunto inteiro e o sorteio ficaria sobre `-inf`.
+///
+/// Gramatica invalida devolve `null` e loga: **falhar alto**. Cair em silencio
+/// para a geracao livre transformaria "extracao garantida" em "extracao quando
+/// deu", que e a mentira que a Pista 2 existe para nao contar.
+JNIEXPORT jstring JNICALL
+Java_com_claryon_llm_NativoDoRedator_nativoRedigirComOpcoes(
+    JNIEnv * env, jobject, jlong handle, jstring sistema, jstring usuario, jstring gramatica,
+    jint max_tokens, jint prazo_ms, jfloat temperatura, jfloat min_p, jfloat penalidade,
+    jint semente) {
+
+    auto * s = reinterpret_cast<Sessao *>(handle);
+    if (s == nullptr) return nullptr;
+
+    s->metricas = Metricas{};
+    const llama_vocab * vocab = llama_model_get_vocab(s->modelo);
+
+    llama_sampler_chain_params scp = llama_sampler_chain_default_params();
+    scp.no_perf = false;
+    llama_sampler * chain = llama_sampler_chain_init(scp);
+
+    if (gramatica != nullptr) {
+        const std::string gbnf = paraUtf8(env, gramatica);
+        const int64_t tg = agora_us();
+        llama_sampler * gram = llama_sampler_init_grammar(vocab, gbnf.c_str(), "root");
+        s->metricas.gramatica_us = agora_us() - tg;
+        if (gram == nullptr) {
+            LOGE("redator: GBNF de %zu B nao compilou — geracao ABORTADA (nao ha queda "
+                 "silenciosa para geracao livre)", gbnf.size());
+            llama_sampler_free(chain);
+            return nullptr;
+        }
+        llama_sampler_chain_add(chain, gram);
+        LOGI("redator: gramatica compilada em %lld us (%zu B de GBNF)",
+             static_cast<long long>(s->metricas.gramatica_us), gbnf.size());
+    }
+
+    if (penalidade > 1.0f) {
+        llama_sampler_chain_add(chain, llama_sampler_init_penalties(
+                                           llama_vocab_n_tokens(vocab),
+                                           /*penalty_last_n=*/64, penalidade,
+                                           /*penalty_freq=*/0.0f, /*penalty_present=*/0.0f));
+    }
+    if (min_p > 0.0f) {
+        llama_sampler_chain_add(chain, llama_sampler_init_min_p(min_p, 1));
+    }
+    if (temperatura <= 0.0f) {
+        // Guloso de verdade — e nao `temp(0)`, que divide por zero. `greedy`
+        // ignora `dist`, entao ele fecha a cadeia sozinho.
+        llama_sampler_chain_add(chain, llama_sampler_init_greedy());
+    } else {
+        llama_sampler_chain_add(chain, llama_sampler_init_temp(temperatura));
+        llama_sampler_chain_add(chain, llama_sampler_init_dist(static_cast<uint32_t>(semente)));
+    }
+
+    const std::string prompt = montar_prompt(s, paraUtf8(env, sistema), paraUtf8(env, usuario));
+    std::string saida;
+    const bool ok = gerar(s, prompt, chain, max_tokens, prazo_ms, saida);
+    llama_sampler_free(chain);
+    if (!ok) return nullptr;
+    return env->NewStringUTF(saida.c_str());
+}
+
+/// As metricas da ultima geracao desta sessao, na ordem:
+/// `[prefill_ms, gramatica_us, amostragem_us, prompt_tok, gerados, decode_rc]`.
+///
+/// `-1` significa "nao medido nesta geracao" — `gramatica_us` fica em -1 quando
+/// nao houve gramatica, e nao em 0, porque 0 seria um custo medido.
+JNIEXPORT jlongArray JNICALL
+Java_com_claryon_llm_NativoDoRedator_nativoUltimasMetricas(
+    JNIEnv * env, jobject, jlong handle) {
+    auto * s = reinterpret_cast<Sessao *>(handle);
+    jlongArray fora = env->NewLongArray(6);
+    if (fora == nullptr) return nullptr;
+    const Metricas m = s == nullptr ? Metricas{} : s->metricas;
+    jlong v[6] = {m.prefill_ms, m.gramatica_us, m.amostragem_us,
+                  m.prompt_tok, m.gerados, m.decode_rc};
+    env->SetLongArrayRegion(fora, 0, 6, v);
+    return fora;
+}
+
+/// **Compila [gramatica] `repeticoes` vezes e devolve o total em microssegundos.**
+///
+/// Isolado da geracao de proposito: o custo de compilar e o numero que decide se
+/// a Pista 2 cabe no orcamento, e medi-lo dentro de uma geracao o misturaria com
+/// prefill e amostragem. Devolve `-1` quando o GBNF nao compila — que e resultado
+/// tambem, e nao pode virar "0 us, rapidissimo".
+JNIEXPORT jlong JNICALL
+Java_com_claryon_llm_NativoDoRedator_nativoMedirGramatica(
+    JNIEnv * env, jobject, jlong handle, jstring gramatica, jint repeticoes) {
+    auto * s = reinterpret_cast<Sessao *>(handle);
+    if (s == nullptr || gramatica == nullptr) return -1;
+    const std::string gbnf = paraUtf8(env, gramatica);
+    const llama_vocab * vocab = llama_model_get_vocab(s->modelo);
+    const int32_t n = repeticoes > 0 ? repeticoes : 1;
+
+    const int64_t t0 = agora_us();
+    for (int32_t i = 0; i < n; ++i) {
+        llama_sampler * g = llama_sampler_init_grammar(vocab, gbnf.c_str(), "root");
+        if (g == nullptr) {
+            LOGE("redator: GBNF de %zu B nao compilou na medicao", gbnf.size());
+            return -1;
+        }
+        llama_sampler_free(g);
+    }
+    return agora_us() - t0;
 }
 
 JNIEXPORT void JNICALL

@@ -259,7 +259,8 @@ class VerificadorDoGatilhoTest {
         )
 
         // ── Elo 6: houve earcon E fala, nessa ordem ───────────────────────────
-        // `VoiceCycle` emite OUVI_VOCE antes do STT e a resposta depois da ação.
+        // `VoiceCycle` emite CANAL_ABERTO na abertura e CANAL_FECHADO antes do
+        // STT; a resposta vem depois da ação.
         assertTrue("elo 6 (saída): esperava earcon + resposta, veio ${faladas.size}", faladas.size >= 2)
         assertTrue(
             "elo 6: o primeiro som tem de ser o earcon de escuta, não a fala",

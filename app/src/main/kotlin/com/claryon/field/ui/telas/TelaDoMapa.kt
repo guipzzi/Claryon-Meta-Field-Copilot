@@ -49,11 +49,19 @@ import com.claryon.field.ui.componentes.Etiqueta
 import com.claryon.field.ui.componentes.Fio
 import com.claryon.field.ui.componentes.MapaDeRuas
 import com.claryon.field.ui.componentes.PontoDeEstado
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Text
+import com.claryon.field.ui.componentes.IconeDeAcao
+import com.claryon.field.ui.componentes.IconeTatico
+import com.claryon.field.ui.componentes.tocavel
+import com.claryon.field.ui.icones.Icones
 import com.claryon.field.ui.componentes.TextoCorpoMenor
 import com.claryon.field.ui.componentes.TextoDado
 import com.claryon.field.ui.componentes.TextoIndicativo
 import com.claryon.field.ui.tema.Cores
 import com.claryon.field.ui.tema.Espaco
+import com.claryon.field.ui.tema.Regua
+import com.claryon.field.ui.tema.Tipo
 import com.claryon.field.ui.tema.Movimento
 import com.claryon.field.ui.tema.duracaoAcessivel
 
@@ -82,6 +90,16 @@ fun TelaDoMapa(
     aoFechar: () -> Unit,
     /** Focar um par carrega o rastro dele; `null` desfoca e **apaga** o rastro. */
     aoFocar: (String?) -> Unit,
+    /**
+     * Força uma sondagem agora, fora do intervalo de 5 s.
+     *
+     * Existe porque o cabeçalho de frescor tem um botão de recarregar, e botão que
+     * não recarrega é a mentira visual que este projeto persegue desde o rótulo "na
+     * fila". `MapaViewModel.abrirMapa()` não serve: ele começa com
+     * `if (bomba != null) return`, então chamá-lo de novo com o mapa aberto é uma
+     * função vazia com cara de ação.
+     */
+    aoRecarregar: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val dono = LocalLifecycleOwner.current
@@ -161,6 +179,10 @@ fun TelaDoMapa(
         // vinte minutos — a única afirmação da tela sobre o estado da rede falava
         // só da metade que funcionava.
         Column(Modifier.align(Alignment.TopCenter)) {
+            CabecalhoDeFrescor(
+                idade = idadeHeroica(estado.minhaIdadeS),
+                aoRecarregar = aoRecarregar,
+            )
             CabecalhoFlutuante(
                 assinado = estado.assinado,
                 minhaPosicaoSobe = estado.minhaPosicaoSobe,
@@ -228,6 +250,91 @@ fun TelaDoMapa(
  * indicador que acende no estado normal ensina a ser ignorado, e aí não avisa mais
  * nada quando importa. É a mesma regra que decidiu o limiar de esmaecimento.
  */
+/**
+ * **O cabeçalho de frescor — o número de destaque do sistema.**
+ *
+ * Copiado da referência de produto por decisão do dono (22/08), e é a peça que
+ * faltava no mapa: *"Last updated …"* com a hora em evidência e um botão de
+ * recarregar ao lado. A auditoria de GPS já tinha nomeado o buraco — o mapa
+ * carimbava a idade de **cada par** e não a do **portador**.
+ *
+ * ### O único herói do produto
+ *
+ * `Tipo.Heroi` e `Tipo.HeroiUnidade` existiam sem um chamador. Este é o chamador, e
+ * é o único que vai existir: a idade da posição é a única **grandeza** que o produto
+ * mostra — o resto são estados, e herói sobre estado é decoração. Ver o KDoc de
+ * [idadeHeroica].
+ *
+ * ### Sem acento cromático, e a razão é a regra mais antiga da paleta
+ *
+ * A régua da referência põe o acento quente **no número**. Aqui ele sai em
+ * [Cores.Tinta], porque neste produto o âmbar significa uma coisa só — *você está no
+ * ar* —, e um número âmbar permanente no topo do mapa a esvaziaria. O destaque vem
+ * dos outros dois canais que a régua usa e que não estão ocupados: **tamanho** (44 sp
+ * contra 12) e **peso** (Light contra tudo o mais). O número domina a tela sem gastar
+ * a cor que protege a transmissão acidental.
+ *
+ * O par número+unidade fica junto na base — `alignByBaseline` e não centralizado: a
+ * unidade é sufixo do algarismo, e centrada ela flutuaria no meio da altura dele.
+ */
+@Composable
+private fun CabecalhoDeFrescor(
+    idade: IdadeHeroica,
+    aoRecarregar: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier
+            .fillMaxWidth()
+            .background(Cores.Vazio.copy(alpha = 0.82f))
+            .padding(
+                start = Espaco.Padrao,
+                end = Espaco.Curto,
+                top = Espaco.Medio,
+                bottom = Espaco.Curto,
+            ),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Etiqueta("Sua posição", cor = Cores.TintaFraca)
+            Box(Modifier.height(Espaco.Micro))
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                    idade.numero,
+                    style = Tipo.Heroi,
+                    color = Cores.Tinta,
+                    modifier = Modifier.alignByBaseline(),
+                )
+                if (idade.unidade.isNotEmpty()) {
+                    Box(Modifier.width(Espaco.Micro))
+                    Text(
+                        idade.unidade,
+                        style = Tipo.HeroiUnidade,
+                        color = Cores.TintaMedia,
+                        modifier = Modifier.alignByBaseline(),
+                    )
+                }
+                Box(Modifier.width(Espaco.Curto))
+                Text(
+                    rotuloDoFrescor(idade),
+                    style = Tipo.CorpoMenor,
+                    color = Cores.TintaFraca,
+                    modifier = Modifier.alignByBaseline(),
+                )
+            }
+        }
+        // Alvo de 48 dp como todo controle deste produto: quem toca está de luva.
+        Box(
+            Modifier
+                .size(Regua.Toque)
+                .tocavel(forma = CircleShape, aoTocar = aoRecarregar),
+            contentAlignment = Alignment.Center,
+        ) {
+            IconeTatico(Icones.Recarregar, cor = Cores.TintaMedia, tamanho = IconeDeAcao)
+        }
+    }
+}
+
 @Composable
 private fun CabecalhoFlutuante(
     assinado: Boolean,
@@ -245,18 +352,18 @@ private fun CabecalhoFlutuante(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             PontoDeEstado(
-                cor = if (assinado) Cores.Vivo else Cores.TintaFraca,
+                cor = if (assinado) Cores.TintaMedia else Cores.TintaFraca,
                 pulsando = assinado,
             )
             Box(Modifier.width(Espaco.Curto))
             Etiqueta(
                 if (assinado) "recebendo" else "sem sinal",
-                cor = if (assinado) Cores.Vivo else Cores.TintaFraca,
+                cor = if (assinado) Cores.TintaMedia else Cores.TintaFraca,
             )
         }
         if (!minhaPosicaoSobe) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                PontoDeEstado(cor = Cores.Falha, pulsando = false)
+                PontoDeEstado(cor = Cores.TintaMedia, pulsando = false)
                 Box(Modifier.width(Espaco.Curto))
                 Etiqueta("fora do mapa", cor = Cores.Falha)
             }
@@ -285,7 +392,7 @@ private fun AvisoDaPosicaoPropria(motivo: String, modifier: Modifier = Modifier)
             .padding(horizontal = Espaco.Padrao, vertical = Espaco.Curto),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        TextoCorpoMenor(motivo, cor = Cores.Falha)
+        TextoCorpoMenor(motivo, cor = Cores.Tinta)
     }
 }
 
@@ -415,7 +522,7 @@ private fun GavetaDaGuarnicao(
                     motivoIndisponivel != null -> Column(
                         Modifier.fillMaxWidth().padding(Espaco.Padrao),
                     ) {
-                        Etiqueta("Indisponível", cor = Cores.P2)
+                        Etiqueta("Indisponível", cor = Cores.TintaMedia)
                         Box(Modifier.height(Espaco.Curto))
                         TextoCorpoMenor(motivoIndisponivel, cor = Cores.TintaMedia)
                     }
@@ -432,7 +539,7 @@ private fun GavetaDaGuarnicao(
                     !temPosicaoPropria -> Column(
                         Modifier.fillMaxWidth().padding(Espaco.Padrao),
                     ) {
-                        Etiqueta("Você não está no mapa", cor = Cores.Falha)
+                        Etiqueta("Você não está no mapa", cor = Cores.Tinta)
                         Box(Modifier.height(Espaco.Curto))
                         TextoCorpoMenor(
                             motivoDaMinhaPosicao
@@ -631,9 +738,13 @@ private fun LinhaDePar(par: ParNoMapa, focado: Boolean, aoTocar: () -> Unit) {
             Etiqueta(
                 par.atualizadoHa,
                 cor = when (par.frescor) {
-                    Frescor.ATUAL -> Cores.Vivo
-                    Frescor.ESMAECIDO -> Cores.P2
-                    Frescor.ANTIGO -> Cores.Falha
+                    // Frescor é ESTADO, e ele já viaja no `alpha` da linha
+                    // (`opacidadeAlvo`, logo acima). Cor aqui era o mesmo dado
+                    // decorado uma segunda vez — e gastava três cromáticas por
+                    // linha, vezes trinta linhas na gaveta.
+                    Frescor.ATUAL -> Cores.Tinta
+                    Frescor.ESMAECIDO -> Cores.TintaMedia
+                    Frescor.ANTIGO -> Cores.TintaFraca
                 },
             )
             if (par.emMovimento) {

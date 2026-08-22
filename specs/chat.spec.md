@@ -191,13 +191,20 @@ ele volta a exigir aparelho no próximo refactor.
     `Cores.NoArFraco` em elemento nenhum do thread. Âmbar significa "você está no
     ar", e só isso (`Cores.kt:16-21`).
 22. `Quando` a forma for `REGISTRO_DE_CANAL`, `o sistema deverá` escrever o rótulo da
-    banda em `Cores.Tinta`, **não** na cor da prioridade: `P3` sobre `Elevado` rende
-    4,28:1, abaixo do mínimo de 4,5:1 para texto pequeno. A cor da prioridade fica na
-    banda e na calha, que são elemento não-textual.
-23. `Quando` a prioridade for conhecida, `o sistema deverá` expor os três canais em
-    paralelo: cor, largura da calha (4/3/2 dp) **e** rótulo escrito
-    (`"P1 emergência"` / `"P2 apoio"` / `"P3 informativo"`). Hoje `P2` e `P3` diferem
-    por 1 px (`Comuns.kt:128-135`), ou seja diferem só por cor.
+    banda em `Cores.Tinta`, **não** na cor da prioridade — cor de prioridade é marca,
+    e marca responde a 3:1, não aos 4,5:1 do texto pequeno. A cor fica na banda e na
+    calha, que são elemento não-textual.
+23. `Quando` a prioridade for conhecida, `o sistema deverá` expor os canais em
+    paralelo: largura da calha (4/3/2 dp) **e** rótulo escrito
+    (`"P1 emergência"` / `"P2 apoio"` / `"P3 informativo"`).
+
+    > **Correção de 2026-08-22 — só o P1 tem cor.** Este item pedia três canais, e o
+    > primeiro era `cor`. O diff de spec da paleta (decisão 2 de `Cores`) restringiu
+    > cor a **sinal**: emergência é sinal, classificação é estado. `P2` e `P3` saíram
+    > em nível de tinta (`TintaMedia`/`TintaFraca`) e passaram a se distinguir por
+    > **largura e rótulo**, que eram justamente os dois canais que já não dependiam de
+    > visão de cor. O item anterior reclamava que "`P2` e `P3` diferem só por cor" — o
+    > conserto foi remover a cor dos dois, não somar um quarto canal.
 
 **Acessibilidade**
 
@@ -218,7 +225,8 @@ ele volta a exigir aparelho no próximo refactor.
 | p95 do tempo de frame rolando 300 registros | ≤ 16 ms | `adb shell dumpsys gfxinfo com.claryon.field framestats`, 3 varreduras ponta a ponta |
 | Passes de medida por item | 1 | teste de fonte que falha se `IntrinsicSize` aparecer no arquivo; confirmação no Layout Inspector |
 | Contraste do corpo sobre o fundo do bloco | ≥ 4,5:1 | `ContrasteDosTokensTest` (WCAG 2.1 sobre os hex de `Cores.kt`). Valores computados: `TintaMedia`/`Painel` = 5,89:1; `Tinta`/`Elevado` = 14,5:1 |
-| Contraste da calha de prioridade contra `Vazio` | ≥ 3:1 | idem. `P3`/`Vazio` = 5,01:1, o pior caso das três |
+| Contraste da calha de prioridade contra `Vazio` | ≥ 3:1 | idem. Só o `P1` é colorido; `P2`/`P3` saem em `TintaMedia`/`TintaFraca` |
+| Elementos cromáticos por arquivo de UI | orçamento nomeado | `OrcamentoCromaticoTest` — falha para mais (regra degradando) e para menos (sinal apagado) |
 | Remontagens de `montarTrafego` por ciclo de recarga sem mudança | 0 | teste JVM de igualdade estrutural de `List<FalaNoGrupo>` |
 | Registros até o thread ficar inutilizável em memória | ≥ 2 000 | teste JVM de `montarTrafego` com lista sintética, medindo alocação |
 

@@ -25,13 +25,19 @@ data class LugarProximo(val nome: String, val distanciaM: Int)
  *  - [SemRede] é o caso normal em campo, não a exceção: o relato da PMERJ que
  *    fundamenta este produto descreve região onde nem rádio digital pega;
  *  - [PrazoEstourado] teve rede e não teve resposta a tempo. A recuperação é
- *    diferente — insistir pode dar certo, andar até pegar sinal não muda nada.
+ *    diferente — insistir pode dar certo, andar até pegar sinal não muda nada;
+ *  - [SemPosicaoPropria] é o caso que só apareceu ao LIGAR a capacidade, e por
+ *    isso ele não estava aqui: *"o hospital mais próximo"* é uma pergunta
+ *    relativa, e sem correção de GPS ela não tem como ser feita. Colapsá-lo em
+ *    [SemRede] mandaria o agente andar atrás de sinal que ele já tem — a mesma
+ *    classe de erro que fez o rádio confundir falta de rede com canal ocupado.
  */
 sealed interface BuscaDeLugar {
     data class Encontrado(val lugar: LugarProximo) : BuscaDeLugar
     data object NadaPorPerto : BuscaDeLugar
     data object SemRede : BuscaDeLugar
     data object PrazoEstourado : BuscaDeLugar
+    data object SemPosicaoPropria : BuscaDeLugar
 }
 
 /**

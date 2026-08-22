@@ -1,7 +1,7 @@
 ---
 feature: consulta-externa
 capacidade: C2 (consulta) — fonte externa como último degrau da cascata
-estado: proposta
+estado: implementada em parte — degrau 2 (geoespacial) construído e ligado; degrau 3 (textual) não existe
 autor: revisão humana pendente
 criada: 2026-08-22
 sobrepoe:
@@ -180,6 +180,54 @@ O que sai de *"Claryon, estou na Rui Barbosa em Niterói, qual o hospital mais p
    Sem agente, sem posição e sem hora exata, duas perguntas do mesmo turno não são
    ligáveis entre si — que é a propriedade que separa "estatística de uso" de
    "histórico de um policial".
+
+## 7-bis. O que foi construído em 22/08 — e o que não foi
+
+Escrito aqui porque "construído" neste projeto significa **tem chamador em `src/main`
+alcançável em runtime** (`CLAUDE.md` §6), e porque a primeira versão desta capacidade
+ficou uma sessão inteira sem esse chamador.
+
+**Construído e ligado.** `CerebroDoCopiloto` monta `LugarPelaRede`
+(`app/.../agent/LugarPelaRede.kt`) e a passa em `procurarLugar` do executor. A costura
+`CategoriaDeLugar → LugarProcurado` é um `when` sem `else`, num arquivo só.
+`ChamadorDaConsultaExternaTest` lê o código de `src/main` e reprova se a linha sumir —
+é o único teste que consegue, porque o padrão do parâmetro **recusa em silêncio** de
+propósito.
+
+**Como cada aceite do §6 é verificado:**
+
+| Aceite | Onde |
+|---|---|
+| local primeiro | ordem do `when` em `DeterministicIntentRouter` — `CONSULTAR_NORMA` antes de `LUGARES` |
+| sem rede → recusa falada como hoje | `ConsultaExternaNoExecutorTest.semRede_recusaFaladaComMotivo` e `semDependenciaInjetada_aRecusaEIdenticaADeAntes` |
+| procedência em **toda** resposta | `ConsultaGeoespacialTest.oNadaPorPerto_tambemCarregaProcedencia` — foi o defeito: `NadaPorPerto` era `data object` |
+| sem termo de rebaixamento | `FalaDeFonteExternaTest`, com controle positivo sobre a redação original desta spec |
+| nada de fala, placa, matrícula, nome ou posição de par sai | `ConsultaGeoespacialTest` (corpo HTTP num socket real, régua de lista fechada) + `ConsultaExternaNoExecutorTest.transcricaoEnvenenada_naoAtravessaAFronteiraDeRede` (parte da fala) |
+| teto de latência é recusa, não espera | `ConsultaGeoespacialTest.servidorQueNuncaResponde_daPrazoEstourado_eNaoSemRede` + `prazoEstourado_viraRecusaPropria_eNaoTentaDeNovo` |
+
+**Um desfecho que a spec não previa e o código precisou ter:** `BuscaDeLugar
+.SemPosicaoPropria`. *"O hospital mais próximo"* é pergunta relativa, e sem correção de
+GPS ela não tem centro. Colapsá-la em "sem rede" mandaria o agente andar atrás de sinal
+que ele já tem. Só apareceu ao **ligar** a capacidade.
+
+**Um defeito que só o teste achou:** `CategoriaDeLugar.POSTO_DE_SAUDE` tem o termo
+`"posto de saude"`; o `"de"` casava com a letra D no filtro de higiene, o `check` da
+fábrica lançava, e o `runCatching` do executor traduzia isso em "Falha interna." — o
+agente que perguntasse por um posto de saúde nunca teria resposta. O KDoc do filtro
+**afirmava** que esse caso estava coberto.
+
+**NÃO construído, e é preciso dizer:**
+
+- o **degrau 3** (busca textual) não existe. Decisão 2: chave em APK é chave vazada;
+- a **persistência** do registro de uso. Ele vive em RAM com teto de 50 e vai ao
+  `logcat`. Sem arquivo, a estatística morre com o processo — e o andaime da decisão 5
+  só funciona se ela sobreviver;
+- a **tela** que o §4 promete (*"fica disponível na tela"*). O `StateFlow` da auditoria
+  está publicado em `DiarioDaConsultaExterna` e **nenhuma tela o observa**;
+- `GuardaDaRedacao` sobre texto externo (último aceite do §6) é **vazio hoje**: não há
+  redação de texto externo, porque não há degrau 3 e a resposta geoespacial é
+  determinística. O aceite só passa a ter conteúdo quando o degrau 3 existir;
+- nada foi medido **no aparelho**. Todos os números acima são de bancada.
 
 ## 8. O que esta spec NÃO propõe
 

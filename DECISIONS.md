@@ -2184,3 +2184,71 @@ estão no diff.
   supressão de ~2 s — o rádio abre segundos antes de alguém falar, então a conta
   fecha, mas o número está aqui para não ser redescoberto como surpresa. Na abertura
   e não no toque: repetir a cada PTT treinaria o agente a ignorar o aviso.
+
+---
+
+## 2026-08-22 · O produto sabia e não agia: o token que travava e a conferência que só existia em teste
+
+- **O caminho crítico deixou de ESPERAR pela renovação, em vez de esperar menos.**
+  `tokenValido` era chamado de dentro do ciclo de voz, e fora da margem de 60 s ele
+  entra no `Mutex` e faz `execute()` **síncrono**. Havia três saídas, e a escolha não é
+  refatoração:
+  1. **Só `callTimeout`** — descartada como solução: continuaria bloqueando, e o teto
+     que caberia num ciclo de 4 s de aceite (algo como 1 s) é curto demais para uma
+     renovação legítima em 3G, então ele trocaria "trava" por "nunca renova".
+  2. **`withTimeoutOrNull` no chamador** — descartada por **não funcionar**:
+     `execute()` é bloqueante e não observa cancelamento, então `withTimeout` em volta
+     de `withContext(Dispatchers.IO)` só retorna quando a chamada terminar. O teto
+     seria decorativo.
+  3. **Escolhida: não esperar, e renovar antes.** `tokenSemEsperar()` responde em
+     memória e **dispara** a renovação em segundo plano; `manterFresco()` renova 10 min
+     antes do vencimento; e o `callTimeout` fica como rede de segurança das duas.
+  **Custo assumido:** o primeiro comando depois de horas em *doze* pode encontrar o
+  token vencido e recusar. O segundo funciona. É pior que o caminho feliz de antes e
+  melhor que o caminho ruim de antes, que era travar por dezenas de segundos.
+
+- **Os números, medidos e não lembrados.** Teto da renovação contra um servidor que
+  escreve um byte por segundo: **29 210 ms** sem `callTimeout`, **6 122 ms** com. O
+  cliente de fábrica tem `callTimeoutMillis == 0` (sem teto) e 10 s em cada timeout
+  parcial — lido dos getters do artefato, dentro do teste. O caminho crítico custa
+  **0,026 µs** por leitura, com **uma** leitura de cofre no processo inteiro. Sem
+  MockWebServer de propósito: um `ServerSocket` de quarenta linhas mede o mesmo, e
+  dependência nova pede justificativa por tamanho e licença (`CLAUDE.md §2`).
+
+- **`SessaoDoAgente.tokenCorrente` deixou de ser um campo.** Ele guardava a última
+  string gravada por quem tivesse renovado, **sem checar validade** — um turno longo e
+  o ciclo de voz consultava com token vencido, recebia 401, e o agente ouvia "Consulta
+  indisponível." sem que nada soubesse por quê. Virou leitura derivada de
+  `tokenSemEsperar`. Alternativa descartada: acrescentar um segundo campo `expiraEm` ao
+  lado — dois campos que precisam concordar são dois campos que vão divergir, e o
+  KDoc do próprio arquivo já registra ter caído nesse padrão uma vez.
+
+- **A conferência da custódia virou tela, e a tela usa `verificar()` em vez de
+  reimplementar.** `periciar()` chama `verificar(lido.handle)` mesmo já tendo o
+  manifesto em mãos — uma releitura de texto por gravação. Alternativa descartada:
+  chamar `conferir(...)` direto, que economizaria a releitura e criaria **duas**
+  conferências parecidas, a testada e a que roda. É exatamente o defeito de origem com
+  um degrau a mais.
+
+- **A perícia usa o cofre DO PROCESSO, e por isso `CerebroDoCopiloto.cofre` é
+  público.** Um `EncryptedEvidenceVault` novo leria o mesmo diretório e daria os mesmos
+  hashes, mas o mapa de sessões abertas é do objeto: a ocorrência **em curso**
+  apareceria na tela como custódia interrompida. `RegistroDeCustodia.emAndamento` é o
+  que separa "gravando agora" de "processo morto antes de fechar" — os dois produzem
+  `SemAncoraDeFim(NAO_FINALIZADA)`, e são coisas opostas para quem periciar.
+
+- **A tela de perícia é acromática.** Custódia quebrada é grave e a tentação de pintá-la
+  de vermelho é forte; a decisão 2 da paleta reserva cor a "no ar" e a prioridade, e o
+  precedente é a tela ao lado — `TelaDePerfil` marca a capacidade **morta** com tinta
+  mais forte. Três níveis de tinta, e o orçamento cromático do projeto não subiu.
+
+- **Perícia é sub-tela do Perfil, não uma quarta aba.** Sem `navigation-compose`, o
+  recorte é um booleano — o mesmo padrão dos portões de abertura e login. Uma quarta
+  aba custaria destino permanente na barra para uma ação que acontece uma vez por
+  apuração.
+
+- **A tela declara o que NÃO faz.** Ela **confere** e não **exporta**: tirar segmentos e
+  manifesto do aparelho continua exigindo `adb`, e isso está escrito na tela em vez de
+  a ausência passar por capacidade. E `Confere` não é *inforjável* — a ressalva do R8
+  aparece na tela com as mesmas palavras-chave do relatório de impacto, com teste que
+  reprova o build se ela sumir de qualquer um dos dois lados.

@@ -423,7 +423,7 @@ fun TelaDePermissoes(aoConcluir: () -> Unit) {
                     )
                 } else {
                     val recusado = PermissoesEssenciais.MICROFONE.permissao in pedidas
-                    val cor = if (recusado) Cores.FalhaTexto else Cores.TintaMedia
+                    val cor = if (recusado) Cores.Tinta else Cores.TintaMedia
                     Row(
                         Modifier.fillMaxWidth().padding(vertical = Espaco.Medio),
                         verticalAlignment = Alignment.CenterVertically,
@@ -533,7 +533,7 @@ private fun LinhaDePermissao(
         // ele fica na linha do título, que é o que ele nomeia.
         IconeTatico(
             icone,
-            cor = if (estado == EstadoDaLinha.NEGADA) Cores.FalhaTexto else Cores.TintaMedia,
+            cor = if (estado == EstadoDaLinha.NEGADA) Cores.Tinta else Cores.TintaMedia,
             tamanho = IconeDeLinha,
         )
         Box(Modifier.width(Espaco.Padrao))
@@ -573,7 +573,7 @@ private fun LinhaDePermissao(
                 TextoCorpoMenor(
                     semEla,
                     cor = if (estado == EstadoDaLinha.NEGADA) {
-                        Cores.FalhaTexto
+                        Cores.Tinta
                     } else {
                         Cores.TintaFraca
                     },

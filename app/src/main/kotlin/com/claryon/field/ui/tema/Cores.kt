@@ -27,17 +27,51 @@ import androidx.compose.ui.graphics.Color
  * hierarquia de superfície não mudou de lugar — só perdeu o matiz.
  *
  * ---
- * ### 2. Cor é rara, e por isso significa. Quatro cromáticas, e um orçamento.
+ * ### 2. Acromático é a BASE. Cor é reservada para SINAL.
  *
- * Vermelho, amarelo, verde e âmbar continuam existindo — como **complemento**,
- * nunca como base. O critério de uso é duplo e os dois lados são obrigatórios:
- * cada aparição de cor tem de corresponder a um estado **excepcional** e
- * **verdadeiro no instante**.
+ * **Diff de spec — 22/08, decisão do dono do produto** (§7: sobrepor regra dura é
+ * decisão humana, e ela entra por escrito).
  *
- * A consequência prática é a regra que mais dói: **cor em elemento permanente é
- * cor que deixou de significar.** Um ponto verde que fica aceso o turno inteiro
- * porque o par está online não informa nada — ele é o fundo. O que informa é o
- * par que *some*. Estado nominal é cinza; a cor entra quando o nominal quebra.
+ * A regra anterior dizia *"cor é rara, e cada aparição corresponde a um estado
+ * excepcional e verdadeiro no instante"*. Ela era certa e **não bastava**, porque
+ * "excepcional" é adjetivo e todo estado parece excepcional para quem o está
+ * desenhando. Medido na auditoria de 22/08: 45 usos cromáticos em 10 arquivos, e a
+ * tela do mapa sozinha gastava **três cromáticas por linha de par**, vezes trinta
+ * linhas na gaveta. A régua da referência de produto é acromática — hierarquia sai
+ * de opacidade, peso e posição —, e a nossa não estava.
+ *
+ * A regra nova troca o adjetivo por uma **pergunta**, e a pergunta tem resposta
+ * verificável:
+ *
+ * > **Isto é um sinal, ou é estrutura/estado sendo decorado?**
+ *
+ *  - **Sinal** → pode ter cor. Aviso que bloqueia operação, emergência P1, "no ar",
+ *    falha que exige ação do agente.
+ *  - **Estrutura ou estado** → acromático, **sempre**. Ponto de presença, item de
+ *    lista, linha de prontidão, frescor, separador, fundo, borda, rótulo.
+ *
+ * E o orçamento que a acompanha: **um elemento cromático por sinal, não um por
+ * pedaço do sinal.** Onde três elementos da mesma linha viravam vermelho juntos —
+ * ícone, valor e explicação em `TelaDePermissoes` —, sobra **um**: o valor. Os
+ * outros dois carregam o mesmo fato em nível de tinta, que é o canal que a
+ * referência usa e que sobrevive a daltonismo.
+ *
+ * A consequência prática continua sendo a regra que mais dói, e agora ela é
+ * corolário em vez de axioma: **cor em elemento permanente é cor que deixou de
+ * significar.** Um ponto verde aceso o turno inteiro porque o par está online é
+ * estado, não sinal — ele é o fundo. O que informa é o par que *some*.
+ *
+ * **O que isso aposentou.** `Vivo` e o antigo `P3` saíram do arquivo, e a razão é a
+ * pergunta acima: os dois nomeavam o **caso nominal** — "o par está vivo", "a
+ * prioridade é normal" —, e caso nominal nunca é sinal. Não havia um só uso
+ * legítimo sobrando depois da varredura; mantê-los seria guardar cor à espera de
+ * quem a gastasse. Prioridade normal continua se distinguindo por **largura de
+ * calha e rótulo escrito**, que é como ela já se distinguia para quem não vê cor.
+ *
+ * O que **ficou** cromático, e cada um é um sinal: [NoAr] (você está no ar), [P1]
+ * (emergência), [P2] (aviso que bloqueia operação — servidor não configurado, sem
+ * posição própria), [Falha] e [FalhaTexto] (falha que exige ação — erro de login,
+ * fora do mapa, escuta recusada, permissão negada).
  *
  * ---
  * ### 3. O âmbar tem um significado só: você está no ar.
@@ -56,8 +90,9 @@ import androidx.compose.ui.graphics.Color
  *  - nenhuma outra cor aparece em elemento que sangre até a borda da tela.
  *
  * O que a paleta faz é tirar os concorrentes de perto: [P2] saiu do âmbar
- * (36,6° → 41,5°, e deixou de ser laranja para ser amarelo) e [P3] **perdeu a cor
- * inteira**, porque prioridade normal não é estado excepcional.
+ * (36,6° → 41,5°, e deixou de ser laranja para ser amarelo) e o antigo `P3` **perdeu
+ * a cor inteira**, porque prioridade normal não é estado excepcional — e em 22/08
+ * perdeu também o token, por não ter sobrado chamador nenhum.
  *
  * ---
  * ### 4. A estrutura é feita de fios, não de caixas.
@@ -74,9 +109,7 @@ import androidx.compose.ui.graphics.Color
  * | [Tinta] | 14,51 | 14,50 | 4,5 |
  * | [TintaMedia] | 5,39 | **7,01** | 4,5 |
  * | [TintaFraca] | **2,51 ✗** | **4,70 ✓** | 4,5 |
- * | [P3] | 4,28 ✗ | **4,89 ✓** | 4,5 |
  * | [NoAr] | 5,88 | 5,88 | 3,0 |
- * | [Vivo] | 6,40 | 6,78 | 3,0 |
  * | [P1] / [Falha] | 4,20 | 4,20 | 3,0 |
  * | [P2] | 7,37 | 7,26 | 3,0 |
  *
@@ -159,31 +192,37 @@ object Cores {
 
     // ── Semântica — cada uma custa caro, e só entra em estado excepcional ─────
 
-    /**
-     * **Presença excepcional**, não presença.
-     *
-     * Não pinte o que está normal. Par online o turno inteiro é o fundo do
-     * problema, não o sinal — quem informa é o par que sumiu. Use em transição
-     * verdadeira (o copiloto ouvindo agora, o par que acabou de voltar), nunca
-     * em indicador permanente.
-     */
-    val Vivo = Color(0xFF46B985)
+    // **`Vivo` e `P3` foram removidos em 22/08.** Ver a decisão 2: os dois
+    // nomeavam o caso NOMINAL — "o par está vivo", "a prioridade é normal" — e o
+    // caso nominal nunca é sinal. Depois da varredura não sobrou um uso legítimo
+    // de nenhum dos dois, e token sem chamador é escrito, não construído (§6).
+    //
+    // Quem procurar o verde: presença virou nível de tinta ([TintaFraca] para o
+    // nominal, [TintaMedia] para a linha viva). Quem procurar o cinza do P3: ele
+    // era `#8B8B8B`, a dois pontos de [TintaFraca] (`#888888`) — duas entradas
+    // para a mesma cor, que é a duplicata que diverge no primeiro ajuste. A
+    // prioridade normal continua distinguível por largura de calha e rótulo.
 
-    /** Prioridade 1 — emergência. Marca, não texto (piso 3:1). */
+    /**
+     * Prioridade 1 — emergência. Marca, não texto (piso 3:1).
+     *
+     * **A única prioridade que continua colorida**, e o critério é o da decisão 2:
+     * emergência é sinal, e cor de urgência tem valor funcional numa ocorrência —
+     * o agente a reconhece antes de ler a palavra. As outras duas prioridades são
+     * classificação, e classificação é estado.
+     */
     val P1 = Color(0xFFE4483C)
 
-    /** Prioridade 2 — alta. Amarelo, e não âmbar: saiu da faixa do [NoAr]. */
-    val P2 = Color(0xFFD9A227)
-
     /**
-     * Prioridade 3 — normal. **Cinza, e isso é a decisão.**
+     * **Aviso que bloqueia operação.** Amarelo, e não âmbar: saiu da faixa do [NoAr].
      *
-     * Era um teal a 185°, a 31,6° do [Vivo] — confundível, e pior: prioridade
-     * normal é o caso comum. Cor no caso comum é cor gasta. O que distingue P3
-     * continua existindo em dois canais que não dependem de visão de cor: a
-     * largura da calha (2 px contra 4 px do P1) e o rótulo escrito.
+     * Deixou de ser "prioridade 2" em 22/08 — prioridade é classificação, e
+     * classificação é estado. O que sobrou para ele é o banner de aviso, que é
+     * sinal por definição: *"servidor não configurado"*, *"sem posição própria"*.
+     * Nos dois casos o agente não consegue trabalhar até resolver, e nos dois ele é
+     * **um** elemento na tela.
      */
-    val P3 = Color(0xFF8B8B8B)
+    val P2 = Color(0xFFD9A227)
 
     /** Falha, permissão negada, capacidade morta. Marca (piso 3:1). */
     val Falha = Color(0xFFE4483C)

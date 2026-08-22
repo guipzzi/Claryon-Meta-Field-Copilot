@@ -284,6 +284,25 @@ object Icones {
     }
 
     /**
+     * **Recarregar** — a seta circular do cabeçalho de frescor.
+     *
+     * Arco de ~270°, aberto no canto superior direito, com a ponta da seta fechando
+     * o vão. O arco NÃO fecha de propósito: círculo completo lê como indicador de
+     * carga, e este ícone é um **botão**, não um estado. A regra 1 de `Movimento`
+     * vale para a forma também — nada aqui pode sugerir atividade que não existe.
+     *
+     * `arcTo` com `isMoreThanHalf = true` e `isPositiveArc = true`: assinatura
+     * conferida em `ui-graphics-android 1.6.8`
+     * (`PathBuilder.arcTo(float,float,float,boolean,boolean,float,float)`), a mesma
+     * já usada pela fábrica abaixo.
+     */
+    val Recarregar: ImageVector = icone("recarregar") {
+        moveTo(20.5f, 12f)
+        arcTo(8.5f, 8.5f, 0f, true, true, 17.9f, 5.9f)
+        moveTo(20.5f, 4f); verticalLineTo(10f); horizontalLineTo(14.5f)
+    }
+
+    /**
      * A fábrica. **É o único lugar que decide traço, ponta e junta**, e é por isso
      * que os quatorze pertencem ao mesmo conjunto: nenhum ícone recebe esses três
      * como parâmetro, então nenhum pode divergir por digitação.

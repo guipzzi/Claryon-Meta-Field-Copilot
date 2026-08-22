@@ -53,6 +53,7 @@ import com.claryon.field.ui.componentes.EstadoDoPtt
 import com.claryon.field.ui.componentes.Etiqueta
 import com.claryon.field.ui.componentes.Fio
 import com.claryon.field.ui.componentes.BlocoDeProcedencia
+import com.claryon.field.ui.componentes.FimInterrompido
 import com.claryon.field.ui.componentes.PontoDeEstado
 import com.claryon.field.ui.componentes.SetaParaDireita
 import com.claryon.field.ui.componentes.TextoCorpo
@@ -489,7 +490,7 @@ private fun CabecalhoDaConversa(
                                     // Sair não é erro, e não pode sair na cor de
                                     // falha: um agente que vê vermelho por decisão
                                     // própria aprende a ignorar o vermelho.
-                                    cor = if (viva.grave) Cores.FalhaTexto else Cores.TintaFraca,
+                                    cor = if (viva.grave) Cores.Tinta else Cores.TintaFraca,
                                     maxLinhas = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
@@ -711,7 +712,7 @@ private fun LinhaDeQuemFala(quem: String) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (confirmado) {
-            PontoDeEstado(cor = Cores.Vivo, pulsando = true)
+            PontoDeEstado(cor = Cores.TintaMedia, pulsando = true)
         } else {
             // Traço tracejado curto, o mesmo sinal do bloco de fala não conferida.
             Box(Modifier.width(10.dp).height(2.dp).calha(Cores.TintaMedia, 10.dp, tracejada = true))
@@ -947,6 +948,14 @@ private fun RegistroDeTrafego(item: ItemDeTrafego) {
             } else {
                 TextoCorpo(item.fala.texto, cor = tinta(item.tintaDoTexto))
             }
+            // O fio que não termina, colado no texto que não terminou. Vale também
+            // quando NÃO há transcrição: "áudio sem transcrição" cortado no meio
+            // continua sendo áudio que acabou antes da hora, e o rodapé sozinho não
+            // diz isso perto o bastante do lugar onde faltou.
+            if (item.fala.cortadaPelaRede) {
+                Box(Modifier.height(Espaco.Micro))
+                FimInterrompido()
+            }
             Box(Modifier.height(Espaco.Micro))
             RodapeDoRegistro(item)
         }
@@ -996,14 +1005,17 @@ private fun RegistroDeTrafego(item: ItemDeTrafego) {
  */
 @Composable
 private fun RodapeDoRegistro(item: ItemDeTrafego) {
-    val marca = when (item.rotuloDeEntrega) {
-        // "não saiu" e não "na fila": não há fila. Ver o KDoc de
-        // `FalaNoGrupo.Entrega`.
-        RotuloDeEntrega.ENVIADA -> "enviada"
-        RotuloDeEntrega.NAO_SAIU -> "não saiu"
-        null -> null
-    }
+    // A escolha da palavra saiu daqui para `marcaDoRodape`, e o motivo é o do KDoc
+    // de `TrafegoDoCanal.kt`: sem `ui-test-junit4`, decisão dentro de composable é
+    // decisão sem teste. O que sobrou aqui é token virando pixel.
+    val marca = marcaDoRodape(item)
     val hora = item.fala.hora
+    // Os dois estados excepcionais sobem para 7,01:1; o nominal ("enviada", ou a
+    // hora sozinha) fica em 4,70:1. É a mesma régua de antes, com o caso novo do
+    // lado certo dela — fala cortada é exatamente o gênero de fato pelo qual este
+    // rodapé brigou para não ter o mesmo peso do caso comum.
+    val excepcional = item.fala.cortadaPelaRede ||
+        item.rotuloDeEntrega == RotuloDeEntrega.NAO_SAIU
     Row(
         Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.End,
@@ -1011,11 +1023,7 @@ private fun RodapeDoRegistro(item: ItemDeTrafego) {
     ) {
         TextoDado(
             if (marca == null) hora else "$marca · $hora",
-            cor = if (item.rotuloDeEntrega == RotuloDeEntrega.NAO_SAIU) {
-                Cores.TintaMedia
-            } else {
-                Cores.TintaFraca
-            },
+            cor = if (excepcional) Cores.TintaMedia else Cores.TintaFraca,
         )
     }
 }
@@ -1120,8 +1128,8 @@ internal val PILULA = RoundedCornerShape(percent = 50)
 
 private fun corDaPrioridade(p: Int) = when (p) {
     1 -> Cores.P1
-    2 -> Cores.P2
-    else -> Cores.P3
+    2 -> Cores.TintaMedia
+    else -> Cores.TintaFraca
 }
 
 private fun corDaCalha(token: TokenDeCalha, naoConfirmada: Boolean): Color = when {
@@ -1129,8 +1137,8 @@ private fun corDaCalha(token: TokenDeCalha, naoConfirmada: Boolean): Color = whe
     // tracejado continua dizendo que a autoria não fechou. Um P1 não conferido
     // precisa ser vermelho — pode ser um pedido de apoio real.
     token == TokenDeCalha.P1 -> Cores.P1
-    token == TokenDeCalha.P2 -> Cores.P2
-    token == TokenDeCalha.P3 -> Cores.P3
+    token == TokenDeCalha.P2 -> Cores.TintaMedia
+    token == TokenDeCalha.P3 -> Cores.TintaFraca
     naoConfirmada -> Cores.TracoForte
     token == TokenDeCalha.TRACO -> Cores.Traco
     else -> Cores.TracoForte

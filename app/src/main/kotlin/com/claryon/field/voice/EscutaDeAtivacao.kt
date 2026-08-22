@@ -73,7 +73,7 @@ fun DetectorDeAtivacao.comoOuvido(): OuvidoDeAtivacao = object : OuvidoDeAtivaca
  * ### As três bocas que ela precisa fechar
  *
  * 1. **A própria saída.** O earcon e o TTS do copiloto saem pelo mesmo fone que o
- *    microfone escuta. Sem filtrar, o `OUVI_VOCE` que a detecção dispara volta pelo
+ *    microfone escuta. Sem filtrar, o `DESPERTAR` que a detecção dispara volta pelo
  *    microfone e alimenta o detector — e a proximidade fone-microfone num headset é
  *    de centímetros. Por isso o [suprimido], que é o **mesmo** `SupressorDeSaidaPropria`
  *    de processo que o rádio usa.

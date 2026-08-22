@@ -243,7 +243,7 @@ private fun ConteudoNoAr(estado: EstadoDoPtt.NoAr) {
  */
 @Composable
 private fun ConteudoPronto(canal: String, pressao: Float, canto: Dp) {
-    LinhaDeCanal(canal, "meio-duplex", Cores.Vivo)
+    LinhaDeCanal(canal, "meio-duplex", Cores.TintaFraca)
     Box(Modifier.height(Espaco.Curto))
     BlocoDeFala(
         rotulo = "Segure para falar",
@@ -357,7 +357,13 @@ private fun BlocoDeFala(
             .drawBehind {
                 if (avanco > 0f) {
                     drawRect(
-                        color = Cores.NoAr,
+                        // **Tinta, e NUNCA `Cores.NoAr`.** Esta barra mede o
+                        // DEDO — o único fato que o aparelho conhece entre o
+                        // toque e a resposta do árbitro. Em âmbar ela afirmava
+                        // "você está no ar" antes de alguém ter concedido o
+                        // piso, que é a única ambiguidade que este produto não
+                        // pode ter. Ver a regra 3 de `Cores`.
+                        color = Cores.Tinta,
                         topLeft = Offset(0f, size.height - 3f),
                         size = androidx.compose.ui.geometry.Size(size.width * avanco, 3f),
                     )
@@ -485,7 +491,7 @@ private val BLOCO_COM_DETALHE = 72.dp
 
 @Composable
 private fun ConteudoOcupado(porQuem: String, canto: Dp) {
-    LinhaDeCanal(porQuem, "falando", Cores.P2)
+    LinhaDeCanal(porQuem, "falando", Cores.TintaMedia)
     Box(Modifier.height(Espaco.Curto))
     // Mesmo bloco, apagado. Meio-duplex: falar por cima não é uma opção que o
     // botão deva oferecer e depois recusar.
@@ -500,7 +506,7 @@ private fun ConteudoOcupado(porQuem: String, canto: Dp) {
 
 @Composable
 private fun ConteudoIndisponivel(motivo: String, canto: Dp) {
-    LinhaDeCanal("sem canal", "indisponível", Cores.Falha)
+    LinhaDeCanal("sem canal", "indisponível", Cores.Tinta)
     Box(Modifier.height(Espaco.Curto))
     // A causa vive DENTRO do bloco desabilitado, não num aviso separado: quem
     // olha o botão para falar é quem precisa saber por que não dá.

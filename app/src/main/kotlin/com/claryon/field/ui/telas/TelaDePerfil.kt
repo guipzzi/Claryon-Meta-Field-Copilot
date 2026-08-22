@@ -58,6 +58,8 @@ fun TelaDePerfil(
     /** Quem consultou a posição deste agente. Ver `QuemMeConsultouViewModel`. */
     consultas: QuemMeConsultouViewModel.Estado,
     aoSair: () -> Unit,
+    /** Abre a perícia da cadeia de custódia. Ver [TelaDePericia]. */
+    aoAbrirPericia: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
@@ -85,6 +87,27 @@ fun TelaDePerfil(
         Box(Modifier.height(Espaco.Secao))
 
         QuemMeConsultou(consultas)
+
+        Box(Modifier.height(Espaco.Secao))
+
+        // **A porta da perícia.** Sem esta seção, `verificar()` e `Manifesto.ler()`
+        // continuariam com zero chamadores em `src/main`: o produto selaria a
+        // âncora de fim em produção e conferiria só em teste, e periciar exigiria
+        // `adb` sobre o diretório privado — o mesmo acesso que o modelo de ameaça
+        // trata como atacante. Fica no perfil, junto do relatório de prontidão e do
+        // log de acesso, porque as três respondem à mesma família de pergunta: o
+        // que este aparelho está fazendo com o que é meu.
+        Column(Modifier.padding(horizontal = Espaco.Padrao)) {
+            Etiqueta("Cadeia de custódia")
+            Box(Modifier.height(Espaco.Curto))
+            TextoCorpoMenor(
+                "Confere as gravações seladas neste aparelho contra o manifesto e a " +
+                    "âncora de fim.",
+                cor = Cores.TintaFraca,
+            )
+            Box(Modifier.height(Espaco.Medio))
+            BotaoTatico("Periciar a custódia", aoAbrirPericia)
+        }
 
         Box(Modifier.height(Espaco.Secao))
 
@@ -186,7 +209,7 @@ private fun LinhaDeCapacidade(c: Capacidade) {
             .padding(horizontal = Espaco.Padrao, vertical = Espaco.Medio),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        PontoDeEstado(if (c.viva) Cores.Vivo else Cores.Falha)
+        PontoDeEstado(if (c.viva) Cores.TintaFraca else Cores.Tinta)
         Box(Modifier.width(Espaco.Medio))
         Column(Modifier.weight(1f)) {
             Text(c.nome, style = Tipo.Corpo, color = if (c.viva) Cores.Tinta else Cores.TintaMedia)
@@ -197,6 +220,6 @@ private fun LinhaDeCapacidade(c: Capacidade) {
                 TextoCorpoMenor(it, cor = Cores.TintaFraca)
             }
         }
-        Etiqueta(if (c.viva) "ok" else "parado", cor = if (c.viva) Cores.Vivo else Cores.Falha)
+        Etiqueta(if (c.viva) "ok" else "parado", cor = if (c.viva) Cores.TintaFraca else Cores.Tinta)
     }
 }

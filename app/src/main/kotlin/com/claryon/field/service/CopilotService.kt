@@ -175,15 +175,24 @@ class CopilotService : Service() {
                     System.currentTimeMillis(),
                 )
                 ultimaAtivacao = cicloId
-                // **O PRIMEIRO de dois earcons, e eles dizem coisas diferentes.**
-                // Este é "estou ouvindo, pode falar", e é dele que sai a meta `fim de
-                // "Claryon" → earcon ≤ 500 ms` — que só existe se quem confirma a
-                // escuta for quem ouviu a palavra. O `VoiceCycle` emite o segundo no
-                // fechamento do VAD: "ouvi o comando, estou trabalhando". Sem display,
-                // som é o único canal, e calar o segundo deixaria o agente sem
-                // resposta nenhuma nos ~2 s entre o fim da fala e a resposta falada.
+                // **BOMMM — o primeiro tempo da gramática, e é aqui que a marca
+                // sonora do produto existe.**
+                //
+                // Até 22/08 este earcon e o do fechamento do VAD eram os DOIS
+                // `OUVI_VOCE`, e este comentário afirmava, com estas palavras, que
+                // "eles dizem coisas diferentes". Diziam — e soavam igual. Num
+                // produto sem display, dois significados com um som só é o agente
+                // sem saber se pode falar ou se já foi ouvido.
+                //
+                // Agora é `DESPERTAR`: golpe de sino inarmônico, o único earcon com
+                // ataque de golpe, som que não é de nenhum outro aparelho da
+                // viatura. É dele que sai a meta `fim de "Claryon" → earcon
+                // ≤ 500 ms`, que só existe se quem confirma a escuta for quem ouviu
+                // a palavra. O `VoiceCycle` emite os outros dois tempos: `bipbip`
+                // quando o microfone de fato abre e `trimtrim` quando o agente para
+                // de falar.
                 SaidaUnica.de(applicationContext)
-                    .emitir(Utterance.Sinalizar(Earcon.OUVI_VOCE, Priority.RESPOSTA))
+                    .emitir(Utterance.Sinalizar(Earcon.DESPERTAR, Priority.RESPOSTA))
                 // Cala pela duração de um ciclo. O `VoiceCycle` tem teto de 8 s; os
                 // 10 s cobrem a resposta falada depois dele. Sem isto o copiloto
                 // ouviria a própria fala e o supressor sozinho não basta — ele cobre

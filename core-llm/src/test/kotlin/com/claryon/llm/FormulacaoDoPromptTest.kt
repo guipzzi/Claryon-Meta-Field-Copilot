@@ -79,7 +79,7 @@ class FormulacaoDoPromptTest {
      */
     @Test
     fun nenhumaInstrucaoCarregaMaterialDoPedido() {
-        for (f in FormulacaoDoPrompt.TODAS) {
+        for (f in FormulacaoDoPrompt.TODAS_MEDIDAS) {
             for (material in listOf(pedido.pergunta, pedido.trecho, pedido.procedencia)) {
                 assertFalse(
                     "A instrução de ${f.nome} contém material do pedido. O `system` é " +
@@ -100,7 +100,7 @@ class FormulacaoDoPromptTest {
      */
     @Test
     fun nenhumaFormulacaoMandaAProcedenciaAoModelo() {
-        for (f in FormulacaoDoPrompt.TODAS) {
+        for (f in FormulacaoDoPrompt.TODAS_MEDIDAS) {
             assertFalse(
                 "${f.nome} manda a procedência ao modelo. Ela é concatenada por quem " +
                     "chama, para que o modelo não possa reescrevê-la.",
@@ -158,10 +158,42 @@ class FormulacaoDoPromptTest {
         }
     }
 
+    /**
+     * **A única formulação que não entrega o trecho é a da Pista 2, e ela não
+     * está em [FormulacaoDoPrompt.TODAS] por isso.**
+     *
+     * `toda_formulacaoEntregaOTrecho` está certo e continua valendo para geração
+     * livre: prompt sem trecho é pedido para inventar norma. O que muda em
+     * [FormulacaoDoPrompt.EXTRACAO_SO_A_PERGUNTA] é que a fonte não viaja no
+     * contexto — viaja na **gramática**, e fora dela não há token sorteável.
+     *
+     * Este teste é a fronteira escrita: se um dia F7 aparecer em `TODAS`, o teste
+     * de lá quebra; se ela parar de omitir o trecho, quebra este, e a medição de
+     * prefill mínimo deixa de medir prefill mínimo.
+     */
+    @Test
+    fun aDaPista2_naoEntregaOTrecho_eNaoEstaEmTODAS() {
+        assertFalse(
+            "F7 voltou a mandar o trecho ao modelo. Ela existe para medir o prefill " +
+                "mínimo: com a gramática na cadeia, a fonte está na jaula, não no contexto.",
+            pedido.trecho.trim() in FormulacaoDoPrompt.EXTRACAO_SO_A_PERGUNTA.usuario(pedido),
+        )
+        assertFalse(
+            "F7 entrou em TODAS, onde toda formulação tem de entregar o trecho.",
+            FormulacaoDoPrompt.EXTRACAO_SO_A_PERGUNTA in FormulacaoDoPrompt.TODAS,
+        )
+        // Controle: a irmã dela, que difere APENAS por levar o trecho, leva mesmo.
+        // Sem isto o par não isola nada.
+        assertTrue(
+            "F6 parou de entregar o trecho. Ela é o lado 'com contexto' do par F6/F7.",
+            pedido.trecho.trim() in FormulacaoDoPrompt.EXTRACAO_COM_TRECHO.usuario(pedido),
+        )
+    }
+
     /** Nome repetido embaralha as linhas da tabela do log, que é lida por humano. */
     @Test
     fun osNomesSaoUnicos() {
-        val nomes = FormulacaoDoPrompt.TODAS.map { it.nome }
+        val nomes = FormulacaoDoPrompt.TODAS_MEDIDAS.map { it.nome }
         assertEquals("Nome de formulação repetido: $nomes", nomes.size, nomes.toSet().size)
     }
 

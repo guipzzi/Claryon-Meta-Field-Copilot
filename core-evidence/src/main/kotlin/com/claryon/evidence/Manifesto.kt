@@ -25,15 +25,24 @@ import java.io.FileOutputStream
  * ## Por que continua em texto claro
  *
  * Hashes não são segredo, e o manifesto em claro é o que permite a um terceiro
- * conferir a custódia **sem** a chave do Keystore. A contrapartida honesta: o
- * manifesto **não é assinado**. Quem tiver acesso de escrita ao diretório pode
- * reescrevê-lo. O que ele garante é que o conjunto (segmentos cifrados +
- * manifesto) seja **consistente**; não substitui a perícia no aparelho.
+ * conferir a custódia **sem** a chave do Keystore. Ele continua **reescrevível** por
+ * quem tenha acesso de escrita ao diretório — o que a v3 acrescenta não é
+ * confidencialidade, é uma linha que esse alguém **não consegue reproduzir**.
+ *
+ * ## A linha `A`, e o que ela mudou na v3
+ *
+ * Até a v2 o manifesto não era assinado de forma nenhuma, e o custo disso não era o
+ * genérico "poderia ser reescrito": era um ataque concreto e barato. Apagar os
+ * últimos segmentos e as linhas `S` correspondentes deixava uma cadeia
+ * **aritmeticamente perfeita**, e a conferência respondia íntegra sobre uma
+ * gravação da qual o fim tinha sido removido. A v3 acrescenta a linha `A` —
+ * HMAC-SHA256 com chave do Keystore sobre "terminou com N segmentos, último hash
+ * H". Ver [AncoraDeFim], inclusive o que ela **não** fecha.
  *
  * ## Formato
  *
  * ```
- * versao=2
+ * versao=3
  * handle=<id>
  * formato=pcm_s16le_mono
  * taxaHz=16000
@@ -42,11 +51,14 @@ import java.io.FileOutputStream
  * S<TAB><seq><TAB><prev|-><TAB><sha256><TAB><bytes>
  * P<TAB><seq><TAB><epochMillis><TAB><motivo>
  * F<TAB><epochMillis><TAB><motivo|->
+ * A<TAB><segmentos><TAB><ultimoHash|-><TAB><hmacSha256>
  * ```
  *
  * A letra inicial classifica a linha. Ela também é o que torna a migração
  * trivial: **as linhas da versão 1 começam com dígito**, então distinguir os dois
- * formatos não depende de heurística.
+ * formatos não depende de heurística. E é o que deixou a v3 caber na v2 sem
+ * quebrar nada: `A` é a **última** linha escrita, então um leitor v2 lê a gravação
+ * inteira e apenas para nela.
  *
  * ## Linha truncada é linha descartada
  *
@@ -57,7 +69,8 @@ import java.io.FileOutputStream
  */
 object Manifesto {
 
-    const val VERSAO_ATUAL = 2
+    /** 3 desde a âncora de fim. Ver [AncoraDeFim.VERSAO_COM_ANCORA]. */
+    const val VERSAO_ATUAL = 3
     const val NOME = "manifest.txt"
 
     private const val SEP = '\t'
@@ -99,6 +112,14 @@ object Manifesto {
         fun fim(epochMillis: Long, motivo: String?) =
             escrever("F$SEP$epochMillis$SEP${motivo ?: NULO}\n")
 
+        /**
+         * Última linha do arquivo, escrita **depois** de [fim] porque o horário e o
+         * motivo do fim entram no que ela assina.
+         */
+        fun ancora(a: AncoraDeFim.Ancora) = escrever(
+            "A$SEP${a.segmentos}$SEP${a.ultimoHashHex ?: NULO}$SEP${a.macHex}\n",
+        )
+
         private fun escrever(texto: String) {
             saida.write(texto.toByteArray(Charsets.UTF_8))
             saida.flush()
@@ -124,6 +145,7 @@ object Manifesto {
         val inicioEpochMillis: Long,
         val fimEpochMillis: Long?,
         val motivoDoFim: String?,
+        val ancora: AncoraDeFim.Ancora? = null,
     ) {
         val finalizado: Boolean get() = fimEpochMillis != null
 
@@ -137,6 +159,7 @@ object Manifesto {
             janelaMs = janelaMs,
             purgados = purgados,
             motivoDoFim = motivoDoFim,
+            ancora = ancora,
         )
     }
 
@@ -167,6 +190,7 @@ object Manifesto {
         var inicio = 0L
         var fim: Long? = null
         var motivoDoFim: String? = null
+        var ancora: AncoraDeFim.Ancora? = null
         val cadeia = ArrayList<ChunkHash>()
         val purgados = ArrayList<Purga>()
 
@@ -186,6 +210,7 @@ object Manifesto {
                 linha[0] == 'S' -> parseSegmento(linha)?.also { cadeia.add(it) } != null
                 linha[0] == 'P' -> parsePurga(linha)?.also { purgados.add(it) } != null
                 linha[0] == 'F' -> parseFim(linha)?.also { (t, m) -> fim = t; motivoDoFim = m } != null
+                linha[0] == 'A' -> parseAncora(linha)?.also { ancora = it } != null
                 else -> false
             }
             // Rasgo só acontece no fim de um arquivo append-only: a primeira linha
@@ -195,8 +220,19 @@ object Manifesto {
         val id = handle ?: return null
         return Lido(
             versao, RecordingHandle(id), cadeia, purgados,
-            formato, taxa, janelaMs, inicio, fim, motivoDoFim,
+            formato, taxa, janelaMs, inicio, fim, motivoDoFim, ancora,
         )
+    }
+
+    private fun parseAncora(linha: String): AncoraDeFim.Ancora? {
+        val p = linha.split(SEP)
+        if (p.size < 4) return null
+        val n = p[1].toIntOrNull() ?: return null
+        // MAC de tamanho errado é linha rasgada, não âncora — e âncora rasgada tem
+        // de sumir, não virar uma que "não confere". A distinção importa: AUSENTE
+        // é o que a queda produz, INVALIDA é o que a adulteração produz.
+        if (p[3].length != 64) return null
+        return AncoraDeFim.Ancora(n, p[2].takeIf { it != NULO }, p[3])
     }
 
     private fun parseSegmento(linha: String): ChunkHash? {

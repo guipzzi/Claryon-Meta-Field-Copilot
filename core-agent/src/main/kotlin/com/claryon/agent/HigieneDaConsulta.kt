@@ -227,15 +227,26 @@ object HigieneDaConsulta {
     )
 
     /**
-     * As palavras do alfabeto fonético, tiradas da **tabela**, não escritas à mão.
+     * As palavras de CÓDIGO do alfabeto fonético, tiradas da **tabela**, não
+     * escritas à mão.
      *
      * `AlfabetoFonetico.letra` não serve aqui: ela aceita letra sozinha por regra
-     * ("a", "e", "o" valem a si mesmas), e "de" da categoria *posto de saúde*
-     * cairia perto demais dessa regra. O que interessa é a palavra do código —
+     * ("a", "e", "o" valem a si mesmas). O que interessa é a palavra do código —
      * "alfa", "bravo", "tango" —, que é o que forma indicativo.
+     *
+     * **Isto era `palavrasDe`, e estava errado.** `palavrasDe` inclui o NOME das
+     * letras ("be", "ce", "de", "te", "que", "esse"), que são palavra corrente do
+     * português e não formam indicativo nenhum. O preço foi concreto e estava em
+     * produção: `CategoriaDeLugar.POSTO_DE_SAUDE` tem o termo `"posto de saude"`, o
+     * `"de"` casava com D, o `check` de [ConsultaHigienizada.de] lançava, e o
+     * `runCatching` do executor traduzia isso em `FalhaOperacional.INTERNA` — o
+     * agente que perguntasse por um posto de saúde ouvia "Falha interna.".
+     *
+     * O KDoc anterior **afirmava** que usar `palavrasDe` evitava exatamente esse
+     * caso. Afirmava, não media; o teste `todaCategoria_temTermoQuePassaNoFiltro`
+     * mede, e foi ele quem achou.
      */
-    private val PALAVRAS_DO_ALFABETO: Set<String> =
-        ('A'..'Z').flatMap { AlfabetoFonetico.palavrasDe(it) }.toSet()
+    private val PALAVRAS_DO_ALFABETO: Set<String> = AlfabetoFonetico.palavrasDeCodigo()
 
     /**
      * Palavras que aparecem capitalizadas sem serem nome de gente ou de rua.

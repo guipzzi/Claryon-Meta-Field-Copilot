@@ -199,6 +199,17 @@ object AlfabetoFonetico {
     }
 
     /**
+     * O mesmo conjunto **sem** [NOME_DA_LETRA]. Ver [palavrasDeCodigo].
+     *
+     * Montado a partir das mesmas listas, e não escrito à mão, para que uma palavra
+     * nova de código entre nos dois lugares de uma vez.
+     */
+    private val PALAVRAS_DE_CODIGO: Set<String> =
+        listOf(INTERNACIONAL, ABRASILEIRADO, NACIONAL_REJEITADO, SEM_FONTE)
+            .flatMap { it.values.flatten() }
+            .toSet()
+
+    /**
      * Índice invertido: palavra → letra.
      *
      * Onde duas letras reivindicam a mesma palavra, **a primeira lista vence** —
@@ -233,6 +244,22 @@ object AlfabetoFonetico {
 
     /** As palavras aceitas para [letra] — a primeira é a canônica. */
     fun palavrasDe(letra: Char): List<String> = PALAVRAS[letra.uppercaseChar()].orEmpty()
+
+    /**
+     * **Só as palavras de CÓDIGO — sem o nome das letras.**
+     *
+     * "alfa", "bravo", "tango", "romeu", "unido" formam indicativo de guarnição.
+     * "de", "te", "pe", "que", "esse" **não formam nada**: são o nome da letra, e
+     * também são palavra corrente do português. Quem soletra uma placa usa as duas
+     * famílias; quem nomeia uma guarnição usa só a primeira.
+     *
+     * Existe porque [palavrasDe] — que devolve as duas famílias juntas — foi usada
+     * como se fosse esta, e o preço apareceu em produção: `CategoriaDeLugar
+     * .POSTO_DE_SAUDE` tem o termo `"posto de saude"`, o `"de"` casava com D, e
+     * `ConsultaHigienizada.de(POSTO_DE_SAUDE)` **lançava** — o agente que
+     * perguntasse por um posto de saúde ouviria "Falha interna.".
+     */
+    fun palavrasDeCodigo(): Set<String> = PALAVRAS_DE_CODIGO
 
     /**
      * Casamento por som, para o que o whisper corrompeu ("tangu" por "tango").

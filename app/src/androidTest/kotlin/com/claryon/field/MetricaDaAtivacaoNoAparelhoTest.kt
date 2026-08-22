@@ -30,7 +30,7 @@ import org.junit.runner.RunWith
  * meses.
  *
  * Aqui o teste faz o que o `CopilotService` faz ao detectar: abre o ciclo, marca a
- * ativação e emite `OUVI_VOCE` pelo dono único da saída. Só o detector é
+ * ativação e emite `DESPERTAR` pelo dono único da saída. Só o detector é
  * dispensado — o resto do caminho é o de produção.
  *
  * ### O que este teste NÃO afirma
@@ -60,10 +60,14 @@ class MetricaDaAtivacaoNoAparelhoTest {
         tel.abrirCiclo(cicloId)
         tel.mark(cicloId, Telemetry.Stage.WAKE_DETECTED, System.currentTimeMillis())
 
-        SaidaUnica.de(app).emitir(Utterance.Sinalizar(Earcon.OUVI_VOCE, Priority.RESPOSTA))
+        // `DESPERTAR` e não outro earcon qualquer: `SaidaUnica.marcarReproducao`
+        // tem uma LISTA FECHADA de tons que contam como marco de ciclo, e um
+        // earcon de fora dela nunca fecharia esta métrica. O teste tem de emitir
+        // o mesmo que a produção emite, senão ele prova outro caminho.
+        SaidaUnica.de(app).emitir(Utterance.Sinalizar(Earcon.DESPERTAR, Priority.RESPOSTA))
 
         // A fila é assíncrona e a rota pode precisar subir. 5 s é folga larga para
-        // um earcon de 180 ms; o que se mede é se ele CHEGA, não quanto demora.
+        // um earcon de 520 ms; o que se mede é se ele CHEGA, não quanto demora.
         //
         // `while` e não `repeat { ... return@repeat }`: `return@repeat` sai da
         // LAMBDA, não do laço — ele continua iterando, só sem esperar. A primeira

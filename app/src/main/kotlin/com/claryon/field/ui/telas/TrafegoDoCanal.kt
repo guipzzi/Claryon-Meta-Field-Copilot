@@ -126,9 +126,62 @@ data class ItemDeTrafego(
             append(if (fala.propria) "Você" else autorExibido)
             if (fala.hora != HORA_DESCONHECIDA) append(", ").append(fala.hora)
             append(". ").append(fala.texto)
+            // **DEPOIS do texto, e não antes.** É o oposto da procedência, que vem
+            // antes de propósito — aquela desqualifica o autor, e quem ouve precisa
+            // saber de quem é a frase ANTES de recebê-la. Esta qualifica o FIM da
+            // frase, e anunciá-la antes faria o leitor de tela dizer "cortada" sobre
+            // um texto que ele ainda não leu.
+            //
+            // O tracejado terminal é sinal visual e não sobrevive ao áudio — mesma
+            // razão pela qual a lateralidade virou "Você" aqui.
+            if (fala.cortadaPelaRede) append(". ").append(FALA_CORTADA_EM_VOZ)
             if (rotuloDeEntrega == RotuloDeEntrega.NAO_SAIU) append(". Não saiu")
         }
 }
+
+/**
+ * **A marca escrita no rodapé do registro.**
+ *
+ * Função pura e fora do `@Composable` pela razão que o KDoc deste arquivo abre: o
+ * projeto não declara `ui-test-junit4`, então decisão dentro de composable é decisão
+ * sem teste. Era um `when` no corpo de `RodapeDoRegistro`, e ganhou um terceiro caso
+ * — que é exatamente quando um `when` escondido para de ser óbvio.
+ *
+ * ---
+ * ### Por que os três casos cabem num campo só
+ *
+ * "enviada" e "não saiu" falam do **envio deste aparelho**; "cortada" fala da
+ * **recepção**. Parecem duas famílias, e são — mas são mutuamente exclusivas por
+ * construção, não por sorte: [ItemDeTrafego.rotuloDeEntrega] é `null` em toda fala
+ * recebida (*"dizer 'enviada' sob a fala de outro agente afirmaria algo sobre um
+ * aparelho que não é este"*), e `FalaNoGrupo.cortadaPelaRede` só é `true` em fala
+ * recebida — `EventoRecepcao.Terminou` não existe para transmissão própria, e o
+ * truncamento da própria é `Entrega.NAO_SAIU`, outro fenômeno com rótulo próprio.
+ *
+ * Ou seja: o rodapé da fala recebida tinha um slot **permanentemente vazio**, e o
+ * fato que faltava na tela é justamente o que só acontece nela. Não há colisão a
+ * arbitrar, e por isso não há precedência escrita aqui — se um dia houver, ela vira
+ * decisão explícita em vez de ordem de `when`.
+ */
+fun marcaDoRodape(item: ItemDeTrafego): String? = when {
+    // Minúscula, como as outras duas: o rodapé é metadado e metadado não grita.
+    // A caixa-alta desta tela é reservada ao genuinamente excepcional — ver
+    // `RodapeDoRegistro`, que perdeu o `ENVIADA` em versal por esse motivo.
+    item.fala.cortadaPelaRede -> "cortada"
+    item.rotuloDeEntrega == RotuloDeEntrega.ENVIADA -> "enviada"
+    item.rotuloDeEntrega == RotuloDeEntrega.NAO_SAIU -> "não saiu"
+    else -> null
+}
+
+/**
+ * O que o leitor de tela ouve no lugar do tracejado terminal.
+ *
+ * Frase e não palavra solta: "cortada" sozinha, depois da transcrição, poderia ser
+ * lida como parte da fala do agente. O sujeito explícito separa o que o rádio diz do
+ * que o aparelho diz — a mesma divisão que a tela faz em duas famílias tipográficas
+ * e que o áudio não tem como reproduzir.
+ */
+const val FALA_CORTADA_EM_VOZ = "Fala cortada pela rede"
 
 /** `"P1 emergência"`. Escrito, e não só colorido — ver [montarTrafego]. */
 fun rotuloDePrioridade(prioridade: Int): String = when (prioridade) {

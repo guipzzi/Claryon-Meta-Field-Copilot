@@ -262,7 +262,7 @@ Duas propriedades desse desenho são invariantes, não preferências:
 
 | Marca | Alvo |
 |---|---|
-| fim de "Claryon" → **início** do earcon `OUVI_VOCE` | p95 ≤ **500 ms** |
+| fim de "Claryon" → **início** do earcon `DESPERTAR` (BOMMM) | p95 ≤ **500 ms** |
 | fim do enunciado completo → BIP de canal aberto | p95 ≤ **1 200 ms** |
 | fim do enunciado completo → primeiro quadro de 20 ms no ar | p95 ≤ **1 500 ms** |
 | falso aceite que **abre canal** | ≤ 1 por 8 h |
@@ -606,9 +606,18 @@ abaixo.
 - [UX] Escala tipográfica de dado tabular: indicativo, distância, rumo e idade alinhados por
   coluna, com tabular figures. É o que faz a tela ler como instrumento e não como app de
   mensagem — esforço: 0,5 sessão — depende: auditoria.
-- [UX] Movimento com a skill `motion-design`, e só onde carrega informação: o pulso do "no
-  ar", a transição de piso concedido/negado, o esmaecimento do marcador por idade. Nada
-  decorativo — esforço: 1 sessão — depende: itens acima.
+- [UX] ~~Movimento com a skill `motion-design`~~ **FEITO em 22/08**, e o item mudou de
+  conteúdo no caminho. Ligados, com chamador em `src/main`: piso concedido/negado
+  (`Casco.kt`, `BarraDePtt.kt`), esmaecimento por idade (`TelaDoMapa.kt`), retorno de toque
+  (`Modifier.tocavel`, que é o controle por onde passa cada botão, aba e linha do sistema) e
+  **passagem entre as páginas da guarnição** — esta última não estava previsto aqui e entrou
+  por decisão do dono: as três páginas são uma pilha, e a direção é a informação.
+  **O pulso do "no ar" NÃO foi feito, e não é pendência: foi removido.** Ele pedia
+  `quadrosNoAr` — quadros confirmados no fio — e a única grandeza que chega à barra é
+  `decorridoMs`, calculada pelo relógio da tela. Alimentar a batida com o relógio faria o
+  âmbar pulsar alegremente sobre um canal morto, que é a mentira visual que a regra 1 do
+  `Movimento` existe para proibir. O que o traz de volta é um contador de quadros publicado
+  por `RadioTatico` — enquanto não houver, a ausência de batida é a informação correta.
 - [UX] Teste de captura por tela para não regredir depois — esforço: 0,5 sessão — depende:
   itens acima.
 - [SEG] ~~Permissão de câmera do DAT pedida em produção~~ **FEITA em 21/08.**

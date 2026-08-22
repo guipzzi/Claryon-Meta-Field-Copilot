@@ -56,12 +56,16 @@ Inverter 4 e 5 → captura de voz intermitente. HFP totalmente configurado **ant
 
 ### Ciclo de voz
 ```
-PCM (HFP) → WakeWord → VAD fecha janela → [earcon "ouvi você" IMEDIATO]
+WakeWord → [DESPERTAR, "BOMMM"] → PCM (HFP) → [CANAL_ABERTO, "bipbip"]
+  → VAD fecha janela → [CANAL_FECHADO, "trimtrim" IMEDIATO]
   → SttEngine.transcribe() → IntentRouter → IntentExecutor.execute()
   → utteranceFor(ActionOutcome) → SoundQueue (earcon e/ou TTS)
 ```
 Duas ordens que não podem ser invertidas:
-1. O earcon dispara quando o **VAD fecha a janela**, não quando o STT termina.
+1. O earcon de fechamento dispara quando o **VAD fecha a janela**, não quando o STT
+   termina. E o de abertura sai quando o microfone de fato abre — não junto com o
+   BOMMM: entre os dois há salto de corrotina, subida de SCO e carga do Whisper, e
+   até 22/08 o agente não tinha como saber quando podia falar.
 2. A **ação acontece antes** de existir qualquer frase — `utteranceFor` recebe o
    resultado, nunca a intenção. Ver "Honestidade" adiante.
 
@@ -154,7 +158,13 @@ Todo acesso ao DAT passa por `GlassesFacade` em `core-glasses` — quando a 0.9 
 
 - ❌ **Reconhecimento facial, embeddings faciais ou base biométrica.** Nenhuma versão, nenhuma flag
 - ❌ Transcrever, classificar ou indexar a fala de terceiros — áudio bruto é evidência, não dado analisável
-- ❌ Enviar áudio, transcrição ou frame para serviço externo no caminho crítico
+- ❌ Enviar áudio, frame ou **transcrição literal** para serviço externo — absoluto para os três.
+  **Revogado em parte em 22/08 pelo dono do projeto:** consulta **textual derivada**, reconstruída
+  a partir da intenção e nunca da fala, é permitida sob as condições de
+  [`../specs/consulta-externa.spec.md`](../specs/consulta-externa.spec.md) — vocabulário fechado,
+  higiene que remove placa/matrícula/nome/indicativo, prazo de 2 s, local sempre primeiro,
+  procedência registrada. Fora dessa spec a proibição vale inteira, e dado de terceiro, posição de
+  par e identificador de agente continuam sem caminho nenhum para fora
 - ❌ Credencial em arquivo versionado
 - ❌ Evidência fora de `EncryptedFile` + Android Keystore
 - ❌ **LLM escolhendo ação.** O modelo de linguagem pode **propor o preenchimento de
@@ -248,10 +258,23 @@ Capturar exige `GlassesAudioRoute`, e o único jeito de obter uma é rotear de f
   `ResultadoDaLiberacao`, e `NaoDevolvido` vira tom antes de `Encerrada`. Um
   `liberar_canal` perdido deixa a guarnição muda até o TTL de 30 s, e só quem causou pode
   agir
-- **Fim de fala recebida diz COMO acabou.** `EventoRecepcao.Terminou` carrega
-  `FimDaFala.ENCERRADA_PELO_EMISSOR | CORTADA_NO_MEIO`. `perdidos` vem zero justamente no
-  caso truncado — o receptor não sabe contar quadros que nunca existiram —, então contar
-  nunca bastou para distinguir
+- **Fim de fala recebida diz COMO acabou — e o fato chega ao OUVIDO e ao BALÃO.**
+  `EventoRecepcao.Terminou` carrega `FimDaFala.ENCERRADA_PELO_EMISSOR | CORTADA_NO_MEIO`.
+  `perdidos` vem zero justamente no caso truncado — o receptor não sabe contar quadros que
+  nunca existiram —, então contar nunca bastou para distinguir. Até 22/08 o corte virava só
+  earcon mais `FALA_DO_COLEGA_CORTADA`, e a tela desenhava a fala truncada campo por campo
+  igual à inteira: quem estava de capacete não recebia o fato por caminho nenhum. Hoje
+  `RadioTatico.aoFalaCortada` → `RadioViewModel.marcarCorteDaRede` → `comCorteDaRede` marca
+  o balão, e ele sai com régua tracejada terminal, `"cortada"` no rodapé e a frase na
+  leitura em voz. **A marca vive em DISCO LOCAL e é reaplicada a cada recarga**:
+  `transmissions` não tem coluna para o motivo do fim, e sem reaplicar a marca sumiria no
+  poll seguinte, dez segundos depois. A RAM não bastou — o serviço é `START_STICKY` e o
+  sistema o recria, e depois disso o aparelho **tinha** o fato de primeira mão e o esquecia.
+  Não vai ao servidor de propósito: o corte é **conclusão do receptor**, e dois receptores
+  da mesma transmissão discordam com razão — quem está no túnel conclui `CORTADA_NO_MEIO`,
+  quem está no descampado recebeu tudo. Escrever no servidor faria a condição de rede de um
+  aparelho virar fato global. `CortesConhecidos` poda por validade (12 h, um turno) e por
+  teto (200 ids), porque marca acumulada por turnos vira lixo que ninguém limpa
 - **Piso local se declara em voz na abertura do rádio.** Sem sessão não há arbitragem do
   servidor, e dois aparelhos podem se achar donos do mesmo canal. A degradação fica (o
   rádio precisa funcionar em túnel); o silêncio sobre ela, não
@@ -285,6 +308,36 @@ Capturar exige `GlassesAudioRoute`, e o único jeito de obter uma é rotear de f
 - Resultado de consulta sensível sai como **earcon codificado + fala curta** (≤7
   palavras). Até 21/08 a regra era "nunca falado" — alto-falante open-ear vaza som para quem está ao lado
 - Falha nunca é silêncio. Todo erro tem earcon próprio
+- **A gramática do canal tem três tempos, e os papéis não se invertem.** (22/08.)
+  `"Claryon"` → `DESPERTAR` (BOMMM, golpe de sino inarmônico) · canal abre →
+  `CANAL_ABERTO` (bipbip, dois chirps subindo) · o agente para de falar, ou 30 s →
+  `CANAL_FECHADO` (trimtrim, dois chirps descendo). **Despertar é IDENTIDADE** — som
+  que só existe neste produto, e é o que a marca registra; **abrir e fechar canal é
+  CONVENÇÃO**, copiada do chirp do Nextel/iDEN porque o policial já sabe o que
+  significa. Convenção poupa treinamento, identidade cria marca. Inverter custa as
+  duas coisas: uma marca que ninguém reconhece e um par de sons a aprender
+- **Todo earcon vive entre 400 e 3400 Hz.** O elo até os óculos é HFP/SCO de banda
+  estreita — acima de ~3,4 kHz nada chega, e planejar parcial ali é planejar
+  silêncio. Abaixo de ~400 Hz mora o ruído de viatura (motor, rolamento,
+  ventilação). O `FALHA` varria até 300 Hz e tinha **54 % da energia debaixo do
+  motor**, justamente no sinal que avisa que algo deu errado
+- **Dois earcons se separam por MORFOLOGIA, não por frequência.** Sob banda estreita
+  e ruído grave, o que sobrevive é quantos elementos há, separados por quanto
+  silêncio, e se cada um sobe, desce ou fica plano. Altura absoluta é a primeira
+  pista a cair. Cada earcon tem uma assinatura `(nº de elementos, contornos,
+  ataque)` **única e calculada do PCM** — declarar a assinatura ao lado do
+  sintetizador faria o teste conferir a si mesmo
+- **Vocabulário sonoro tem teste de distinguibilidade PAR A PAR, e ele mede o
+  ataque.** Até 22/08 nada guardava isso, e o resultado foi previsível:
+  `GRAVANDO` e `CONSULTA_FURTO_ROUBO` eram **idênticos bit a bit por 115 ms** (os
+  dois abriam com `tone(500.0, …)`), e `ACAO_EXECUTADA` e `CONSULTA_RESTRICAO_ADMIN`
+  tinham a mesma morfologia a 4,5 semitons. Os primeiros ~120 ms têm régua própria
+  porque é neles que o agente decide se o som é para ele — um par que só diverge no
+  fim já cobrou a atenção inteira antes de dizer o que era
+- **Todo earcon precisa de chamador em `src/main`** (`ChamadorDosEarconsTest`).
+  Earcon sintetizado e nunca tocado é a mesma família de defeito do §6 do
+  `CLAUDE.md`, e é a mais fácil de cometer: nasce numa entrada de `enum`, ganha um
+  ramo no `when`, passa nos testes de síntese, e nunca sai por um alto-falante
 - Fila de prioridade: nível 1 (emergência) interrompe tudo; nível 3 é suprimido em Modo Tático
 - **"Interrompe tudo" inclui a SÍNTESE, não só o que já está soando.** Uma fala do
   copiloto passa ~1 s dentro do Piper antes de virar som, e uma leitura de norma passa

@@ -460,8 +460,15 @@ class ClaryonIntentExecutor(
      * [BuscaDePar]: *nada por perto* é o sistema funcionando, *sem rede* e *prazo
      * estourado* são falhas — e as três pedem ações diferentes do agente.
      */
-    private suspend fun consultarLugar(categoria: CategoriaDeLugar): ActionOutcome =
-        when (val b = procurarLugar(categoria)) {
+    private suspend fun consultarLugar(categoria: CategoriaDeLugar): ActionOutcome {
+        // **Mesmo portão de [consultarPosicao], e pela mesma razão.** "O hospital
+        // mais próximo" é pergunta RELATIVA: sem permissão de local não há centro
+        // de busca, e a recusa precisa dizer *isto*, porque a recuperação é abrir
+        // os ajustes — não andar até pegar sinal, não repetir o comando.
+        if (!permissaoDeLocal()) {
+            return ActionOutcome.Falhou(FalhaOperacional.SEM_PERMISSAO_DE_LOCAL)
+        }
+        return when (val b = procurarLugar(categoria)) {
             is BuscaDeLugar.Encontrado -> ActionOutcome.LugarEncontrado(b.lugar)
 
             // Teve rede e não há nada no raio. NÃO é falha — o mesmo raciocínio de
@@ -477,7 +484,14 @@ class ClaryonIntentExecutor(
                 ActionOutcome.Falhou(FalhaOperacional.CONSULTA_SEM_REDE)
             BuscaDeLugar.PrazoEstourado ->
                 ActionOutcome.Falhou(FalhaOperacional.CONSULTA_DEMOROU)
+
+            // Permissão concedida e ainda assim sem centro de busca: o GPS não tem
+            // correção recente. A fala é a mesma da consulta de posição, e é a
+            // certa — "esperar sinal" é o que o agente faz nos dois casos.
+            BuscaDeLugar.SemPosicaoPropria ->
+                ActionOutcome.Falhou(FalhaOperacional.SEM_POSICAO_PROPRIA)
         }
+    }
 
     private suspend fun consultarPosicao(indicativo: String): ActionOutcome {
         // Permissão é a única pré-condição local que faz sentido aqui.

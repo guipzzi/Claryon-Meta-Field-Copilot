@@ -86,7 +86,20 @@ object Movimento {
     /** Remanejo de layout, gaveta, expansão. */
     const val MEDIO = 240
 
-    /** Teto para interface de produto. Acima disto, precisa de justificativa escrita. */
+    /**
+     * Teto para interface de produto. Acima disto, precisa de justificativa escrita.
+     *
+     * **Zero chamadores, e de propósito — este é um LIMITE, não uma capacidade.**
+     * Auditado em 22/08 junto com os símbolos que foram removidos por não terem
+     * chamador, e mantido porque a pergunta 2 do §6 separa as duas coisas: função
+     * pública sem chamador dá a impressão de uma capacidade que não existe; uma
+     * régua sem chamador continua sendo a régua. Ele é o número contra o qual
+     * [RespiroDePresenca] e [DECAIMENTO] se justificam por escrito, e o dia em que
+     * uma animação o alcançar é o dia em que ela precisa de justificativa.
+     *
+     * Se um dia alguém o "ligar" só para tirá-lo desta lista, o teto vira duração
+     * comum e perde a função.
+     */
     const val LONGO = 300
 
     /**

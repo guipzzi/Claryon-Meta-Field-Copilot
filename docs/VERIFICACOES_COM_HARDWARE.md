@@ -56,6 +56,29 @@ porque trazem o beamforming, mas não são pré-requisito.
 3. **A ida e volta completa**, com o aparelho no bolso: "Claryon, guarnição 3
    na escuta" → earcon → BIP → quadros no ar.
 
+### O vocabulário de earcons — o que a bancada NÃO responde (22/08)
+
+A distinguibilidade dos dez earcons foi medida em JVM
+(`DistinguibilidadeDosEarconsTest`): distância par a par no sinal inteiro e nos
+primeiros 120 ms, com e sem ruído de viatura sintético, mais assinatura morfológica
+única e orçamento de banda 400–3400 Hz. Todos os números são de **simulação**, e a
+simulação tem duas lacunas conhecidas — as mesmas do recall do gatilho:
+
+- **O codec CVSD não é simulado.** A bancada corta a banda em 3,4 kHz; o codec real
+  quantiza. O `DESPERTAR` é o mais exposto: ele é o único earcon com parciais
+  inarmônicos, e é exatamente esse tipo de espectro que um codec de voz trata pior.
+- **Nenhum ouvido humano votou.** Distância espectrotemporal é um proxy. A pergunta
+  do produto é se um policial dentro de uma viatura **acerta qual foi**, e isso é
+  teste com pessoas, não com métrica.
+
+**O que fazer, quando houver o dispositivo:** tocar `00_VOCABULARIO_INTEIRO.wav`
+pelo fone HFP em ordem embaralhada, com motor ligado, e anotar a matriz de
+confusão. Menos de 9 de 10 corretos em qualquer par derruba o desenho daquele par —
+não o limiar do teste. As amostras ficam **fora do repositório**, em
+`~/Downloads/claryon-earcons-2026-08-22/`, com uma versão `__como_chega_pelo_HFP`
+de cada uma (passa-baixa 3,4 kHz + 16 k→8 k→16 k) para ouvir a perda antes de ter o
+fone.
+
 ### O que eu entrego antes disso
 
 Tela de captura dentro do app, gravando **pela rota HFP** e nomeando os arquivos no
@@ -146,6 +169,27 @@ adb shell dumpsys batterystats > bs.txt
 
 Meta: ≤ 12 %/h em modo Ativo. Hoje a política de energia é testada como lógica
 pura — o consumo real nunca foi medido.
+
+## Renovação de token com o aparelho dormindo (22/08)
+
+```bash
+# token novo, app aberto; depois trancar a tela e deixar o aparelho parado 2 h
+adb shell dumpsys deviceidle force-idle      # entra em doze sem esperar
+adb logcat -s ClaryonField | grep -i token
+# acordar e dar UM comando de voz que consulte posição
+```
+
+O que observar: se o **primeiro** comando responde "Consulta indisponível." e o
+**segundo** funciona, o laço de renovação antecipada dormiu junto com o aparelho —
+comportamento conhecido e declarado, não defeito novo. `manterFresco` usa `delay`, e
+`delay` não roda em *doze*; a segunda camada (`tokenSemEsperar` disparando a renovação
+ao ver a margem estourada) é o que faz o segundo comando funcionar.
+
+O que **já está medido**, em JVM contra socket real: o teto da renovação é **6 122 ms**
+(o `callTimeout`; sem ele, 29 210 ms contra o mesmo servidor lento) e a leitura do
+caminho crítico custa **0,026 µs** por chamada, com **uma** leitura de cofre no
+processo inteiro. O que falta é só o comportamento sob *doze*, que nenhum teste de JVM
+reproduz.
 
 ## Detecção de uso — o achado do caos com MockDeviceKit
 

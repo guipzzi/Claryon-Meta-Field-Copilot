@@ -209,8 +209,8 @@ private const val ALFA_MINIMO_DO_RESPIRO = 0.35f
 fun FaixaDePrioridade(prioridade: Int, modifier: Modifier = Modifier) {
     val (cor, largura) = when (prioridade) {
         1 -> Cores.P1 to Regua.MarcaP1
-        2 -> Cores.P2 to Regua.MarcaP2
-        else -> Cores.P3 to Regua.MarcaP3
+        2 -> Cores.TintaMedia to Regua.MarcaP2
+        else -> Cores.TintaFraca to Regua.MarcaP3
     }
     Box(modifier.width(largura).background(cor))
 }
@@ -362,7 +362,7 @@ fun BotaoTatico(
  */
 internal fun rotuloDoBotao(habilitado: Boolean, destrutivo: Boolean): Color = when {
     !habilitado -> Cores.TintaMedia
-    destrutivo -> Cores.FalhaTexto
+    destrutivo -> Cores.Tinta
     else -> Cores.Vazio
 }
 

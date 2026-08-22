@@ -8,7 +8,7 @@ import org.junit.Test
 
 class SoundSchedulerTest {
 
-    private fun tone(p: Priority) = Sound.Tone(Earcon.OUVI_VOCE, p)
+    private fun tone(p: Priority) = Sound.Tone(Earcon.DESPERTAR, p)
 
     @Test
     fun modoTatico_suprimeInformativo() {

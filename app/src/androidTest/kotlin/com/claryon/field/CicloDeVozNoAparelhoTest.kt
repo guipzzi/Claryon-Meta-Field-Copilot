@@ -45,7 +45,7 @@ import org.junit.runner.RunWith
  *
  * ## O que cada meta mede, e por que uma pode passar hoje
  *
- * **`fim da fala → earcon` NÃO depende do STT.** O `VoiceCycle` emite `OUVI_VOCE`
+ * **`fim da fala → earcon` NÃO depende do STT.** O `VoiceCycle` emite `CANAL_FECHADO`
  * *antes* de chamar o whisper. Essa meta mede: hangover do VAD (600 ms de silêncio
  * que o Silero exige para fechar a janela) + síntese do earcon + subida da rota
  * SCO + primeiro `write` no `AudioTrack`. Só o hangover já come 600 dos 500 ms —

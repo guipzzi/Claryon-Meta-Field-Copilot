@@ -17,7 +17,8 @@ import kotlinx.coroutines.flow.first
  * Orquestrador do **ciclo de voz**:
  *
  * ```
- * PCM (HFP) → VAD fecha a janela → [earcon "ouvi você" IMEDIATO]
+ * [earcon CANAL_ABERTO — "bipbip", o microfone abriu]
+ *   → PCM (HFP) → VAD fecha a janela → [earcon CANAL_FECHADO — "trimtrim", IMEDIATO]
  *   → STT (whisper, em lote) → IntentRouter → IntentExecutor  ← A AÇÃO ACONTECE
  *   → utteranceFor(RESULTADO) → fila de som (earcon e/ou TTS)
  * ```
@@ -30,8 +31,26 @@ import kotlinx.coroutines.flow.first
  * neste arquivo em que a resposta preceda a ação: `utteranceFor` só aceita
  * resultado, e a única forma de obter um é executando.
  *
- * O earcon de "ouvi você" dispara no **fechamento do VAD**, não no fim do STT: o
+ * O earcon de fechamento dispara no **fechamento do VAD**, não no fim do STT: o
  * agente sabe que foi ouvido em ~400 ms, mesmo que a ação leve 2 s.
+ *
+ * ## Os dois tempos da gramática que vivem aqui (22/08)
+ *
+ * O `CopilotService` toca o **BOMMM** ao ouvir "Claryon". Depois dele ainda
+ * acontece trabalho de verdade antes de o microfone estar de fato aberto: o salto
+ * de corrotina no serviço, `audio.iniciar()` (que em HFP real é negociação de SCO,
+ * centenas de milissegundos), o Whisper vindo do dono de processo. **Nesse
+ * intervalo o agente não tinha como saber se já podia falar** — o produto não tem
+ * display, e o único sinal chegava antes do microfone.
+ *
+ * Por isso [Earcon.CANAL_ABERTO] sai **aqui**, na primeira linha de [runOnce], que
+ * é o instante em que este objeto começa a consumir o fluxo do microfone: *"canal
+ * aberto, pode falar"*. E [Earcon.CANAL_FECHADO] sai quando o VAD fecha a janela:
+ * *"você parou de falar, o canal fechou, estou trabalhando"* — que é exatamente o
+ * gatilho que o dono escreveu (*"30 s ou parou de falar → trimtrim"*).
+ *
+ * Os dois são a convenção do rádio, não invenção nossa: chirp subindo abre, chirp
+ * descendo fecha. O policial já sabe.
  *
  * Depende só de abstrações, então é testável em JVM com fakes.
  */
@@ -68,6 +87,18 @@ class VoiceCycle(
     /** Executa um ciclo: espera uma janela de fala, entende, **age**, e responde. */
     suspend fun runOnce(): Resultado {
         val cicloId = novoCicloId()
+
+        // **bipbip — "canal aberto, pode falar".**
+        //
+        // Antes de qualquer espera: é este objeto que abre o fluxo do microfone, e
+        // o instante em que ele começa a consumi-lo é o único momento honesto para
+        // dizer que o canal está de pé. Emitir mais cedo (no serviço, junto com o
+        // BOMMM) prometeria um microfone que ainda não existe; mais tarde só
+        // avisaria depois de o agente já ter falado por cima.
+        //
+        // Ele NÃO vira `EARCON_PLAYED`: ver a lista fechada em `SaidaUnica`.
+        emitir(Utterance.Sinalizar(Earcon.CANAL_ABERTO, Priority.RESPOSTA))
+
         val segmento = vad.segment(pcmInput()).first() // 1ª janela fechada pelo VAD
 
         // **O zero de todas as metas de latência do ciclo — descontado.**
@@ -83,8 +114,10 @@ class VoiceCycle(
             agoraMs() - segmento.silencioFinalMs,
         )
 
-        // Earcon IMEDIATO, antes do STT: confirma escuta enquanto a ação corre.
-        emitir(Utterance.Sinalizar(Earcon.OUVI_VOCE, Priority.RESPOSTA))
+        // **trimtrim — IMEDIATO, antes do STT.** "Parou de falar, o canal fechou":
+        // confirma escuta enquanto a ação corre. É o terceiro tempo da gramática, e
+        // o gatilho é literalmente o que o dono escreveu — o agente parou de falar.
+        emitir(Utterance.Sinalizar(Earcon.CANAL_FECHADO, Priority.RESPOSTA))
 
         // **O zero do custo REAL do STT.**
         //

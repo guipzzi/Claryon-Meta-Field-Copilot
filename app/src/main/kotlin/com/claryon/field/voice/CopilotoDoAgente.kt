@@ -23,6 +23,8 @@ import com.claryon.field.agent.AnexoDeEvidencia
 import com.claryon.field.norma.ConsultaDeNorma
 import com.claryon.field.agent.ClaryonIntentExecutor
 import com.claryon.field.agent.Identidade
+import com.claryon.field.agent.LugarPelaRede
+import com.claryon.net.ConsultaGeoespacial
 import com.claryon.field.audio.AudioDoAgente
 import com.claryon.field.audio.SaidaUnica
 import com.claryon.field.auth.SessaoDoAgente
@@ -42,6 +44,7 @@ import com.claryon.field.voice.Modelos
 import com.claryon.field.voice.SileroVoiceActivityDetector
 import com.claryon.field.voice.VoiceCycle
 import com.claryon.net.ConsultaDePosicao
+import com.claryon.net.TokenSemEspera
 import com.claryon.sync.SemTransporteGateway
 import com.claryon.sync.SyncManager
 import com.claryon.sync.TacticalDispatcher
@@ -115,8 +118,13 @@ class CerebroDoCopiloto(private val app: Context) {
 
     private val consulta = ConsultaDePosicao(
         config = SessaoDoAgente.config,
-        // `runBlocking` NÃO: a renovação de token não pode travar o ciclo de voz.
-        // Lê o cache já validado; quem renova é `SessaoDoAgente.tokenValido`.
+        // **A renovação de token não pode travar o ciclo de voz — e agora ela não
+        // trava.** `tokenCorrente` é a leitura SEM ESPERA: confere o vencimento em
+        // memória e, se estiver perto, dispara a renovação em segundo plano sem
+        // aguardá-la. Antes de 22/08 esta linha lia um campo mutável **sem
+        // checagem de validade** e a guarda de `localizar` chamava
+        // `tokenValido`, que faz `execute()` síncrono — a intenção estava no
+        // comentário, o caminho é que furava.
         tokenDeSessao = { SessaoDoAgente.tokenCorrente },
     )
 
@@ -131,7 +139,12 @@ class CerebroDoCopiloto(private val app: Context) {
         if (redeConfigurada) {
             BaseVeicularSupabase(
                 config = SessaoDoAgente.config,
-                tokenDeSessao = { SessaoDoAgente.tokenValido(app) },
+                // Mesma regra da consulta de posição: a placa é consultada DENTRO
+                // do ciclo de voz, e `tokenValido` espera a rede. Sem token bom
+                // agora, a base responde indisponível e o agente ouve a recusa —
+                // que é o desfecho que ele teria de qualquer jeito depois de
+                // esperar, só que segundos antes.
+                tokenDeSessao = { SessaoDoAgente.tokenCorrente },
             )
         } else {
             BaseVeicularIndisponivel
@@ -140,9 +153,42 @@ class CerebroDoCopiloto(private val app: Context) {
 
     private val consultaVeicular by lazy { ConsultaNaBaseVeicular(baseVeicular) }
 
+    /**
+     * **A cascata externa ligada.** `specs/consulta-externa.spec.md`, decisões 1 e 2.
+     *
+     * Sem esta linha `ConsultaGeoespacial`, `HigieneDaConsulta`, `ConsultaHigienizada`
+     * e os dois registros teriam **zero chamadores em `src/main`** — e o padrão de
+     * `procurarLugar` no executor é `BuscaDeLugar.SemRede`, então o agente ouviria
+     * "Sem rede para consultar." com quatro barras de sinal. Escrito, não construído.
+     *
+     * **Não depende de `redeConfigurada`.** Overpass é aberto, sem chave e sem
+     * token — esta é a única capacidade de rede do produto que funciona antes do
+     * login, e enterrá-la atrás da configuração do Supabase seria acoplar duas
+     * coisas que não têm relação.
+     */
+    private val lugarPelaRede by lazy {
+        LugarPelaRede(
+            fonte = ConsultaGeoespacial(),
+            // A MESMA fonte de posição da consulta de posição e do alerta. Uma
+            // segunda leitura de GPS aqui daria duas respostas diferentes para
+            // "onde estou" no mesmo aparelho.
+            minhaPosicao = { local.ultimaPosicao() },
+        )
+    }
+
     val router = DeterministicIntentRouter()
 
-    private val cofre = EncryptedEvidenceVault(app)
+    /**
+     * O cofre de evidência do processo.
+     *
+     * **Público porque a perícia precisa desta instância, e não de uma parecida.**
+     * Um segundo `EncryptedEvidenceVault(app)` leria o mesmo diretório e daria os
+     * mesmos hashes, mas o mapa de sessões abertas é do OBJETO: a gravação em curso
+     * apareceria para ele como "processo morto antes de fechar", e a tela de perícia
+     * acusaria uma custódia interrompida sobre a ocorrência que está acontecendo
+     * agora. Ver `PericiaViewModel` e `EncryptedEvidenceVault.periciar`.
+     */
+    val cofre = EncryptedEvidenceVault(app)
 
     
 
@@ -155,7 +201,18 @@ class CerebroDoCopiloto(private val app: Context) {
      * quilômetros sem nada no payload denunciando.
      */
     private suspend fun localizar(indicativo: String): BuscaDePar {
-        if (!redeConfigurada || SessaoDoAgente.tokenValido(app) == null) {
+        // **O ponto exato que travava o ciclo de voz.** Era
+        // `SessaoDoAgente.tokenValido(app)`, que fora da margem entra no `Mutex` e
+        // faz `execute()` síncrono — com o cliente de fábrica, sem `callTimeout`, o
+        // pior caso passava de 10 s dentro de um ciclo cujo aceite é 4 s.
+        //
+        // `tokenSemEsperar` responde em memória. `Vencido` recusa ESTA consulta e
+        // deixa a renovação em voo, então a próxima já encontra token bom: o agente
+        // troca uma espera de dezenas de segundos por uma recusa falada imediata e
+        // uma segunda tentativa que funciona.
+        if (!redeConfigurada ||
+            SessaoDoAgente.tokenSemEsperar(app) !is TokenSemEspera.Valido
+        ) {
             return BuscaDePar.Indisponivel
         }
         val r = consulta.onde(indicativo).getOrElse { return BuscaDePar.Indisponivel }
@@ -247,6 +304,11 @@ class CerebroDoCopiloto(private val app: Context) {
         // agente ouve "Consulta indisponível." em vez de "Alfa Dois não
         // localizado", que afirmaria que o companheiro sumiu.
         localizarPar = { indicativo -> localizar(indicativo) },
+
+        // **O último degrau da cascata, ligado.** Local primeiro (o roteador manda
+        // pergunta com marcador legal para `ConsultarNorma`, que responde em 618 ms
+        // e sem sinal); só o que sobra chega aqui e vira rede.
+        procurarLugar = { categoria -> lugarPelaRede.procurar(categoria) },
 
         // **A câmera ligada.** Sem esta linha `withCamera` e `PlacaOcr.lerPlaca`
         // continuariam com zero chamadores em `src/main` — declaração,

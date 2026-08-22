@@ -264,9 +264,15 @@ gatilho esteja **sozinho** no segmento.
    `IntentExecutor` e responder por `utteranceFor(ActionOutcome)`.
 2. `Se` a transcrição não começar por "claryon", `então o sistema deverá` descartar
    o segmento **em silêncio**, sem earcon e sem log de conteúdo.
-3. `Quando` um comando for aceito, `o sistema deverá` emitir `OUVI_VOCE` antes de
-   executar a ação, e a resposta falada `deverá` derivar do `ActionOutcome`, nunca
-   da `Intent`.
+3. `Quando` um comando for aceito, `o sistema deverá` emitir `CANAL_FECHADO` antes
+   de executar a ação, e a resposta falada `deverá` derivar do `ActionOutcome`,
+   nunca da `Intent`. *(22/08: o earcon era `OUVI_VOCE`. A gramática de três tempos
+   — `DESPERTAR` na palavra de ativação, `CANAL_ABERTO` quando o microfone abre,
+   `CANAL_FECHADO` quando o agente para de falar — substituiu-o. O INSTANTE deste
+   critério não mudou; mudou o som que ocupa o instante, e o `OUVI_VOCE` saiu do
+   `enum` por ficar sem chamador. O `CANAL_ABERTO` que o item 8 pede passou a
+   existir de fato: até então esta spec nomeava um símbolo que não estava no
+   `enum`.)*
 4. `Enquanto` houver transmissão de rádio em curso, `o sistema deverá` manter o
    caminho de comando **desligado**.
 

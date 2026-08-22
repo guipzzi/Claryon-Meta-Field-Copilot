@@ -21,7 +21,7 @@ pública. Hackathon AI Glasses Brasil — **18/09/2026**.
 |---|---|---|
 | **P1 · Rede de comunicação** | PTT/walkie-talkie entre operadores, com transcrição | **A transcrição ocorre na ORIGEM**, antes de trafegar. Todos os receptores exibem exatamente o mesmo texto, sem divergência — e o servidor nunca precisa transcrever |
 | **P2 · Geolocalização** | Posição da guarnição, atualizada e persistida | O servidor devolve **grandezas** (distância, rumo), **nunca coordenada** de terceiro |
-| **P3 · IA on-device** | Copiloto especialista em segurança pública | **100% local.** Palavra de ativação: **"Claryon"**, isolada. Nada de IA na nuvem em caminho nenhum |
+| **P3 · IA on-device** | Copiloto especialista em segurança pública | **100% local.** Palavra de ativação: **"Claryon"**, isolada. **Nenhum modelo roda na nuvem** — STT, TTS, OCR e busca na norma são do aparelho. Desde 22/08 existe **um** degrau de rede, e ele não é IA: consulta geoespacial estruturada por categoria, depois que o local não respondeu, sob [`specs/consulta-externa.spec.md`](specs/consulta-externa.spec.md) |
 
 **Casos de uso do P3:** *"Claryon, envie um resumo da última hora"* ·
 *"Claryon, onde está a guarnição do Sgt. Paiva?"*
@@ -34,7 +34,15 @@ pública. Hackathon AI Glasses Brasil — **18/09/2026**.
 - ❌ **Transcrever, classificar ou indexar a fala de terceiros.** O beamforming isola
   quem veste os óculos — transcrevemos o agente, não o interlocutor. É intencional,
   não conserte. O pré-roll do PTT vive em RAM e nunca é persistido.
-- ❌ **Enviar áudio, transcrição ou frame para serviço externo no caminho crítico.**
+- ❌ **Enviar áudio, frame ou transcrição LITERAL para serviço externo.** Continua
+  absoluto para os três. **Revogado em parte em 22/08, por decisão do dono do
+  projeto:** consulta **textual derivada** — reconstruída a partir da intenção, nunca
+  da fala — é permitida **sob as condições de [`specs/consulta-externa.spec.md`]
+  (specs/consulta-externa.spec.md)**, e só sob elas: vocabulário fechado, higiene que
+  remove placa/matrícula/nome/indicativo, prazo de 2 s, local sempre primeiro,
+  procedência registrada. Fora dessa spec, a proibição vale inteira. O que a
+  revogação **não** toca: nada de dado de terceiro, posição de par ou identificador
+  de agente sai daqui, em caminho nenhum.
 - ❌ **Função de servidor que receba a identidade de quem pergunta como parâmetro.**
   Com ela, distâncias trilateram a posição absoluta de qualquer par. O solicitante
   vem do JWT; o parâmetro só existe dentro do schema `private`.
@@ -94,6 +102,7 @@ agente não sabe o que não sabe.
 | áudio, HFP, PTT, rádio | `docs/PADROES_DE_ENGENHARIA.md` §Sequências · §Rota de áudio · §Rádio tático |
 | posição, mapa, RPC | idem §Localização e mapa · `servidor/migracoes/0003,0006,0008,0010` |
 | fala, earcon, TTS, energia | idem §Honestidade · §Design de áudio · §Energia |
+| consulta externa, geoespacial, Overpass | `specs/consulta-externa.spec.md` **inteira** — a revogação do §2 vale só sob ela |
 | qualquer API do DAT | **Regra Zero**: MCP `search_dat_docs` + `javap` no AAR |
 
 ---

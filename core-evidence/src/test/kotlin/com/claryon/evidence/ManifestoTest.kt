@@ -28,10 +28,10 @@ class ManifestoTest {
 
     private fun h(n: Int) = "%064x".format(n)
 
-    // ── Formato v2 ────────────────────────────────────────────────────────────
+    // ── Formato v3 ────────────────────────────────────────────────────────────
 
     @Test
-    fun v2_idaEVolta_preservaCadeiaPurgasEMetadados() {
+    fun v3_idaEVolta_preservaCadeiaPurgasAncoraEMetadados() {
         val dir = tmp.newFolder()
         val handle = RecordingHandle("GTA-3_007_1700000000000")
         Manifesto.Escritor(File(dir, Manifesto.NOME)).use { e ->
@@ -40,10 +40,11 @@ class ManifestoTest {
             e.segmento(ChunkHash(1, h(2), h(1), 320_000))
             e.purga(Purga(0, 1_700_000_099_000, "RETENCAO_CONFIGURADA"))
             e.fim(1_700_000_100_000, motivo = null)
+            e.ancora(AncoraDeFim.Ancora(segmentos = 2, ultimoHashHex = h(2), macHex = h(7)))
         }
 
         val lido = assertNotNull(Manifesto.ler(dir)).let { Manifesto.ler(dir)!! }
-        assertEquals(2, lido.versao)
+        assertEquals(3, lido.versao)
         assertEquals(handle, lido.handle)
         assertEquals(16_000, lido.sampleRateHz)
         assertEquals(10_000, lido.janelaMs)
@@ -54,10 +55,70 @@ class ManifestoTest {
         assertEquals(listOf(0), lido.purgados.map { it.sequence })
         assertTrue(lido.finalizado)
         assertNull(lido.motivoDoFim)
+        assertEquals(AncoraDeFim.Ancora(2, h(2), h(7)), lido.ancora)
+    }
+
+    /**
+     * A linha `A` é a **última** do arquivo, e é o que permitiu a v3 caber na v2
+     * sem quebrar nada: um leitor anterior lê a gravação inteira e apenas para
+     * nela. Se alguém mover a âncora para antes do `F`, o `fim` some — e é isso
+     * que este teste segura.
+     */
+    @Test
+    fun v3_aAncoraEhAUltimaLinha() {
+        val dir = tmp.newFolder()
+        val arquivo = File(dir, Manifesto.NOME)
+        Manifesto.Escritor(arquivo).use { e ->
+            e.cabecalho(ctx(), RecordingHandle("x"), janelaMs = 10_000)
+            e.segmento(ChunkHash(0, h(1), null, 320_000))
+            e.fim(1_700_000_100_000, motivo = null)
+            e.ancora(AncoraDeFim.Ancora(1, h(1), h(7)))
+        }
+        assertTrue(arquivo.readLines().last { it.isNotEmpty() }.startsWith("A\t"))
+        assertTrue(Manifesto.ler(dir)!!.finalizado)
+    }
+
+    /**
+     * Gravação encerrada sem que a chave respondesse: manifesto v3 finalizado e
+     * **sem** linha `A`. O leitor não pode inventar uma — quem confere precisa ver
+     * a ausência para poder recusar a integridade.
+     */
+    @Test
+    fun v3_finalizadaSemAncora_leComoAusente() {
+        val dir = tmp.newFolder()
+        Manifesto.Escritor(File(dir, Manifesto.NOME)).use { e ->
+            e.cabecalho(ctx(), RecordingHandle("x"), janelaMs = 10_000)
+            e.segmento(ChunkHash(0, h(1), null, 320_000))
+            e.fim(1L, motivo = null)
+        }
+        val lido = Manifesto.ler(dir)!!
+        assertTrue(lido.finalizado)
+        assertNull(lido.ancora)
+    }
+
+    /**
+     * Âncora rasgada pela queda tem de **sumir**, não virar uma que "não confere".
+     * A distinção importa no laudo: ausente é o que a queda produz, inválida é o
+     * que a adulteração produz.
+     */
+    @Test
+    fun linhaDeAncoraRasgada_viraAusenteNaoInvalida() {
+        val dir = tmp.newFolder()
+        val arquivo = File(dir, Manifesto.NOME)
+        Manifesto.Escritor(arquivo).use { e ->
+            e.cabecalho(ctx(), RecordingHandle("x"), janelaMs = 10_000)
+            e.segmento(ChunkHash(0, h(1), null, 320_000))
+            e.fim(1L, motivo = null)
+        }
+        arquivo.appendText("A\t1\t${h(1)}\t${h(7).take(30)}")
+
+        val lido = Manifesto.ler(dir)!!
+        assertNull("MAC de tamanho errado não é âncora", lido.ancora)
+        assertEquals(listOf(0), lido.cadeia.map { it.sequence })
     }
 
     @Test
-    fun v2_registraPorQueParou() {
+    fun v3_registraPorQueParou() {
         val dir = tmp.newFolder()
         Manifesto.Escritor(File(dir, Manifesto.NOME)).use { e ->
             e.cabecalho(ctx(), RecordingHandle("x"), janelaMs = 10_000)
@@ -68,8 +129,35 @@ class ManifestoTest {
         assertEquals("EVID_SEM_ESPACO", Manifesto.ler(dir)!!.motivoDoFim)
     }
 
+    /**
+     * Manifesto gravado **antes** da âncora existir. Continua legível, e a ausência
+     * de `A` é fiel: quem confere precisa poder distinguir "formato anterior" de
+     * "âncora removida", e não pode se um dos dois for adivinhado.
+     */
     @Test
-    fun v2_escritaEhAppendOnly_naoQuadratica() {
+    fun v2_gravadoAntesDaAncora_continuaLegivelSemEla() {
+        val dir = tmp.newFolder()
+        File(dir, Manifesto.NOME).writeText(
+            buildString {
+                appendLine("versao=2")
+                appendLine("handle=GTA-3_007_1700000000000")
+                appendLine("formato=${OccurrenceContext.FORMATO_PCM_S16LE_MONO}")
+                appendLine("taxaHz=16000")
+                appendLine("janelaMs=10000")
+                appendLine("inicio=1700000000000")
+                appendLine("S\t0\t-\t${h(1)}\t320000")
+                appendLine("F\t1700000100000\t-")
+            },
+        )
+        val lido = Manifesto.ler(dir)!!
+        assertEquals(2, lido.versao)
+        assertEquals(listOf(0), lido.cadeia.map { it.sequence })
+        assertTrue(lido.finalizado)
+        assertNull(lido.ancora)
+    }
+
+    @Test
+    fun v3_escritaEhAppendOnly_naoQuadratica() {
         val dir = tmp.newFolder()
         val arquivo = File(dir, Manifesto.NOME)
         var maiorTamanho = 0L

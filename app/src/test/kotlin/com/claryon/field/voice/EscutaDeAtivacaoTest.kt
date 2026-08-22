@@ -104,7 +104,7 @@ class EscutaDeAtivacaoTest {
 
     /**
      * **O eco.** O earcon e o TTS saem pelo mesmo fone que o microfone escuta, a
-     * centímetros de distância. Sem este filtro, o `OUVI_VOCE` que a detecção dispara
+     * centímetros de distância. Sem este filtro, o `DESPERTAR` que a detecção dispara
      * volta pelo microfone e alimenta o detector — cascata.
      */
     @Test

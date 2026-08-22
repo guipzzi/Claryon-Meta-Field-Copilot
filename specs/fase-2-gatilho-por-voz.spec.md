@@ -168,9 +168,9 @@ O portão mora em `core-agent` porque `core-agent/build.gradle.kts` depende **s�
 
 ### 3.5 O earcon, a segunda meta, e por que a primeira não se reescreve
 
-`VoiceCycle.kt:87` emite `OUVI_VOCE` **antes** do STT (`sttFn` só em `:97`). O aceite A2 exige descarte **sem earcon**. Logo **qualquer portão a jusante do earcon é inalcançável** — áudio não tem desfazer.
+`VoiceCycle` emite `CANAL_FECHADO` (era `OUVI_VOCE` até 22/08) **antes** do STT. O aceite A2 exige descarte **sem earcon**. Logo **qualquer portão a jusante do earcon é inalcançável** — áudio não tem desfazer.
 
-A meta de **500 ms** foi escrita para o caminho de **botão**, onde a intenção já foi dada pelo toque. No caminho mãos-livres ela é impossível por construção: não há como confirmar escuta antes de saber que falaram com a gente. Esta spec **declara uma segunda meta** (`fim do enunciado → OUVI_VOCE ≤ 800 ms`, mãos-livres) e **não** reescreve a primeira. As duas vivem em **`Transicao` distintas** — hoje `FIM_DA_FALA_ATE_EARCON` é uma fila só e misturar as populações destrói o número de 305 ms já medido.
+A meta de **500 ms** foi escrita para o caminho de **botão**, onde a intenção já foi dada pelo toque. No caminho mãos-livres ela é impossível por construção: não há como confirmar escuta antes de saber que falaram com a gente. Esta spec **declara uma segunda meta** (`fim do enunciado → CANAL_FECHADO ≤ 800 ms`, mãos-livres) e **não** reescreve a primeira. As duas vivem em **`Transicao` distintas** — hoje `FIM_DA_FALA_ATE_EARCON` é uma fila só e misturar as populações destrói o número de 305 ms já medido.
 
 ### 3.6 Abertura de transmissão — reúso, ordem e prioridade
 
@@ -248,7 +248,7 @@ Ancorar no BIP é o certo — **e é perigoso na ordem errada**. `ClienteDePisoR
 9. `Quando` o detector fechar um segmento `e` a transcrição normalizada contiver uma variante da palavra de ativação nas **N** primeiras palavras `e` houver ao menos um token depois, `o sistema deverá` rotear **o restante** (sem a palavra) por `DeterministicIntentRouter`, executar, e responder por `utteranceFor(ActionOutcome)`.
 10. `Se` a transcrição não satisfizer o item 9, `então o sistema deverá` descartar o segmento **em silêncio**: sem earcon, sem fala, sem exibir a transcrição em tela e sem log de conteúdo.
 11. `Se` o verificador estiver indisponível ou falhar, `então o sistema deverá` responder de forma **audível**, com causa própria, nunca silêncio.
-12. `Quando` um comando for aceito, `o sistema deverá` emitir `OUVI_VOCE` **depois** do portão e **antes** de executar a ação.
+12. `Quando` um comando for aceito, `o sistema deverá` emitir `CANAL_FECHADO` **depois** do portão e **antes** de executar a ação. *(era `OUVI_VOCE`; ver a gramática de três tempos em `core-common/.../AudioSignals.kt`.)*
 13. `Enquanto` houver transmissão de rádio em curso **ou** janela de recepção aberta, `o sistema deverá` manter o caminho de comando **desligado**.
 
 **C — Abertura de transmissão**
@@ -308,7 +308,7 @@ Numerada do que destrava mais para o que destrava menos. **Passo sem medição n
 | **1.1** | `Ativacao` + `PortaoDeComando` (puro) | **novo** `core-agent/.../PortaoDeAtivacao.kt` | JVM: `"aurora mudar para guarnicao tres"` → `Comando("mudar para guarnicao tres")`; `"aurora"` sozinho → `Ignorar`; `"a hora de mudar…"` → `Ignorar` (veto escrito no teste); normalização (`"Aurora,"`, `"aurora."`, `"Áurora"`) passa **sem entrada extra na lista** |
 | **1.2** | Janela N parametrizada | idem | **Contra-teste:** `"na aurora mudar…"` passa com N=2 e **falha** com N=1; `"central chamando aurora mudar…"` → `Ignorar` com N=2. Se passar nos dois, o teste não testa a janela |
 | **1.3** | `sttFn` tri-estado (para de colapsar `null`/`Failure`/vazio em `""`) | `CopilotoViewModel.kt:497` | Whisper ausente → resposta **audível** com causa própria. Hoje viraria mudez permanente |
-| **1.4** | `Resultado` do ciclo vira `sealed` (`Executado`/`Descartado`); earcon migra para depois do portão | `app/.../voice/VoiceCycle.kt:61-66,87,100` | **Contra-teste de ordem:** com `portao = null` (botão) o mesmo áudio produz `OUVI_VOCE` **antes** do `sttFn`; com portão ligado **não** produz até `avaliar` devolver `Comando`. Sem esse par, o parâmetro é a flag que esta spec condena |
+| **1.4** | `Resultado` do ciclo vira `sealed` (`Executado`/`Descartado`); earcon migra para depois do portão | `app/.../voice/VoiceCycle.kt:61-66,87,100` | **Contra-teste de ordem:** com `portao = null` (botão) o mesmo áudio produz `CANAL_FECHADO` **antes** do `sttFn`; com portão ligado **não** produz até `avaliar` devolver `Comando`. Sem esse par, o parâmetro é a flag que esta spec condena |
 | **1.5** | Ramo descartado não vaza conteúdo | `CopilotoViewModel.kt:550` (`descrever(r.transcricao, …)`) | Zero `Utterance` emitida **e** status sem a transcrição. Ligar o portão sem isto faz o app **exibir** a fala de terceiros que ele descartou |
 
 ### Bloco 2 — Escuta contínua e intertravamentos

@@ -376,7 +376,12 @@ private fun desenhar(
         // Opacidade por frescor, como na lista: marcador cheio afirma "está ali",
         // esmaecido diz "estava".
         val alfa = if (par.frescor == Frescor.ESMAECIDO) 120 else 255
-        val cor = if (par.emMovimento) Cores.Vivo.toArgb() else Cores.Tinta.toArgb()
+        // Posição é ESTADO, não sinal: o par que se desloca deixou de ser
+        // verde e passou a ser o degrau de tinta mais alto. A distinção
+        // sobrevive porque os dois canais são ortogonais — o NÍVEL de tinta diz
+        // se anda, o ALFA logo acima diz o frescor —, e a palavra "deslocando"
+        // continua na gaveta para quem precisar do fato sem interpretar pino.
+        val cor = if (par.emMovimento) Cores.Tinta.toArgb() else Cores.TintaMedia.toArgb()
         mapa.addMarker(
             MarkerOptions()
                 .position(LatLng(lat, lon))
@@ -421,7 +426,7 @@ private fun setaDoPortador(rumoGraus: Float?, giroDaTela: Double): Bitmap {
 
     // Halo de precisão: sugere "por aqui", não "exatamente aqui".
     c.drawCircle(centro, centro, 26f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Cores.Vivo.toArgb()
+        color = Cores.Tinta.toArgb()
         alpha = 38
     })
     // Anel escuro por baixo do disco: sobre rua clara, branco em branco some.
@@ -433,7 +438,11 @@ private fun setaDoPortador(rumoGraus: Float?, giroDaTela: Double): Bitmap {
     })
 
     if (rumoGraus != null && rumoGraus.isFinite()) {
-        val tinta = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Cores.Vivo.toArgb() }
+        // `Vazio` e não um degrau de tinta: a seta é desenhada POR CIMA do
+        // disco branco de raio 12,5. Tinta clara sobre branco desaparece — é o
+        // mesmo motivo do anel escuro logo acima. Marca escura sobre
+        // preenchimento claro é a gramática do CTA deste sistema.
+        val tinta = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Cores.Vazio.toArgb() }
         c.save()
         // **Zero, não `rumoGraus`.** Quem gira agora é a câmera: com a tela já
         // orientada pelo deslocamento, a seta desenhada no rumo giraria duas
@@ -456,7 +465,7 @@ private fun setaDoPortador(rumoGraus: Float?, giroDaTela: Double): Bitmap {
     } else {
         // Sem rumo: disco cheio. Diz "estou aqui" e cala sobre a direção.
         c.drawCircle(centro, centro, 6f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Cores.Vivo.toArgb()
+            color = Cores.Vazio.toArgb()
         })
     }
     return bmp

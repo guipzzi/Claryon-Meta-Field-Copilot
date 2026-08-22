@@ -134,8 +134,10 @@ class AtivacaoAteEarconTest {
     /**
      * **A regressão que a revisão adversarial achou, escrita como cenário.**
      *
-     * No caminho da palavra de ativação os DOIS earcons são `OUVI_VOCE`: o de
-     * "estou ouvindo" na detecção e o de "ouvi o comando" no fechamento do VAD. E
+     * No caminho da palavra de ativação há DOIS earcons que marcam ciclo:
+     * `DESPERTAR` na detecção e `CANAL_FECHADO` no fechamento do VAD (até 22/08 os
+     * dois eram o MESMO som, `OUVI_VOCE`, o que já era um defeito de produto por
+     * si). Os dois continuam chegando pelo mesmo estágio `EARCON_PLAYED`. E
      * o ciclo é UM só, porque `cicloDeVoz` reaproveita o id da ativação — sem
      * isso a métrica dos 500 ms não fecharia.
      *

@@ -115,8 +115,17 @@ android {
     // tarefa: depois de uma rodada verde, mexer SÓ no vetor deixava o teste
     // `UP-TO-DATE`, ele nem rodava, e a divergência passava. Medido: a primeira
     // tentativa de contra-teste "passou" exatamente assim.
+    //
+    // **Mesma armadilha, segundo arquivo (22/08):** `TelaDePericiaTest` exige que a
+    // ressalva do R8 — *`Confere` não é inforjável* — exista **na tela e no
+    // relatório de impacto**, para que o produto e o documento não possam divergir.
+    // O `.md` não é entrada de compilação de nada: sem esta linha, apagar a ressalva
+    // do relatório deixava o teste `UP-TO-DATE` e a divergência passava. A tela é
+    // literal de string, então ela já invalida a tarefa por compilação.
     testOptions.unitTests.all {
         it.inputs.file("src/main/res/drawable/marca_claryon.xml")
+            .withPathSensitivity(org.gradle.api.tasks.PathSensitivity.RELATIVE)
+        it.inputs.file(rootProject.file("docs/RELATORIO_DE_IMPACTO_LGPD.md"))
             .withPathSensitivity(org.gradle.api.tasks.PathSensitivity.RELATIVE)
     }
     // Lint ATIVO (o AGP 8.9.2 corrigiu o bug com Kotlin 2.2). O único achado

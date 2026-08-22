@@ -83,6 +83,16 @@ import java.io.File
  * @param janelaMs duração da janela acumulada em RAM antes de selar um segmento.
  * @param reservaDeDiscoBytes piso de espaço livre. Abaixo dele o cofre **para e
  *   avisa** em vez de falhar 50 vezes por segundo em silêncio.
+ * ## O que a cadeia de hash não pegava
+ *
+ * Ela detecta **alteração** e é cega a **remoção no fim**: apagar os últimos
+ * segmentos e as linhas `S` correspondentes deixava uma cadeia aritmeticamente
+ * perfeita, e [verificar] respondia [Integridade.Integra] sobre uma gravação
+ * decapitada. Desde a v3 do manifesto, [finalizar] sela uma **âncora de fim** com
+ * chave do Keystore ([AncoraDeFim]) e [verificar] só chega a [Integridade.Integra]
+ * com ela válida. Leia [AncoraDeFim] antes de citar isso em relatório: ela fecha o
+ * ataque de quem tem acesso ao **disco**, não o de quem executa **como o app**.
+ *
  * @param retencao ver [PoliticaDeRetencao]. O padrão não apaga nada.
  * @param clockMillis relógio injetável — mantém a classe testável.
  */
@@ -99,6 +109,13 @@ class EncryptedEvidenceVault(
             .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
             .build()
     }
+
+    /**
+     * Não é injetável de propósito. Um cofre que aceita outro assinador aceita ser
+     * construído com um que assina qualquer coisa — e o único chamador disso seria
+     * um teste, que provaria então o caminho que não roda em produção.
+     */
+    private val assinador: AncoraDeFim.Assinador = AssinadorDoKeystore()
 
     private val mutex = Mutex()
     private val sessoes = HashMap<String, Sessao>()
@@ -289,7 +306,19 @@ class EncryptedEvidenceVault(
                     val motivoFinal = motivo ?: (restante as? Result.Failure)?.error?.code
                     val agora = clockMillis()
                     sessao.manifesto.fim(agora, motivoFinal)
+
+                    // Depois do `F`: o horário e o motivo do fim entram no MAC.
+                    // Uma âncora nula sai do manifesto como linha ausente — nunca
+                    // como âncora inventada. Ver AncoraDeFim.selar.
+                    val ancora = AncoraDeFim.selar(
+                        assinador = assinador,
+                        declaracao = declaracao(handle, sessao, agora, motivoFinal),
+                        segmentos = sessao.cadeia.size,
+                        ultimoHashHex = sessao.ultimoHash,
+                    )
+                    if (ancora != null) sessao.manifesto.ancora(ancora)
                     sessao.manifesto.close()
+
                     val manifesto = CustodyManifest(
                         handle = handle,
                         chain = sessao.cadeia.toList(),
@@ -300,6 +329,7 @@ class EncryptedEvidenceVault(
                         janelaMs = janelaMs,
                         purgados = sessao.purgados.toList(),
                         motivoDoFim = motivoFinal,
+                        ancora = ancora,
                     )
                     Result.success(manifesto)
                 }.getOrElse { e ->
@@ -311,12 +341,81 @@ class EncryptedEvidenceVault(
 
     // ── Conferência ───────────────────────────────────────────────────────────
 
+    /**
+     * **Todas as gravações do aparelho, cada uma com o seu veredito.**
+     *
+     * É o caminho de perícia, e ele não existia: [verificar] e [Manifesto.ler]
+     * tinham **zero chamadores em `src/main`** até 22/08. O cofre selava a âncora
+     * de fim em produção — caminho alcançável por voz, HMAC do Keystore, manifesto
+     * v3 — e conferia **só em teste**. Periciar exigia `adb`/root sobre o diretório
+     * privado, que é o acesso que o modelo de ameaça trata como atacante.
+     *
+     * ## O que esta função custa
+     *
+     * A conferência **decifra e re-hasheia todos os segmentos** de todas as
+     * gravações finalizadas. Não é sondagem: é a operação inteira, e por isso ela
+     * nasce de um toque do agente e não de um laço. Um turno de 10 min de gravação
+     * ocupa ~1,94 MB de segmentos; vinte ocorrências dessas são ~39 MB de AES-GCM
+     * mais SHA-256 — abaixo de um segundo com aceleração de hardware, e ainda assim
+     * a tela mostra estado de espera, porque um aparelho sem aceleração existe.
+     *
+     * A gravação **em curso** é a exceção: ela entra na lista com
+     * [RegistroDeCustodia.emAndamento] e **não** é conferida. Decifrar o que o
+     * cofre está escrevendo custaria E/S no meio de uma ocorrência para produzir um
+     * veredito que muda no segmento seguinte.
+     *
+     * ## Diretório sem manifesto legível some da lista
+     *
+     * `Manifesto.ler` devolve `null` quando não há arquivo, quando ele está vazio
+     * ou quando nem o `handle=` foi escrito — um `mkdirs` que aconteceu e um
+     * `beginRecording` que morreu logo depois. Não há custódia ali para periciar, e
+     * inventar uma linha "quebrada" faria a tela acusar adulteração onde houve
+     * apenas um diretório vazio.
+     */
+    suspend fun periciar(): List<RegistroDeCustodia> = withContext(Dispatchers.IO) {
+        // O lock só para o retrato das sessões abertas. Segurá-lo durante a
+        // conferência inteira travaria `append` por todo o tempo de decifração —
+        // e o `append` que trava é evidência que se perde.
+        val abertas = mutex.withLock { sessoes.keys.toSet() }
+
+        val raiz = File(appContext.filesDir, "evidence")
+        val dirs = raiz.listFiles { f: File -> f.isDirectory }?.toList().orEmpty()
+
+        dirs.mapNotNull { dir ->
+            val lido = Manifesto.ler(dir) ?: return@mapNotNull null
+            val emAndamento = lido.handle.id in abertas
+            RegistroDeCustodia(
+                handle = lido.handle,
+                versao = lido.versao,
+                inicioEpochMillis = lido.inicioEpochMillis,
+                fimEpochMillis = lido.fimEpochMillis,
+                motivoDoFim = lido.motivoDoFim,
+                segmentos = lido.cadeia.size,
+                purgados = lido.purgados.size,
+                bytesRetidos = lido.paraCustodia().bytesRetidos,
+                emAndamento = emAndamento,
+                // `verificar(handle)` e não `conferir(...)` direto: o caminho que a
+                // perícia executa tem de ser o MESMO que os testes exercitam, senão
+                // "conferência construída" volta a ser duas implementações parecidas
+                // — a testada e a que roda.
+                veredito = if (emAndamento) {
+                    Integridade.SemAncoraDeFim(Integridade.SemAncoraDeFim.Motivo.NAO_FINALIZADA)
+                } else {
+                    verificar(lido.handle)
+                },
+            )
+        }.sortedByDescending { it.inicioEpochMillis }
+    }
+
     /** Confere a custódia lendo o manifesto do próprio diretório — o que um perito faz. */
     suspend fun verificar(handle: RecordingHandle): Integridade = withContext(Dispatchers.IO) {
         val dir = diretorio(handle)
         val lido = Manifesto.ler(dir)
             ?: return@withContext Integridade.Quebrada(0)
-        conferir(dir, lido.paraCustodia())
+        // `finalizado` vem do leitor, não de `finalizedAtEpochMillis == 0`: um
+        // manifesto sem linha `F` não tem fim para ancorar, e inferir isso de um
+        // horário zerado seria adivinhar.
+        conferir(dir, lido.paraCustodia(), lido.finalizado)
     }
 
     /**
@@ -324,9 +423,27 @@ class EncryptedEvidenceVault(
      * [manifesto].
      */
     suspend fun verificar(handle: RecordingHandle, manifesto: CustodyManifest): Integridade =
-        withContext(Dispatchers.IO) { conferir(diretorio(handle), manifesto) }
+        withContext(Dispatchers.IO) {
+            // Só existe CustodyManifest depois de `finalizar`.
+            conferir(diretorio(handle), manifesto, finalizada = true)
+        }
 
-    private fun conferir(dir: File, manifesto: CustodyManifest): Integridade {
+    private fun conferir(
+        dir: File,
+        manifesto: CustodyManifest,
+        finalizada: Boolean,
+    ): Integridade {
+        // A âncora vem primeiro porque responde à pergunta anterior a todas: este
+        // manifesto é o que foi selado? Sem isso, conferir segmento por segmento
+        // confere fielmente uma lista que o atacante escolheu.
+        AncoraDeFim.conferir(
+            assinador = assinador,
+            declaracao = declaracao(manifesto),
+            cadeia = manifesto.chain,
+            finalizada = finalizada,
+            ancora = manifesto.ancora,
+        )?.let { return it }
+
         val purgadas = manifesto.purgados.map { it.sequence }.toSet()
         var anterior: String? = null
         for (ch in manifesto.chain) {
@@ -393,6 +510,41 @@ class EncryptedEvidenceVault(
     }
 
     // ── Auxiliares ────────────────────────────────────────────────────────────
+
+    /**
+     * O que a âncora assina, montado na selagem (a partir da sessão viva).
+     *
+     * Existem duas construções porque selar e conferir enxergam fontes diferentes —
+     * e é justamente por isso que elas produzem o **mesmo** [AncoraDeFim.Declaracao]:
+     * um MAC que só confere quando calculado do mesmo lado não prova nada.
+     */
+    private fun declaracao(
+        handle: RecordingHandle,
+        sessao: Sessao,
+        fimEpochMillis: Long,
+        motivoDoFim: String?,
+    ) = AncoraDeFim.Declaracao(
+        handleId = handle.id,
+        versao = Manifesto.VERSAO_ATUAL,
+        sampleRateHz = sessao.ctx.sampleRateHz,
+        formato = sessao.ctx.formato,
+        janelaMs = janelaMs,
+        fimEpochMillis = fimEpochMillis,
+        motivoDoFim = motivoDoFim,
+        purgados = sessao.purgados.toList(),
+    )
+
+    /** O mesmo, montado na conferência (a partir do manifesto apresentado). */
+    private fun declaracao(m: CustodyManifest) = AncoraDeFim.Declaracao(
+        handleId = m.handle.id,
+        versao = m.versao,
+        sampleRateHz = m.sampleRateHz,
+        formato = m.formato,
+        janelaMs = m.janelaMs,
+        fimEpochMillis = m.finalizedAtEpochMillis,
+        motivoDoFim = m.motivoDoFim,
+        purgados = m.purgados,
+    )
 
     private fun bytesPorJanela(sampleRateHz: Int): Int =
         (sampleRateHz.toLong() * BYTES_POR_AMOSTRA * janelaMs / 1_000).toInt()

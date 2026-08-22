@@ -80,6 +80,29 @@ class MapaViewModel(app: Application) : AndroidViewModel(app) {
      */
     private val escopoDoFechamento = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    /**
+     * **Sonda agora, fora do intervalo de 5 s.**
+     *
+     * O botão de recarregar do cabeçalho de frescor precisa de uma ação que
+     * realmente recarregue: [abrirMapa] começa com `if (bomba != null) return`, e
+     * ligar o botão nele daria uma função vazia com cara de ação — o mesmo gênero de
+     * mentira do rótulo "na fila" que este projeto removeu por não haver fila.
+     *
+     * Cancela a bomba e a recria, o que dispara a primeira sondagem na hora. Não é
+     * "esvaziar e recarregar": o estado atual **fica na tela** até a resposta chegar,
+     * porque limpar aqui faria o mapa piscar em branco a cada toque e o agente
+     * perderia a posição dos pares por um instante — num deslocamento, é o instante
+     * que importa.
+     *
+     * Idempotente sob toque repetido: cada chamada cancela a anterior antes de
+     * lançar, então não há como acumular duas bombas sondando o mesmo canal.
+     */
+    fun recarregar() {
+        bomba?.cancel()
+        bomba = null
+        abrirMapa()
+    }
+
     fun abrirMapa() {
         if (bomba != null) return
         bomba = viewModelScope.launch {

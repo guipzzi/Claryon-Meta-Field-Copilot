@@ -23,7 +23,61 @@ class TrafegoDoCanalTest {
         propria: Boolean = false,
         prioridade: Int? = null,
         entrega: FalaNoGrupo.Entrega = FalaNoGrupo.Entrega.RECEBIDA,
-    ) = FalaNoGrupo(id, indicativo, hora, texto, propria, prioridade, entrega)
+        cortadaPelaRede: Boolean = false,
+    ) = FalaNoGrupo(id, indicativo, hora, texto, propria, prioridade, entrega, cortadaPelaRede)
+
+    // ── Fala cortada pela rede ────────────────────────────────────────────────
+    //
+    // O fato chegava ao OUVIDO (earcon + `FALA_DO_COLEGA_CORTADA`) e não ao BALÃO:
+    // a tela desenhava a fala truncada campo por campo igual à inteira. Estes
+    // travam os dois canais em que ela agora aparece — o rodapé escrito e a
+    // leitura em voz.
+
+    @Test
+    fun falaCortada_escreveCortadaNoRodape_eAInteiraNaoEscreve() {
+        // Contra-teste: as duas configurações rodam e têm de DIFERIR. Asserir só
+        // `"cortada"` no caso cortado passaria com um `marcaDoRodape` que devolvesse
+        // "cortada" para tudo.
+        val cortada = montarTrafego(listOf(fala(cortadaPelaRede = true))).single()
+        val inteira = montarTrafego(listOf(fala(cortadaPelaRede = false))).single()
+        assertEquals("cortada", marcaDoRodape(cortada))
+        assertNull(marcaDoRodape(inteira))
+    }
+
+    @Test
+    fun falaCortada_naoRoubaORotuloDeEntregaDaFalaPropria() {
+        // `cortadaPelaRede` vem primeiro no `when` de `marcaDoRodape`. Isso só é
+        // seguro porque os dois campos são mutuamente exclusivos por construção —
+        // recebida não tem entrega, própria não tem corte. Este teste trava a
+        // metade que o `when` poderia quebrar em silêncio: a própria continua
+        // dizendo "não saiu".
+        val propria = montarTrafego(
+            listOf(fala(propria = true, entrega = FalaNoGrupo.Entrega.NAO_SAIU)),
+        ).single()
+        assertEquals("não saiu", marcaDoRodape(propria))
+    }
+
+    @Test
+    fun falaCortada_entraNaLeituraEmVoz_eDepoisDoTexto() {
+        // O tracejado terminal é sinal visual e não sobrevive ao áudio. A ORDEM é
+        // parte do critério: anunciar o corte antes do texto faria o leitor de tela
+        // qualificar uma frase que ele ainda não leu.
+        val i = montarTrafego(listOf(fala(texto = "Apoio na", cortadaPelaRede = true))).single()
+        val voz = i.leituraEmVoz
+        assertTrue("a leitura não anuncia o corte: $voz", voz.contains(FALA_CORTADA_EM_VOZ))
+        assertTrue(
+            "o corte foi anunciado ANTES do texto: $voz",
+            voz.indexOf(FALA_CORTADA_EM_VOZ) > voz.indexOf("Apoio na"),
+        )
+    }
+
+    @Test
+    fun falaInteira_naoAnunciaCorteNenhum() {
+        // O par do teste acima. Sem ele, um `leituraEmVoz` que sempre acrescentasse
+        // a frase passaria no anterior.
+        val i = montarTrafego(listOf(fala(cortadaPelaRede = false))).single()
+        assertFalse(i.leituraEmVoz.contains(FALA_CORTADA_EM_VOZ))
+    }
 
     // ── Lateralidade (critérios 1 a 3) ────────────────────────────────────────
 

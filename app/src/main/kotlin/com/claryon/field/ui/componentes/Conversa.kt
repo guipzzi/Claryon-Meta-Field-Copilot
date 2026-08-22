@@ -122,6 +122,81 @@ fun Modifier.contornoTracejado(cor: Color, canto: Dp, largura: Dp = 1.dp): Modif
     }
 
 /**
+ * **A fala acabou no meio — o fio que não termina.**
+ *
+ * Desenha uma régua tracejada curta logo abaixo da transcrição, começando onde o
+ * texto começa. Lê literalmente: a frase continuava e o resto não chegou.
+ *
+ * ---
+ * ### Por que tracejado outra vez, e por que isso não confunde
+ *
+ * Tracejado já é o morfema de *"não fechou"* neste balão — [Modifier.calha] e
+ * [Modifier.contornoTracejado] o usam para a autoria que não resolveu, com o mesmo
+ * `dashPathEffect(6, 5)` que está aqui. Repetir o morfema é a intenção: **as duas
+ * coisas significam a mesma coisa** — algo neste registro não se completou —, e um
+ * segundo vocabulário para o mesmo conceito obrigaria o agente a aprender duas
+ * gramáticas para uma ideia.
+ *
+ * O que separa os dois casos é a **posição**, não o traço, e a posição é a
+ * informação:
+ *
+ *  - autoria que não fecha é **perímetro** — cerca o registro inteiro, porque a
+ *    dúvida é sobre o registro inteiro;
+ *  - fala cortada é **terminal** — mora no fim do texto, porque o que faltou está
+ *    exatamente ali.
+ *
+ * Os dois podem aparecer no mesmo balão, e devem: uma fala de origem não confirmada
+ * também pode ser cortada pela rede, e esconder um por causa do outro perderia
+ * metade do que houve.
+ *
+ * ---
+ * ### Sem cor, como todo o resto deste balão
+ *
+ * [Cores.TintaFraca] e nenhum token de sinal. Cor aqui já significa prioridade
+ * (P1/P2/P3) e transmissão (âmbar), e o âmbar tem dono — *"você está no ar"*.
+ * Truncamento não é urgência: a frase que chegou continua verdadeira e continua
+ * legível em tinta cheia. O que o agente precisa saber é que ela **não é toda a
+ * frase**, e isso é geometria, que sobrevive a daltonismo, sol forte e captura em
+ * preto e branco.
+ *
+ * A largura é fixa e curta — o traço é um sinal, não uma barra de progresso. Um fio
+ * de largura total leria como separador de seção, que é outra coisa que esta tela já
+ * desenha.
+ */
+@Composable
+fun FimInterrompido(modifier: Modifier = Modifier) {
+    Box(
+        modifier
+            .width(LARGURA_DO_FIM_INTERROMPIDO)
+            .height(Espaco.Fio)
+            .drawBehind {
+                // Horizontal, e por isso NÃO reusa `Modifier.calha`: aquele desenha
+                // no eixo vertical (é uma faixa de borda), e passar 1 dp de altura
+                // para ele produziria um ponto, não uma régua. Mesmo `PathEffect`,
+                // outro eixo — a gramática é compartilhada, a geometria não.
+                val y = size.height / 2f
+                drawLine(
+                    color = Cores.TintaFraca,
+                    start = Offset(0f, y),
+                    end = Offset(size.width, y),
+                    strokeWidth = size.height,
+                    cap = StrokeCap.Butt,
+                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 5f), 0f),
+                )
+            },
+    )
+}
+
+/**
+ * 28 dp — cerca de duas palavras curtas.
+ *
+ * Longo o bastante para caber três traços do padrão `6/5` e ser lido como
+ * interrupção; curto o bastante para não competir com o fio de seção, que atravessa
+ * a tela inteira.
+ */
+private val LARGURA_DO_FIM_INTERROMPIDO: Dp = 28.dp
+
+/**
  * **Procedência — o topo do balão cuja autoria não fechou.**
  *
  * Estruturalmente é o lugar que um aplicativo de mensagens usa para a citação da

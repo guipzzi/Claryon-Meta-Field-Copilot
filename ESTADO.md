@@ -4,10 +4,9 @@
 
 ## O que funciona hoje
 
-- `./gradlew build :app:compileDebugAndroidTestKotlin` verde. **862 testes JVM únicos, 106 classes,
-  0 falhas, 0 pulados.** O número que eu reportava antes (1163) estava **inflado em 63%**: debug e
-  release rodam as mesmas classes e eu somava as duas. E **`build` sozinho NÃO compila `androidTest`** —
-  empurrei um `HEAD` quebrado por esse buraco de verificação.
+- `./gradlew build :app:compileDebugAndroidTestKotlin` verde, **0 falhas, 0 pulados**. Contagem por
+  classe (debug+release inflavam 63%); **`build` sozinho NÃO compila `androidTest`** — empurrei um `HEAD`
+  quebrado por esse buraco. **Reconferir o total: quatro agentes fecharam no mesmo dia.**
 - **RÁDIO, os 8 defeitos do caos consertados**, cada um com contra-teste em duas rodadas. O bloqueador:
   **sobreposição de vozes de 4 640 ms → 60 ms** (232 quadros → 3). O conserto não acrescentou tráfego —
   o anúncio de P1 **já era difundido e ninguém lia**. Também: `liberar` devolve resultado tipado e a
@@ -20,6 +19,9 @@
 - **PLACA: 0 erradas aceitas em 31 imagens** de campo (ângulo, chuva, contraluz, reflexo, oclusão, noite).
   Dita: 40/40. Roteador a 93 µs no p50. OCR a p50 8 ms — **quem limita é a câmera de 7 fps**, não ele.
 - **LLM roda no celular, provado**: `adb push`, `mmap` sobre FUSE, carga 2 435 ms, PSS +1,91× o GGUF.
+- **CONSULTA EXTERNA LIGADA** (§2 revogado em parte, `specs/consulta-externa.spec.md`): Overpass **depois**
+  do local, prazo 2 s; atravessam categoria fechada + a **minha** coordenada a 4 casas, medido no corpo HTTP
+  num socket real. Dois registros: auditoria precisa × uso por **dia**. Ao ligar, "posto de saúde" lançava.
 - **Quatro documentos novos** para os quatro critérios do §11.2 do edital: LGPD art. 38, aderência ao
   toolkit, prontidão de hardware, e impacto com **entrevista de PM da PMERJ** (autorizada, sem iniciais).
 
@@ -42,14 +44,17 @@
 6. **Nada foi medido em óculos reais.** O emulador não tem SCO. Bateria dos óculos, térmica, latência
    boca-a-ouvido e o custo do RPC novo na preempção seguem sem número.
 7. **O mapa fica preto e mudo** se só os tiles forem bloqueados (wifi de evento) — Supabase acessível,
-   `OnStyleLoaded` nunca dispara, sem marcador e sem mensagem. É a única violação viva de "falha nunca é
-   silêncio" na tabela de degradação.
-8. **`ROADMAP` define fases 0 a 5.** Não existe Fase 6 escrita — a leitura de placa foi feita e está
-   ligada, mas sem critério de aceite contra o qual medir. E o deck submetido descreve face, display e
-   nuvem; o §14.1 veda mudança de escopo, mas o §8.1 **permite nuvem explicitamente**.
+   `OnStyleLoaded` nunca dispara, sem marcador e sem mensagem. Única violação viva de "falha nunca é silêncio".
+8. **`ROADMAP` define fases 0 a 5**, sem Fase 6 escrita — placa lida e ligada, sem aceite contra o que
+   medir. Deck descreve face e display; **nuvem deixou de ser divergência** (§2 revogado em parte).
+9. **O COFRE NÃO GUARDA O RÁDIO.** Só `Intent.IniciarGravacao` o alimenta; nenhum caminho do PTT
+   escreve nele. Conferir virou caminho do produto (Perfil → Periciar, veredito tipado por gravação);
+   **EXPORTAR não** — tirar segmento e manifesto do aparelho ainda exige `adb`, e `Confere` não é inforjável.
+10. **Renovação de token dormindo:** `manterFresco` usa `delay`, que não roda em *doze* — o 1º comando
+    depois de horas no bolso acha token vencido e recusa; o 2º funciona. Teto medido 6 122 ms (era 29 210).
 
 ## O que vem a seguir
 
-A entrega do Segundo Filtro venceu em **22/08** e é o portão: sem ela, nenhuma fase seguinte existe.
-Depois: a régua de sentido do guarda, o truncamento chegando ao balão da tela (fica na UI), o aceite 4 da
-spec de troca de grupo esperando ratificação, e a `0024` aplicada no banco.
+A entrega do Segundo Filtro venceu em **22/08** e é o portão. Depois: régua de sentido do guarda ·
+truncamento no balão da tela · aceite 4 da troca de grupo · `0024` no banco · persistir o registro de uso
+da consulta externa, que hoje vive em RAM e morre com o processo (o andaime só cresce se sobreviver).

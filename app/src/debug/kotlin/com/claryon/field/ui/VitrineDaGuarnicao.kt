@@ -41,7 +41,12 @@ class VitrineDaGuarnicao : ComponentActivity() {
         // folga de três posições ainda cobre a lista inteira.
         val voltas = intent.getStringExtra("volume")?.toIntOrNull() ?: 1
         // `-e duros 1` acrescenta os cruzamentos, no fim, onde a lista já para.
-        val roteiro = if (intent.getStringExtra("duros") != null) FALAS + DUROS else FALAS
+        // `-e duros 1` acrescenta os cruzamentos; `-e cortadas 1`, as falas que a
+        // rede truncou. Somam-se de forma independente, e sempre NO FIM — o roteiro
+        // base tem de sair idêntico às capturas anteriores, ou a comparação some.
+        val roteiro = FALAS +
+            (if (intent.getStringExtra("duros") != null) DUROS else emptyList()) +
+            (if (intent.getStringExtra("cortadas") != null) CORTADAS else emptyList())
         // `-e ptt negado|ocupado|noar` — o estado do rádio.
         //
         // Existe por causa do painel de detalhes: a parte dele que mais importa é
@@ -204,5 +209,53 @@ private val DUROS = listOf(
         "9", "", "15:05:47",
         "Todas as unidades, converjam para a praça agora.",
         propria = false, prioridade = 1, entrega = FalaNoGrupo.Entrega.RECEBIDA,
+    ),
+)
+
+/**
+ * **A fala que a rede cortou no meio.** `-e cortadas 1`.
+ *
+ * Atrás de chave, e não no roteiro base, pela regra que o KDoc desta classe fixa: o
+ * roteiro base é a régua das capturas antes/depois, e acrescentar caso ao meio dele
+ * invalida toda comparação anterior a hoje.
+ *
+ * **O primeiro par é o teste de verdade, e é por isso que os dois textos são
+ * idênticos.** `11` e `12` dizem exatamente a mesma frase; só uma foi cortada. É o
+ * enunciado visual da razão pela qual `cortadaPelaRede` existe como campo em vez de
+ * ser derivada — *texto incompleto é indistinguível de texto completo curto*. Se a
+ * marca terminal falhar, os dois balões ficam gêmeos na captura, e o defeito se vê
+ * sem ler o código.
+ *
+ * `13` cobre o cruzamento que importa: **cortada E sem autoria confirmada.** Os dois
+ * sinais usam o mesmo morfema — tracejado —, e a captura é o que prova que eles não
+ * se apagam: um é perímetro, o outro é terminal. Se alguém unificar os dois desenhos,
+ * este registro deixa de ter duas leituras e passa a ter uma.
+ *
+ * `14` é a cortada **sem transcrição nenhuma**: o caso em que o rodapé sozinho não
+ * bastaria, porque não há frase que termine abruptamente para o olho perceber.
+ */
+private val CORTADAS = listOf(
+    FalaNoGrupo(
+        "11", "ALFA DOIS", "15:06:10",
+        "Suspeito seguiu a pé pela travessa, sentido",
+        propria = false, prioridade = null, entrega = FalaNoGrupo.Entrega.RECEBIDA,
+        cortadaPelaRede = true,
+    ),
+    FalaNoGrupo(
+        "12", "ALFA DOIS", "15:06:31",
+        "Suspeito seguiu a pé pela travessa, sentido",
+        propria = false, prioridade = null, entrega = FalaNoGrupo.Entrega.RECEBIDA,
+        cortadaPelaRede = false,
+    ),
+    FalaNoGrupo(
+        "13", "", "15:07:02",
+        "Tem mais um saindo pelos fundos, ele está",
+        propria = false, prioridade = 1, entrega = FalaNoGrupo.Entrega.RECEBIDA,
+        cortadaPelaRede = true,
+    ),
+    FalaNoGrupo(
+        "14", "CHARLIE 4", "15:07:40", "",
+        propria = false, prioridade = null, entrega = FalaNoGrupo.Entrega.RECEBIDA,
+        cortadaPelaRede = true,
     ),
 )

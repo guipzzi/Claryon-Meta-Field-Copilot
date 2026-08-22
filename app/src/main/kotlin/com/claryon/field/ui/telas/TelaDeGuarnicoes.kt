@@ -238,7 +238,7 @@ private fun LinhaDeGuarnicao(
             Box(Modifier.height(Espaco.Curto))
             // A recusa mora na linha tocada, e não num aviso global: é ali que o
             // agente está olhando, e é dali que sai o gesto seguinte.
-            TextoCorpoMenor(rotuloDaRecusa(it), cor = Cores.FalhaTexto)
+            TextoCorpoMenor(rotuloDaRecusa(it), cor = Cores.Tinta)
         }
     }
 }

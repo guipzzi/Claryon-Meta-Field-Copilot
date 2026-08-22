@@ -48,7 +48,7 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class PreempcaoDuranteASinteseTest {
 
-    private fun tone(p: Priority) = Sound.Tone(Earcon.OUVI_VOCE, p)
+    private fun tone(p: Priority) = Sound.Tone(Earcon.DESPERTAR, p)
 
     /** PCM de um elemento só, carregando o ordinal da prioridade. */
     private fun pcmDe(sound: Sound): ShortArray = shortArrayOf(sound.priority.ordinal.toShort())

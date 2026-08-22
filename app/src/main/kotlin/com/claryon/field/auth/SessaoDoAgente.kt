@@ -4,6 +4,8 @@ import android.content.Context
 import com.claryon.field.BuildConfig
 import com.claryon.net.AutenticacaoSupabase
 import com.claryon.net.ConfigRealtime
+import com.claryon.net.TokenSemEspera
+import com.claryon.net.tokenOuNulo
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -32,13 +34,21 @@ import kotlinx.coroutines.launch
  * Keystore; duas instâncias significariam dois tokens em voo e renovações
  * concorrentes sobre o mesmo `refresh_token`, que o servidor invalida ao usar.
  *
- * ## `tokenCorrente` é cache, e a distinção importa
+ * ## Duas leituras do token, e a distinção importa
  *
- * [tokenCorrente] é a última credencial **já validada**, lida de forma síncrona
- * por quem não pode suspender — o `ConsultaDePosicao` do ciclo de voz. Quem
- * pode suspender chama [tokenValido], que renova. Misturar os dois era o que
- * fazia o mapa (que renova) e o copiloto (que só lê) dependerem de um campo
- * mutável compartilhado dentro do ViewModel, sem que nada no tipo dissesse isso.
+ * [tokenCorrente] é a leitura **sem espera**, para quem não pode suspender — o
+ * `ConsultaDePosicao` do ciclo de voz. Quem pode suspender chama [tokenValido],
+ * que renova e **espera a rede**. Misturar os dois era o que fazia o mapa (que
+ * renova) e o copiloto (que só lê) dependerem de um campo mutável compartilhado
+ * dentro do ViewModel, sem que nada no tipo dissesse isso.
+ *
+ * **`tokenCorrente` deixou de ser um campo.** Ele era a última string gravada por
+ * quem tivesse renovado, **sem nenhuma checagem de validade**: um turno longo o
+ * bastante e o ciclo de voz consultava com um token vencido, recebia 401, e o
+ * agente ouvia "Consulta indisponível." sem que nada no aparelho soubesse por quê.
+ * Agora é uma leitura derivada de [AutenticacaoSupabase.tokenSemEsperar] — mesma
+ * ausência de espera, com a data de validade conferida e a renovação disparada em
+ * segundo plano quando falta pouco.
  */
 object SessaoDoAgente {
 
@@ -80,17 +90,31 @@ object SessaoDoAgente {
     private var instancia: AutenticacaoSupabase? = null
 
     /**
-     * Último token **já validado**. Leitura síncrona para quem não pode
-     * suspender (o ciclo de voz não pode travar esperando renovação de rede).
+     * **O token utilizável agora, sem esperar por rede nenhuma.**
      *
-     * `null` significa "nunca houve sessão nesta execução", e quem lê trata como
-     * indisponível em vez de tentar sem credencial — a diferença entre "consulta
-     * indisponível" e "companheiro não localizado", que o produto não pode
-     * confundir.
+     * `null` significa "não há token que preste **neste instante**" — sem sessão,
+     * ou com o token vencido. Quem lê trata como indisponível em vez de tentar sem
+     * credencial: a diferença entre "consulta indisponível" e "companheiro não
+     * localizado", que o produto não pode confundir.
+     *
+     * Ler daqui **dispara** a renovação em segundo plano quando o vencimento está
+     * perto, e não espera por ela. Quem precisa distinguir "vencido" de "nunca
+     * houve sessão" usa [tokenSemEsperar], que devolve o tipo inteiro.
+     *
+     * A primeira leitura do processo toca o cofre cifrado (Keystore); da segunda
+     * em diante é um campo `@Volatile`. `Application.onCreate` chama [aquecer], que
+     * paga essa primeira em `Dispatchers.IO` — por isso ninguém a paga na Main.
      */
-    @Volatile
-    var tokenCorrente: String? = null
-        private set
+    val tokenCorrente: String?
+        get() = instancia?.tokenSemEsperar()?.tokenOuNulo
+
+    /**
+     * O mesmo, com a causa: [TokenSemEspera.Vencido] e [TokenSemEspera.SemSessao]
+     * pedem condutas diferentes, e o `null` de [tokenCorrente] as achata numa só.
+     *
+     * Não suspende, não abre socket, não entra em lock.
+     */
+    fun tokenSemEsperar(context: Context): TokenSemEspera = de(context).tokenSemEsperar()
 
     fun de(context: Context): AutenticacaoSupabase =
         instancia ?: synchronized(this) {
@@ -138,9 +162,16 @@ object SessaoDoAgente {
         escopo.launch {
             val auth = de(context)
             // `autenticado()` toca o Keystore; aqui isso é legítimo, porque
-            // estamos em Dispatchers.IO.
+            // estamos em Dispatchers.IO. E é esta chamada que popula o espelho em
+            // memória de onde `tokenCorrente` passa a ler sem custo.
             _estado.value =
                 if (auth.autenticado()) EstadoDaSessao.Autenticado else EstadoDaSessao.Ausente
+
+            // **A renovação antecipada, ligada.** Sem esta linha `manterFresco`
+            // seria mais uma função pública sem chamador em `src/main` — e o
+            // caminho crítico voltaria a depender de encontrar o token já fresco
+            // por acaso. Idempotente: chamar de novo devolve o mesmo Job.
+            auth.manterFresco()
         }
     }
 
@@ -151,21 +182,21 @@ object SessaoDoAgente {
     }
 
     /**
-     * Token válido, renovando se preciso, **e atualizando o cache**.
+     * Token válido, renovando se preciso — **e esperando a rede para isso**.
      *
-     * É o único ponto que escreve [tokenCorrente]: antes, três lugares
-     * diferentes faziam `autenticacao.tokenValido()?.also { tokenCorrente = it }`
-     * e bastava um esquecer o `also` para o ciclo de voz passar a consultar com
-     * um token velho.
+     * Só para quem pode esperar: o WebSocket do rádio (que precisa de token bom
+     * para reconectar), o mapa, a base veicular fora do ciclo. O teto é
+     * [AutenticacaoSupabase.TETO_DA_CHAMADA_MS].
+     *
+     * **Nunca do ciclo de voz** — lá o acesso é [tokenCorrente] ou
+     * [tokenSemEsperar]. O `also { tokenCorrente = it }` que existia aqui deixou de
+     * ser necessário quando `tokenCorrente` virou leitura derivada: não há mais
+     * cache para alguém esquecer de atualizar.
      */
-    suspend fun tokenValido(context: Context): String? =
-        de(context).tokenValido()?.also { tokenCorrente = it }
+    suspend fun tokenValido(context: Context): String? = de(context).tokenValido()
 
     /** Só para teste instrumentado — devolve o objeto ao estado virgem. */
     fun instalar(substituta: AutenticacaoSupabase?) {
-        synchronized(this) {
-            instancia = substituta
-            tokenCorrente = null
-        }
+        synchronized(this) { instancia = substituta }
     }
 }

@@ -110,6 +110,14 @@ data class CustodyManifest(
     val purgados: List<Purga> = emptyList(),
     /** `null` = encerramento normal. Texto = por que parou (ex.: `DISCO_CHEIO`). */
     val motivoDoFim: String? = null,
+    /**
+     * Prova de que a gravação terminou aqui. Ver [AncoraDeFim].
+     *
+     * `null` significa que **não há** âncora: manifesto anterior à v3, gravação não
+     * finalizada, ou chave do Keystore indisponível no momento de selar. Nenhum
+     * desses casos chega a [Integridade.Integra].
+     */
+    val ancora: AncoraDeFim.Ancora? = null,
 ) {
     /** Bytes de áudio em claro sob custódia, já descontado o que foi purgado. */
     val bytesRetidos: Long
@@ -120,16 +128,61 @@ data class CustodyManifest(
 }
 
 /**
+ * **Uma gravação selada no aparelho, com o veredito de quem a conferiu.**
+ *
+ * É o que o caminho de perícia devolve. Existe porque até 22/08 conferir a
+ * custódia era **ferramenta de laboratório**: [EncryptedEvidenceVault.verificar] e
+ * [Manifesto.ler] tinham zero chamadores em `src/main`, e periciar uma ocorrência
+ * exigia `adb`/root sobre o diretório privado do app — exatamente o acesso que o
+ * modelo de ameaça trata como atacante. Pela régua do `CLAUDE.md §6`, a
+ * conferência estava **escrita, não construída**.
+ *
+ * ## Os campos são os do manifesto, e nenhum é derivado de adivinhação
+ *
+ * [inicioEpochMillis] é `0` em manifestos da v1, que não gravavam o início.
+ * [fimEpochMillis] é `null` quando não há linha `F`. Nenhum dos dois é preenchido
+ * com o horário do arquivo: mtime é reescrevível e diria uma coisa parecida com a
+ * verdade, que numa cadeia de custódia é pior que a lacuna.
+ *
+ * @param emAndamento a gravação está aberta **neste processo** agora. Sem este
+ *   campo, uma gravação em curso e uma gravação cujo processo morreu antes de
+ *   fechar produzem o mesmo veredito
+ *   ([Integridade.SemAncoraDeFim.Motivo.NAO_FINALIZADA]) — e são coisas opostas
+ *   para quem periciar. A que está em curso não é conferida: decifrar segmento
+ *   enquanto o cofre escreve custaria E/S no meio de uma ocorrência para produzir
+ *   um retrato que muda no instante seguinte.
+ * @param bytesRetidos áudio em claro sob custódia, já descontado o purgado.
+ */
+data class RegistroDeCustodia(
+    val handle: RecordingHandle,
+    val versao: Int,
+    val inicioEpochMillis: Long,
+    val fimEpochMillis: Long?,
+    val motivoDoFim: String?,
+    val segmentos: Int,
+    val purgados: Int,
+    val bytesRetidos: Long,
+    val emAndamento: Boolean,
+    val veredito: Integridade,
+)
+
+/**
  * Veredito da conferência de integridade.
  *
  * [ExpurgadaPorPolitica] existe porque retenção e cadeia de custódia colidem: sem
  * um estado próprio, todo segmento apagado por política seria reportado como
  * **adulterado** — a política de retenção do produto passaria a forjar, sozinha,
  * um sinal de fraude em toda gravação antiga.
+ *
+ * [Truncada] e [SemAncoraDeFim] existem porque hash encadeado detecta **alteração**
+ * e é cego a **remoção no fim**. Ver [AncoraDeFim]. A regra que sustenta os dois é
+ * fechar por falta: [Integra] e [ExpurgadaPorPolitica] exigem âncora de fim válida,
+ * então nenhum caminho de adulteração conhecido produz um veredito de integridade —
+ * no máximo produz um veredito visivelmente mais fraco.
  */
 sealed interface Integridade {
 
-    /** Todos os segmentos presentes conferem com a cadeia declarada. */
+    /** Todos os segmentos presentes conferem, e a âncora de fim confere. */
     data object Integra : Integridade
 
     /**
@@ -148,6 +201,45 @@ sealed interface Integridade {
      * [EncryptedEvidenceVault]).
      */
     data class SegmentoNaoRegistrado(val sequencia: Int) : Integridade
+
+    /**
+     * **A âncora de fim prova que faltam segmentos.** Foram selados
+     * [seladosNoFim]; o manifesto apresenta [presentesNoManifesto].
+     *
+     * É o veredito do ataque que a cadeia de hash sozinha não pega: apagar os
+     * últimos segmentos e as linhas correspondentes deixa uma cadeia
+     * aritmeticamente perfeita. A âncora é assinada e não acompanha o corte.
+     *
+     * O caso simétrico (mais linhas do que foram seladas) cai aqui também: é a
+     * mesma divergência, e nenhuma das duas direções é integridade.
+     */
+    data class Truncada(val seladosNoFim: Int, val presentesNoManifesto: Int) : Integridade
+
+    /**
+     * Não há âncora de fim válida — então **nada prova que este é o fim**, mesmo
+     * que todos os segmentos presentes confiram entre si. Nunca é [Integra].
+     */
+    data class SemAncoraDeFim(val motivo: Motivo) : Integridade {
+        enum class Motivo {
+            /** Sem linha `F`: processo morto antes de fechar. Não houve o que ancorar. */
+            NAO_FINALIZADA,
+
+            /** Manifesto anterior à v3, que não tinha âncora. Também é o resultado de
+             *  rebaixar `versao=` para escapar da exigência — e por isso não é [Integra]. */
+            FORMATO_ANTERIOR,
+
+            /** Manifesto v3 finalizado e **sem** linha `A`: ou a chave falhou ao selar,
+             *  ou alguém removeu a linha. Os dois casos são o mesmo para quem confere. */
+            AUSENTE,
+
+            /** Linha `A` presente e o MAC não confere: o manifesto não é o que foi selado. */
+            INVALIDA,
+
+            /** A chave do Keystore não respondeu **agora**. Não diz nada sobre a gravação:
+             *  diz que esta conferência não pôde ser feita neste aparelho. */
+            CHAVE_INDISPONIVEL,
+        }
+    }
 }
 
 /**

@@ -40,42 +40,108 @@ enum class LugarProcurado(val filtroOsm: String) {
 }
 
 /**
+ * **De onde veio a resposta — e ela acompanha TODA resposta que a fonte deu.**
+ *
+ * Aceite da spec §6: *"registrar a procedência — serviço, trecho e carimbo de
+ * tempo — em **toda** resposta de fonte externa"*. Tipo próprio, e não cinco
+ * campos repetidos em cada desfecho, porque foi assim que a base veicular
+ * garantiu o mesmo: [Procedencia] em toda resposta **inclusive na que não acha
+ * nada**, que é justamente onde não há linha de resultado para carregar o flag —
+ * e é por isso que a versão anterior deste arquivo tinha `NadaPorPerto` como
+ * `data object`, sem procedência nenhuma. O defeito é o mesmo, e o conserto
+ * também.
+ *
+ * Nome distinto do dela de propósito: [Procedencia] responde *qual base* (oficial
+ * ou demonstração) e é falada; esta responde *de onde veio este dado* e **não** é
+ * falada. Reusar o nome faria duas regras diferentes parecerem a mesma.
+ *
+ * Ela viaja no tipo em vez de ficar num `Log` do lado de lá: um campo que existe
+ * é um campo que o teste consegue inspecionar; uma linha de log some na primeira
+ * refatoração.
+ *
+ * @param servico o endereço consultado — a "URL ou serviço de origem" do §4.
+ * @param consultaEmitida **o que de fato saiu pela rede**, byte a byte. É o campo
+ *   que torna a promessa do §5 auditável depois do fato, e não só no teste: se um
+ *   dia alguém contestar que a transcrição vazou, a prova está aqui, guardada no
+ *   aparelho do próprio agente.
+ * @param trecho o **trecho exato** que fundamentou a resposta: o elemento OSM
+ *   como veio, reduzido ao que sustenta o nome e a distância. Não é o corpo
+ *   inteiro (que pode ter centenas de elementos) nem um resumo escrito por nós —
+ *   é o dado que produziu a fala. Vazio quando a fonte não achou nada, que é o
+ *   fato honesto: não houve trecho.
+ * @param carimboMillis quando a consulta foi feita, **com precisão**. Este é o
+ *   registro de AUDITORIA, do próprio agente, no aparelho. O registro de
+ *   estatística de uso é OUTRO e tem granularidade de dia; ver `RegistroDeUso` e
+ *   `RegistroDeAuditoria` em `core-agent`.
+ */
+data class ProcedenciaExterna(
+    val servico: String,
+    val consultaEmitida: String,
+    val trecho: String,
+    val carimboMillis: Long,
+    val duracaoMs: Long,
+)
+
+/**
  * O que a fonte externa devolveu, **com a procedência junto**.
  *
- * A procedência é registrada em toda resposta externa (aceite da spec §6), e é
- * por isso que ela viaja no tipo em vez de ficar num `Log` do lado de lá: um
- * campo que existe é um campo que o teste consegue inspecionar; uma linha de log
- * some na primeira refatoração.
+ * Quatro desfechos e nenhum colapso, pela mesma razão de `BuscaDePar`: *nada por
+ * perto* é o sistema funcionando; *sem rede* e *prazo estourado* são falhas com
+ * recuperações opostas.
+ *
+ * Repare em quais carregam [ProcedenciaExterna] e quais não: as duas em que **a fonte
+ * respondeu**. Sem rede e prazo estourado não têm procedência porque não houve
+ * resposta de fonte nenhuma — inventar um serviço e um carimbo ali seria
+ * registrar uma consulta que não aconteceu.
  */
 sealed interface RespostaGeoespacial {
 
-    /**
-     * @param servico o endereço consultado — a "URL ou serviço de origem" do §4.
-     * @param trecho o **trecho exato** que fundamentou a resposta: o elemento OSM
-     *   como veio, reduzido ao que sustenta o nome e a distância. Não é o corpo
-     *   inteiro (que pode ter centenas de elementos) nem um resumo escrito por nós
-     *   — é o dado que produziu a fala.
-     * @param carimboMillis quando a consulta foi feita, com precisão. **Este é o
-     *   registro de AUDITORIA**, do próprio agente, no aparelho. O registro de
-     *   estatística de uso é outro e tem granularidade de dia; ver `RegistroDeUso`.
-     */
     data class Encontrado(
         val nome: String,
         val distanciaM: Int,
-        val servico: String,
-        val trecho: String,
-        val carimboMillis: Long,
-        val duracaoMs: Long,
+        val procedencia: ProcedenciaExterna,
     ) : RespostaGeoespacial
 
-    /** Teve rede, a fonte respondeu, e não há nada no raio. Não é falha. */
-    data object NadaPorPerto : RespostaGeoespacial
+    /**
+     * Teve rede, a fonte respondeu, e não há nada no raio. Não é falha — e
+     * **carrega procedência**, porque é resposta.
+     */
+    data class NadaPorPerto(val procedencia: ProcedenciaExterna) : RespostaGeoespacial
 
     /** Sem rede, DNS fora, servidor recusando. O caso normal em campo. */
     data object SemRede : RespostaGeoespacial
 
     /** Passou de [ConsultaGeoespacial.prazoMs]. **Recusa, não espera.** */
     data object PrazoEstourado : RespostaGeoespacial
+}
+
+/**
+ * **A porta pela qual `app` alcança a fonte externa — e ela só aceita enum e números.**
+ *
+ * Existe para uma razão de teste e uma de desenho, e as duas importam:
+ *
+ *  - **desenho:** a assinatura é o contrato de privacidade. Um `String` aqui seria
+ *    a porta por onde a transcrição sairia, e nenhuma revisão de código pega isso
+ *    todas as vezes. Com [LugarProcurado] e três números, não há por onde;
+ *  - **teste:** o `app` costura `CategoriaDeLugar → LugarProcurado` num arquivo só,
+ *    e o teste dessa costura precisa capturar **o que atravessou a fronteira** sem
+ *    subir um servidor HTTP dentro de `app` (que não tem `org.json` de verdade no
+ *    classpath de teste). Uma implementação de mentira captura os argumentos; o
+ *    teste de `core-net` prova o que esses argumentos viram no fio.
+ */
+interface FonteGeoespacial {
+    /**
+     * Repare que **o raio não é parâmetro**. Ele é regra de produto (3 km — ver
+     * `ConsultaGeoespacial.RAIO_PADRAO_M`), não escolha de quem chama: um raio por
+     * chamada seria um botão para "tentar de novo mais longe", e a resposta certa
+     * para *nada num raio operacional* é dizer que não há, não alargar até achar
+     * qualquer coisa.
+     */
+    suspend fun maisProximo(
+        lugar: LugarProcurado,
+        latitude: Double,
+        longitude: Double,
+    ): RespostaGeoespacial
 }
 
 /**
@@ -146,8 +212,9 @@ class ConsultaGeoespacial(
     private val endpoint: String = OVERPASS,
     private val client: OkHttpClient = CLIENTE_COMPARTILHADO,
     val prazoMs: Long = PRAZO_PADRAO_MS,
+    private val raioM: Int = RAIO_PADRAO_M,
     private val agora: () -> Long = { System.currentTimeMillis() },
-) {
+) : FonteGeoespacial {
 
     /**
      * O [lugar] mais próximo de ([latitude], [longitude]) dentro de [raioM].
@@ -157,11 +224,10 @@ class ConsultaGeoespacial(
      * conta é uma harversine sobre o que voltou, e ela é barata — dezenas de
      * elementos, não milhares.
      */
-    suspend fun maisProximo(
+    override suspend fun maisProximo(
         lugar: LugarProcurado,
         latitude: Double,
         longitude: Double,
-        raioM: Int = RAIO_PADRAO_M,
     ): RespostaGeoespacial = withContext(Dispatchers.IO) {
         val lat = arredondar(latitude)
         val lon = arredondar(longitude)
@@ -199,7 +265,7 @@ class ConsultaGeoespacial(
             return@withContext RespostaGeoespacial.SemRede
         }
 
-        interpretar(corpo, lat, lon, agora() - t0)
+        interpretar(corpo, consulta, lat, lon, agora() - t0)
     }
 
     /**
@@ -232,6 +298,7 @@ class ConsultaGeoespacial(
 
     private fun interpretar(
         corpo: String,
+        consultaEmitida: String,
         latConsulta: String,
         lonConsulta: String,
         duracaoMs: Long,
@@ -240,6 +307,19 @@ class ConsultaGeoespacial(
             ?: return RespostaGeoespacial.SemRede
         val lat0 = latConsulta.toDouble()
         val lon0 = lonConsulta.toDouble()
+
+        /**
+         * A procedência de QUALQUER desfecho em que a fonte respondeu — inclusive
+         * o "não achei". Fechada aqui, uma vez, para que não exista o caminho em
+         * que alguém a monta num ramo e esquece no outro.
+         */
+        fun procedencia(trecho: String) = ProcedenciaExterna(
+            servico = endpoint,
+            consultaEmitida = consultaEmitida,
+            trecho = trecho,
+            carimboMillis = agora(),
+            duracaoMs = duracaoMs,
+        )
 
         var melhor: JSONObject? = null
         var melhorNome = ""
@@ -260,18 +340,18 @@ class ConsultaGeoespacial(
             }
         }
 
-        val escolhido = melhor ?: return RespostaGeoespacial.NadaPorPerto
+        // Sem elemento utilizável: a fonte respondeu, e a resposta é "nada". Ela
+        // carrega procedência como qualquer outra — **é o caso em que não há linha
+        // de resultado para pendurar o flag, e por isso é o que se esquece.**
+        val escolhido = melhor ?: return RespostaGeoespacial.NadaPorPerto(procedencia(""))
         val (lat, lon) = coordenadaDe(escolhido)!!
         return RespostaGeoespacial.Encontrado(
             nome = melhorNome,
             distanciaM = distanciaM(lat0, lon0, lat, lon).roundToInt(),
-            servico = endpoint,
             // O trecho que FUNDAMENTOU, não o corpo inteiro: é o elemento escolhido,
             // como veio do servidor. É o que o agente confere depois se a resposta
             // for contestada.
-            trecho = escolhido.toString(),
-            carimboMillis = agora(),
-            duracaoMs = duracaoMs,
+            procedencia = procedencia(escolhido.toString()),
         )
     }
 

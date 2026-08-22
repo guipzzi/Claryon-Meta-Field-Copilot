@@ -222,7 +222,7 @@ class OficinaDeDesperdicioTest {
             |════════ EARCON: recalculado a cada reprodução, na Main ════════
             |$relatorio
             |  soma dos oito (p50) ......... ${us(somaP50)}
-            |  OUVI_VOCE é o do ciclo de voz e o mais frequente do produto.
+            |  DESPERTAR e CANAL_ABERTO/CANAL_FECHADO são os do ciclo de voz.
             |════════════════════════════════════════════════════════════════
             """.trimMargin(),
         )

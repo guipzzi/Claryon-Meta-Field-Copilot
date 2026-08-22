@@ -41,6 +41,8 @@ import com.claryon.field.ui.telas.Capacidade
 import com.claryon.field.ui.telas.TelaDeGuarnicao
 import com.claryon.field.ui.telas.TelaDeLogin
 import com.claryon.field.ui.QuemMeConsultouViewModel
+import com.claryon.field.ui.PericiaViewModel
+import com.claryon.field.ui.telas.TelaDePericia
 import com.claryon.field.ui.telas.TelaDePerfil
 import com.claryon.field.ui.telas.TelaDePermissoes
 import com.claryon.field.ui.telas.TelaDoMapa
@@ -205,6 +207,12 @@ private fun Operacao(
     val escuta by CopilotService.estadoDaEscuta.collectAsState()
     val quemMeConsultou: QuemMeConsultouViewModel = viewModel()
     val consultas by quemMeConsultou.estado.collectAsState()
+    // **A perícia da custódia.** Ver `PericiaViewModel`: `verificar()` e
+    // `Manifesto.ler()` tinham zero chamadores em `src/main` até 22/08, e este é o
+    // caminho que os alcança em runtime.
+    val pericia: PericiaViewModel = viewModel()
+    val estadoDaPericia by pericia.estado.collectAsState()
+    var periciando by remember { mutableStateOf(false) }
     // **O estado da transmissão da posição própria.** De processo, e não do
     // ViewModel: quem escreve é o serviço em primeiro plano, que sobrevive à tela.
     val transmissao by TransmissaoDePosicao.estado.collectAsState()
@@ -212,6 +220,10 @@ private fun Operacao(
     // transformaria a própria consulta de transparência numa fonte de tráfego.
     LaunchedEffect(destino) {
         if (destino == Destino.PERFIL) quemMeConsultou.carregar()
+        // Sair da aba fecha a perícia. Sem isto, voltar ao perfil depois de olhar o
+        // mapa cairia direto na tela de conferência — e num painel operacional,
+        // uma aba que não abre no que o rótulo dela promete é desorientação.
+        if (destino != Destino.PERFIL) periciando = false
     }
     // **O relógio da causa, e só enquanto o perfil está aberto.**
     //
@@ -320,10 +332,23 @@ private fun Operacao(
                 aoAbrir = mapa::abrirMapa,
                 aoFechar = mapa::fecharMapa,
                 aoFocar = mapa::focarPar,
+                aoRecarregar = mapa::recarregar,
                 modifier = modifier,
             )
 
-            Destino.PERFIL -> TelaDePerfil(
+            // **A perícia é uma sub-tela do perfil, não uma quarta aba.**
+            //
+            // Sem `navigation-compose` (decisão do stack), o recorte é um booleano
+            // aqui — o mesmo padrão dos portões de abertura e login logo acima. Uma
+            // quarta aba custaria um destino permanente na barra para uma ação que
+            // acontece uma vez por apuração; a fila de três destinos é o rascunho do
+            // produto e não muda por conveniência de roteamento.
+            Destino.PERFIL -> if (periciando) TelaDePericia(
+                estado = estadoDaPericia,
+                aoConferir = pericia::conferir,
+                aoVoltar = { periciando = false },
+                modifier = modifier,
+            ) else TelaDePerfil(
                 indicativo = INDICATIVO_DEMO,
                 matricula = AGENTE_DEMO,
                 unidade = "GTA-3",
@@ -340,6 +365,7 @@ private fun Operacao(
                 ),
                 consultas = consultas,
                 aoSair = aoEncerrarTurno,
+                aoAbrirPericia = { periciando = true },
                 modifier = modifier,
             )
         }
