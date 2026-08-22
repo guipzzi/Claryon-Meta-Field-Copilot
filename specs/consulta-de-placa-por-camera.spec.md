@@ -102,16 +102,27 @@ escrita porque foi o que se propôs; o que existe é o parágrafo seguinte.
 chamadores em `src/main`: quem extraía placa em produção era
 `DeterministicIntentRouter.extrairPlaca`, casamento literal de sete caracteres — de
 modo que a ditada do exemplo acima virava `ConsultarPlaca(placa = null)` e **abria a
-câmera** para ler a placa que o agente acabara de falar. O roteador agora tenta o
-literal primeiro e a ditada depois, e pelo caminho de produção o banco de 40
-elocuções positivas saiu de **2/40 para 40/40**, com **0 falsos positivos em 44
-negativos** — os mesmos de antes.
+câmera** para ler a placa que o agente acabara de falar. Ligada a ditada ao roteador, o
+banco de 40 elocuções positivas saiu de **2/40 para 40/40**, com **0 falsos positivos
+em 44 negativos** — os mesmos de antes.
 
-A **ordem** entre os dois, porém, não tem prova própria: as duas só divergem quando
-ambas devolvem placa e as placas diferem, e sobre 84 elocuções mais 1817 trechos de
-lei isso dá **zero**. Há uma divergência construível, e nela a ordem escolhida perde:
-na **correção falada** (*"consultar placa ABC1234, não — placa XYZ5678"*) o literal lê
-a primeira placa e a ditada lê depois da última menção, de modo que se consulta a
+**A ordem é `ditada ?: literal`** — `DeterministicIntentRouter.kt:188-189`. Este
+parágrafo dizia o contrário até 22/08, e a inversão está registrada em
+`DECISIONS.md:2026`: o pedido original era literal primeiro, e a medição derrubou o
+argumento dele. A segunda tentativa só roda quando a primeira devolve `null`, então as
+duas ordens só divergem quando **ambas** devolvem placa e as placas diferem — zero
+vezes sobre 84 elocuções mais 1817 trechos de lei.
+
+A divergência construível é a **correção falada**, e é por ela que a ordem foi
+invertida: em *"consultar placa ABC1234, não — placa juliet november oscar quinto
+quarto dobrado oitavo"*, o literal lê a **primeira** placa, e a ditada lê depois da
+última menção. Medido em 22/08 pelo caminho de produção: o literal devolve `ABC1234` e
+a ditada devolve `JNO5448` — **a produção devolve `JNO5448`**, que é a correção do
+agente, e não o engano que ele acabou de desdizer. O parágrafo abaixo descreve o
+desenho antigo e fica como registro:
+
+> Na ordem antiga (literal primeiro), o literal lê a primeira placa e a ditada lê
+> depois da última menção, de modo que se consulta a
 placa que o agente acabou de corrigir. Está asserido em `PlacaDitadaNoRoteadorTest` e
 **não** consertado — trocar quem vence é decisão de spec, e é a segunda pendência
 deste documento.
