@@ -91,3 +91,6 @@ ferramentas/ativacao/*.onnx
 # atenção com mudança de verdade.
 __pycache__/
 *.pyc
+
+# Material do edital (PDFs da organização). Cópia local para leitura — NUNCA versionar.
+.docs-edital/
