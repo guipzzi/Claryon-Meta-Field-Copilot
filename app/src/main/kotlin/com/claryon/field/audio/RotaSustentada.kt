@@ -1,7 +1,7 @@
 package com.claryon.field.audio
 
 import android.util.Log
-import com.claryon.audio.GlassesAudioManagerImpl
+import com.claryon.audio.GlassesAudioManager
 import com.claryon.common.Result
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -54,7 +54,13 @@ import kotlinx.coroutines.sync.withLock
  * não esta classe.
  */
 class RotaSustentada(
-    private val audio: GlassesAudioManagerImpl,
+    // **Interface, não a implementação.** Era `GlassesAudioManagerImpl`, e o efeito
+    // colateral era que esta classe não tinha teste nenhum em JVM: o `Impl` precisa de
+    // `Context`, e o módulo não tem Robolectric nem biblioteca de mock. A classe usa
+    // exatamente dois métodos — `iniciar()` e `liberar()` —, e ambos são da interface;
+    // pedir o concreto não comprava nada e custava a testabilidade da carência, que é
+    // o que decide se o P1 paga remontagem de SCO ao cortar a fala.
+    private val audio: GlassesAudioManager,
     private val escopo: CoroutineScope,
     private val carenciaMs: Long = CARENCIA_MS,
 ) {

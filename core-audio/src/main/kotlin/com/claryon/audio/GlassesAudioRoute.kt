@@ -30,6 +30,21 @@ value class GlassesAudioRoute private constructor(val deviceId: Int) {
     companion object {
 
         /**
+         * **Só para teste. Não use em produção — [acquire] é o único caminho.**
+         *
+         * Existe porque o construtor é privado e [acquire] exige um `AudioManager` do
+         * Android, o que tornava **intestável em JVM** tudo que recebe uma rota. O caso
+         * concreto que a abriu: provar que a rota sobrevive ao P1 cortando a fala
+         * (`RotaAtravessaOCorteTest`) — sem isso, a pergunta "o P1 paga remontagem de
+         * SCO?" só teria a resposta de um KDoc, e KDoc não é medição.
+         *
+         * O nome é feio de propósito. Quem escrever isto no caminho de produção terá
+         * escrito, em letras, que está fabricando uma rota que o sistema não concedeu.
+         */
+        fun paraTesteSomente(deviceId: Int = -1): GlassesAudioRoute =
+            GlassesAudioRoute(deviceId)
+
+        /**
          * **Único caminho de produção.** Só devolve sucesso se o dispositivo de
          * comunicação ativo for `TYPE_BLUETOOTH_SCO` — o canal de voz dos óculos.
          *
