@@ -1,0 +1,552 @@
+package com.claryon.net
+
+import com.claryon.common.Result
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.currentTime
+import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+/**
+ * **O outro lado do rádio: o que B, C e D de fato ouvem.**
+ *
+ * `ReceptorTest` cobre o receptor sozinho. Aqui ele entra num grupo com N pares e
+ * a rede é maltratada no meio: cai do lado de quem fala, cai do lado de quem ouve,
+ * alguém entra no meio da fala, o relógio de um aparelho está errado.
+ *
+ * Cada teste registra o comportamento **observado**, e vários deles travam um
+ * número que hoje é ruim — 2 s até o receptor perceber que a fala foi cortada, por
+ * exemplo. Número ruim travado é dívida visível; adjetivo é dívida escondida.
+ *
+ * **Só `advanceTimeBy`.** O laço de reprodução do [Receptor] roda por relógio, e
+ * as esperas até desistir são 100 × 20 ms: o tempo virtual precisa ser conduzido à
+ * mão para que o teste meça a espera em vez de atravessá-la sem ver.
+ */
+@OptIn(ExperimentalCoroutinesApi::class)
+class CaosDeRecepcaoComNParesTest {
+
+    private val gta = "gta-3"
+
+    /**
+     * PCM que carrega a **identidade do quadro**: a primeira amostra é o byte do
+     * payload, que os testes usam como número de sequência.
+     *
+     * Sem isso, "o receptor tocou 12 quadros" não distingue tocar na ordem certa de
+     * tocar embaralhado — e a ordem é justamente o que o buffer de jitter promete.
+     */
+    private class CodecComCarimbo : CodecDeVoz {
+        override suspend fun codificar(pcm: ShortArray): Result<List<ByteArray>> =
+            Result.success(listOf(ByteArray(1) { 0 }))
+
+        override suspend fun decodificar(payload: ByteArray?): Result<ShortArray> {
+            val marca: Short = if (payload == null || payload.isEmpty()) PLC else payload[0].toShort()
+            return Result.success(ShortArray(160) { marca })
+        }
+
+        override val taxaDeSaidaHz = 24_000
+        override fun liberar() = Unit
+
+        companion object {
+            /** Marca do quadro reconstruído por PLC — nunca é um número de sequência. */
+            const val PLC: Short = -1
+        }
+    }
+
+    /** O que a camada de cima recebeu, na ordem. */
+    private class Escuta {
+        val eventos = mutableListOf<EventoRecepcao>()
+
+        val chegando get() = eventos.filterIsInstance<EventoRecepcao.Chegando>()
+        val terminou get() = eventos.filterIsInstance<EventoRecepcao.Terminou>()
+
+        /** A sequência de marcas tocadas — a ORDEM em que a voz saiu do alto-falante. */
+        val tocados: List<Short>
+            get() = eventos.filterIsInstance<EventoRecepcao.Audio>().map { it.pcm.first() }
+
+        val reproduzidos get() = tocados.count { it != CodecComCarimbo.PLC }
+        val interpolados get() = tocados.count { it == CodecComCarimbo.PLC }
+    }
+
+    private fun TestScope.escutar(par: ParDeRadio, escopo: CoroutineScope): Escuta {
+        val escuta = Escuta()
+        Receptor(
+            transporte = par,
+            codec = CodecComCarimbo(),
+            escopo = escopo,
+            agoraMs = { currentTime },
+        ).iniciar { escuta.eventos += it }
+        return escuta
+    }
+
+    private fun escopoDeTeste(scope: TestScope) =
+        CoroutineScope(UnconfinedTestDispatcher(scope.testScheduler) + Job())
+
+    private fun quadro(tx: String, seq: Int, t: Long = 0L, ultimo: Boolean = false) =
+        QuadroAudio(tx, seq, t, ByteArray(1) { seq.toByte() }, ultimo)
+
+    private fun anuncio(tx: String, autor: String = "alfa") = AnuncioDeFala(
+        transmissaoId = tx,
+        autorIndicativo = autor,
+        autorAgenteId = autor,
+        prioridade = PrioridadeTransmissao.P2_APOIO,
+    )
+
+    // ── 1. A rede cai do lado de quem FALA ────────────────────────────────────
+
+    /**
+     * **Alfa entra num túnel no meio da frase.**
+     *
+     * Observado: Bravo ouve a metade que chegou, e depois **2 000 ms de nada**
+     * antes de o receptor concluir que acabou. O evento que ele recebe é
+     * [EventoRecepcao.Terminou] — o mesmo, com os mesmos campos, que uma fala
+     * encerrada normalmente produz. **Não há marcação de fala truncada.**
+     */
+    @Test
+    fun aRedeDeAlfaCaiNoMeioDaFala_bravoOuveAMetade_eSoDescobre2sDepois() = runTest {
+        val escopo = escopoDeTeste(this)
+        val barramento = BarramentoTatico()
+        val alfa = ParDeRadio("alfa", barramento)
+        val bravo = ParDeRadio("bravo", barramento)
+        val escuta = escutar(bravo, escopo)
+
+        try {
+            alfa.anunciar(anuncio("tx-1"))
+            repeat(10) { alfa.enviar(quadro("tx-1", it)) }
+            advanceTimeBy(400) // tempo de tocar os 10
+            alfa.rede = false // túnel: nada mais sai, e o `ultimo` nunca virá
+            repeat(10) { alfa.enviar(quadro("tx-1", 10 + it, ultimo = it == 9)) }
+
+            val quandoCortou = currentTime
+            assertEquals("Bravo ouviu só o que chegou", 10, escuta.reproduzidos)
+            assertTrue("e não sabe ainda que acabou", escuta.terminou.isEmpty())
+
+            advanceTimeBy(2_100)
+            val fim = escuta.terminou.firstOrNull()
+            assertNotNull("o receptor tem de desistir em algum momento", fim)
+            assertEquals("tx-1", fim!!.transmissaoId)
+            assertEquals(10, fim.quadros)
+            assertEquals(
+                "OBSERVADO: zero quadros contados como PERDIDOS numa fala cortada ao meio — " +
+                    "o corte não aparece em nenhum campo",
+                0,
+                fim.perdidos,
+            )
+            assertTrue(
+                "OBSERVADO: 2 s de silêncio até o receptor concluir que a fala acabou " +
+                    "(${escuta.eventos.size} eventos, corte em $quandoCortou)",
+                currentTime - quandoCortou >= 2_000,
+            )
+        } finally {
+            escopo.cancel()
+        }
+    }
+
+    /**
+     * **O contra-teste que prova o achado acima**, e ele é uma igualdade, não uma
+     * descrição: a fala encerrada normalmente e a fala cortada pela rede produzem
+     * dois [EventoRecepcao.Terminou] **iguais**, campo a campo.
+     *
+     * Se algum dia existir marcação de truncamento, este teste cai — e cair é o
+     * comportamento certo: é assim que alguém descobre que o achado foi consertado.
+     */
+    @Test
+    fun oFimNormalEOFimPorRedeCaida_saoIndistinguiveisParaQuemOuve() = runTest {
+        suspend fun desfechoCom(corteNoMeio: Boolean): EventoRecepcao.Terminou {
+            val escopo = escopoDeTeste(this)
+            val barramento = BarramentoTatico()
+            val alfa = ParDeRadio("alfa", barramento)
+            val bravo = ParDeRadio("bravo", barramento)
+            val escuta = escutar(bravo, escopo)
+            try {
+                alfa.anunciar(anuncio("tx"))
+                repeat(10) { alfa.enviar(quadro("tx", it, ultimo = !corteNoMeio && it == 9)) }
+                advanceTimeBy(400)
+                if (corteNoMeio) {
+                    alfa.rede = false
+                    repeat(10) { alfa.enviar(quadro("tx", 10 + it, ultimo = it == 9)) }
+                    advanceTimeBy(2_100)
+                }
+                return escuta.terminou.single()
+            } finally {
+                escopo.cancel()
+            }
+        }
+
+        val normal = desfechoCom(corteNoMeio = false)
+        val truncado = desfechoCom(corteNoMeio = true)
+
+        assertEquals(
+            "OBSERVADO: uma fala inteira e uma fala cortada ao meio pela rede chegam " +
+                "à camada de cima como o MESMO evento — não há como a tela marcar corte",
+            normal,
+            truncado,
+        )
+        assertEquals(10, normal.quadros)
+        assertEquals(0, truncado.perdidos)
+    }
+
+    // ── 2. A rede cai do lado de quem OUVE ────────────────────────────────────
+
+    /**
+     * **Bravo é quem entra no túnel.**
+     *
+     * Do ponto de vista do laço de reprodução, é idêntico ao caso anterior — e é
+     * esse o ponto. A única coisa que separa os dois na camada de cima é
+     * `conectado()`: no corte do emissor, o transporte de Bravo continua verde; no
+     * corte dele, fica vermelho. É a diferença que a tela usa para dizer "sem
+     * dados" em vez de deixar o agente achar que o colega calou.
+     */
+    @Test
+    fun aRedeDeBravoCaiNoMeioDaRecepcao_soOEstadoDoTransporteDistingueDoOutroCorte() = runTest {
+        val escopo = escopoDeTeste(this)
+        val barramento = BarramentoTatico()
+        val alfa = ParDeRadio("alfa", barramento)
+        val bravo = ParDeRadio("bravo", barramento)
+        val escuta = escutar(bravo, escopo)
+
+        try {
+            alfa.anunciar(anuncio("tx-1"))
+            repeat(8) { alfa.enviar(quadro("tx-1", it)) }
+            advanceTimeBy(400)
+            assertTrue("Bravo estava ouvindo", escuta.reproduzidos == 8)
+            assertTrue(bravo.conectado())
+
+            bravo.rede = false // agora é o OUVINTE que some
+            repeat(12) { alfa.enviar(quadro("tx-1", 8 + it, ultimo = it == 11)) }
+            advanceTimeBy(2_100)
+
+            assertEquals("nada mais foi tocado", 8, escuta.reproduzidos)
+            assertEquals(8, escuta.terminou.single().quadros)
+            assertFalse(
+                "e é SÓ isto que a tela tem para distinguir de um colega que calou",
+                bravo.conectado(),
+            )
+        } finally {
+            escopo.cancel()
+        }
+    }
+
+    // ── 3. Entrar no grupo no meio da fala ────────────────────────────────────
+
+    /**
+     * **Charlie liga o rádio no meio da ocorrência.**
+     *
+     * Observado, e é o comportamento certo para voz ao vivo: ele ouve **do ponto em
+     * que entrou**, sem PLC para o que perdeu — reconstruir 300 ms de fala que
+     * nunca chegou seria inventar áudio.
+     *
+     * O que **não** é aceitável e o teste registra: Charlie perde o
+     * [EventoRecepcao.Chegando], porque o anúncio já passou. Na tela isso significa
+     * uma voz tocando **sem autor**, e `RadioTatico.tratarRecepcao` só chama
+     * `aoMudarQuemFala` no `Chegando`. Charlie ouve alguém e não sabe quem.
+     */
+    @Test
+    fun charlieEntraNoMeioDaFala_ouveDoPontoEmQueEntrou_eSemSaberQuemFala() = runTest {
+        val escopo = escopoDeTeste(this)
+        val barramento = BarramentoTatico()
+        val alfa = ParDeRadio("alfa", barramento)
+        val bravo = ParDeRadio("bravo", barramento)
+        val charlie = ParDeRadio("charlie", barramento, noGrupo = false)
+        val deBravo = escutar(bravo, escopo)
+        val deCharlie = escutar(charlie, escopo)
+
+        try {
+            alfa.anunciar(anuncio("tx-1", autor = "alfa"))
+            repeat(15) { alfa.enviar(quadro("tx-1", it)) }
+            advanceTimeBy(400)
+
+            charlie.noGrupo = true // entrou agora
+            repeat(15) { alfa.enviar(quadro("tx-1", 15 + it, ultimo = it == 14)) }
+            advanceTimeBy(800)
+
+            assertEquals("Bravo, presente desde o começo, ouviu tudo", 30, deBravo.reproduzidos)
+            assertEquals(
+                "Charlie ouve só a metade que existia depois da entrada dele",
+                15,
+                deCharlie.reproduzidos,
+            )
+            assertEquals(
+                "e NÃO pode haver PLC pelo começo que ele nunca teve direito de ouvir",
+                0,
+                deCharlie.interpolados,
+            )
+            assertEquals(
+                "a primeira coisa que Charlie ouve é o quadro 15, não o 0",
+                15.toShort(),
+                deCharlie.tocados.first(),
+            )
+            assertTrue("Bravo sabe quem fala", deBravo.chegando.isNotEmpty())
+            assertTrue(
+                "OBSERVADO: Charlie ouve uma voz sem nenhum evento de autoria — " +
+                    "na tela, som sem autor",
+                deCharlie.chegando.isEmpty(),
+            )
+            assertTrue("mas o fim ele recebe", deCharlie.terminou.isNotEmpty())
+        } finally {
+            escopo.cancel()
+        }
+    }
+
+    // ── 4. Relógio do cliente errado ──────────────────────────────────────────
+
+    /**
+     * **A ordem da fala é a SEQUÊNCIA, nunca o carimbo de tempo.**
+     *
+     * Um aparelho com o relógio adiantado meia hora — ou zerado por troca de
+     * bateria — carimbaria `capturadoEmMs` fora de qualquer ordem plausível. Se o
+     * receptor ordenasse por tempo, a fala sairia embaralhada ou seria descartada
+     * inteira.
+     *
+     * Aqui os carimbos vêm em ordem DECRESCENTE e ainda por cima negativos, e a
+     * voz sai em ordem.
+     */
+    @Test
+    fun relogioDoEmissorTotalmenteErrado_naoMudaAOrdemDaVoz() = runTest {
+        val escopo = escopoDeTeste(this)
+        val barramento = BarramentoTatico()
+        val alfa = ParDeRadio("alfa", barramento)
+        val bravo = ParDeRadio("bravo", barramento)
+        val escuta = escutar(bravo, escopo)
+
+        try {
+            alfa.anunciar(anuncio("tx-1"))
+            repeat(12) { i ->
+                // Carimbo decrescente, começando no futuro e terminando no passado.
+                alfa.enviar(quadro("tx-1", i, t = 1_800_000L - i * 1_000_000L, ultimo = i == 11))
+            }
+            advanceTimeBy(500)
+
+            assertEquals(
+                "a voz saiu na ordem da sequência, não na do relógio",
+                (0..11).map { it.toShort() },
+                escuta.tocados,
+            )
+            assertEquals(0, escuta.interpolados)
+        } finally {
+            escopo.cancel()
+        }
+    }
+
+    /**
+     * O contra-teste: **chegada** fora de ordem, com carimbo certo. O buffer de
+     * jitter reordena — que é o que ele existe para fazer, e é o que prova que o
+     * teste acima não passou por acidente de ordem de chegada.
+     */
+    @Test
+    fun quadrosQueChegamForaDeOrdem_saemNaOrdem() = runTest {
+        val escopo = escopoDeTeste(this)
+        val barramento = BarramentoTatico()
+        val alfa = ParDeRadio("alfa", barramento)
+        val bravo = ParDeRadio("bravo", barramento)
+        val escuta = escutar(bravo, escopo)
+
+        try {
+            alfa.anunciar(anuncio("tx-1"))
+            listOf(3, 1, 0, 5, 2, 4, 7, 6).forEach { alfa.enviar(quadro("tx-1", it)) }
+            alfa.enviar(quadro("tx-1", 8, ultimo = true))
+            advanceTimeBy(500)
+
+            assertEquals((0..8).map { it.toShort() }, escuta.tocados)
+        } finally {
+            escopo.cancel()
+        }
+    }
+
+    /**
+     * **Quadro que chega tarde demais é descartado, e o buraco já virou PLC.**
+     *
+     * Tocá-lo depois quebraria a ordem e soaria pior que a interpolação que já
+     * saiu no lugar dele. O teste exige as duas metades: a interpolação acontece
+     * **e** o retardatário não aparece na saída.
+     */
+    @Test
+    fun oQuadroQueChegaTardeDemais_naoVoltaAToarDepoisDoPlc() = runTest {
+        val escopo = escopoDeTeste(this)
+        val barramento = BarramentoTatico()
+        val alfa = ParDeRadio("alfa", barramento)
+        val bravo = ParDeRadio("bravo", barramento)
+        val escuta = escutar(bravo, escopo)
+
+        try {
+            alfa.anunciar(anuncio("tx-1"))
+            // O 4 nunca chega na hora; os posteriores chegam.
+            listOf(0, 1, 2, 3, 5, 6, 7, 8).forEach { alfa.enviar(quadro("tx-1", it)) }
+            advanceTimeBy(400)
+
+            assertTrue("o buraco tem de virar PLC, nunca silêncio", escuta.interpolados >= 1)
+            assertFalse(
+                "o retardatário não pode aparecer fora de lugar",
+                escuta.tocados.contains(4.toShort()),
+            )
+
+            alfa.enviar(quadro("tx-1", 4)) // chega atrasado
+            alfa.enviar(quadro("tx-1", 9, ultimo = true))
+            advanceTimeBy(400)
+
+            assertFalse(
+                "e continua não podendo aparecer — a ordem da voz é irrecuperável",
+                escuta.tocados.contains(4.toShort()),
+            )
+            assertTrue(escuta.terminou.isNotEmpty())
+        } finally {
+            escopo.cancel()
+        }
+    }
+
+    // ── 5. Três transmissões em sequência ─────────────────────────────────────
+
+    /**
+     * **Três falas enfileiradas no mesmo canal, sem vazamento entre elas.**
+     *
+     * O risco concreto: o buffer de jitter guarda quadros por número de sequência,
+     * e todas as transmissões começam em 0. Sem `jitter.reiniciar()` no anúncio, um
+     * quadro pendente da fala anterior tocaria dentro da seguinte — a voz de um
+     * agente colada dentro da frase de outro.
+     */
+    @Test
+    fun tresFalasSeguidas_naoVazamUmaDentroDaOutra() = runTest {
+        val escopo = escopoDeTeste(this)
+        val barramento = BarramentoTatico()
+        val pares = listOf("alfa", "bravo", "charlie").map { ParDeRadio(it, barramento) }
+        val delta = ParDeRadio("delta", barramento)
+        val escuta = escutar(delta, escopo)
+
+        try {
+            pares.forEach { par ->
+                val tx = "tx-${par.agenteId}"
+                par.anunciar(anuncio(tx, autor = par.agenteId))
+                repeat(10) { par.enviar(quadro(tx, it, ultimo = it == 9)) }
+                // **A sujeira que faz este teste valer.** Um quadro de sequência
+                // alta que chega tarde e nunca é tocado fica pendente no buffer.
+                // Sem `jitter.reiniciar()` no anúncio seguinte, `proximaEsperada`
+                // continuaria em 10 e os quadros 0..9 da PRÓXIMA fala seriam
+                // descartados por "atrasados" — a fala do colega sumiria inteira.
+                par.enviar(quadro(tx, 40))
+                advanceTimeBy(600)
+            }
+
+            assertEquals("uma abertura por fala", 3, escuta.chegando.size)
+            assertEquals("um fim por fala", 3, escuta.terminou.size)
+            assertEquals(
+                listOf("tx-alfa", "tx-bravo", "tx-charlie"),
+                escuta.terminou.map { it.transmissaoId },
+            )
+            assertEquals(
+                "cada fala entrega os 10 quadros dela, e só os dela",
+                listOf(10, 10, 10),
+                escuta.terminou.map { it.quadros },
+            )
+            assertEquals(
+                "e a voz sai em ordem dentro de cada fala, sem quadro de uma dentro da outra",
+                (0..9).map { it.toShort() } + (0..9).map { it.toShort() } + (0..9).map { it.toShort() },
+                escuta.tocados,
+            )
+        } finally {
+            escopo.cancel()
+        }
+    }
+
+    // ── 6. O texto chega depois, e com chave própria ──────────────────────────
+
+    /**
+     * **O texto de uma fala não pode pousar no balão da seguinte.**
+     *
+     * A transcrição na origem sai **depois** do fim da fala — e nesse intervalo
+     * outra transmissão já pode ter começado. O evento carrega o `transmissaoId`
+     * justamente para casar por chave, e sai **fora** do laço de reprodução para
+     * não esperar o áudio drenar.
+     */
+    @Test
+    fun oTextoDaFalaAnterior_chegaComAChaveDela_mesmoComOutraFalaTocando() = runTest {
+        val escopo = escopoDeTeste(this)
+        val barramento = BarramentoTatico()
+        val alfa = ParDeRadio("alfa", barramento)
+        val bravo = ParDeRadio("bravo", barramento)
+        val charlie = ParDeRadio("charlie", barramento)
+        val escuta = escutar(charlie, escopo)
+
+        try {
+            alfa.anunciar(anuncio("tx-alfa"))
+            repeat(5) { alfa.enviar(quadro("tx-alfa", it, ultimo = it == 4)) }
+            advanceTimeBy(300)
+
+            // Bravo já está falando quando o whisper de Alfa termina.
+            bravo.anunciar(anuncio("tx-bravo", autor = "bravo"))
+            repeat(5) { bravo.enviar(quadro("tx-bravo", it)) }
+            alfa.transcrever("tx-alfa", "reforço na Avenida Sete")
+            advanceTimeBy(300)
+
+            val texto = escuta.eventos.filterIsInstance<EventoRecepcao.TextoDaFala>().single()
+            assertEquals(
+                "o texto é de Alfa e tem de continuar sendo, com Bravo no ar",
+                "tx-alfa",
+                texto.transmissaoId,
+            )
+            assertEquals("reforço na Avenida Sete", texto.texto)
+        } finally {
+            escopo.cancel()
+        }
+    }
+
+    // ── 7. Canal degradado ────────────────────────────────────────────────────
+
+    /**
+     * **Perda alta tem de virar aviso, e uma vez só.**
+     *
+     * Decidir uma abordagem contando com um apoio que talvez não tenha ouvido é
+     * pior que saber que o canal está ruim. E repetir o aviso a cada quadro seria
+     * ruído por cima de um alerta que o agente já recebeu.
+     */
+    @Test
+    fun perdaAcimaDoLimiar_avisaUmaVezSo() = runTest {
+        val escopo = escopoDeTeste(this)
+        val barramento = BarramentoTatico()
+        val alfa = ParDeRadio("alfa", barramento)
+        val bravo = ParDeRadio("bravo", barramento)
+        val escuta = escutar(bravo, escopo)
+
+        try {
+            alfa.anunciar(anuncio("tx-1"))
+            // Metade dos quadros some — muito acima dos 30% do limiar.
+            (0..79).filter { it % 2 == 0 }.forEach { alfa.enviar(quadro("tx-1", it)) }
+            alfa.enviar(quadro("tx-1", 80, ultimo = true))
+            advanceTimeBy(3_000)
+
+            val avisos = escuta.eventos.count { it is EventoRecepcao.CanalDegradado }
+            assertEquals("um aviso, não um por quadro", 1, avisos)
+            assertTrue("e a voz continuou saindo, interpolada", escuta.interpolados > 10)
+        } finally {
+            escopo.cancel()
+        }
+    }
+
+    /** Contra-teste: canal limpo **não** dispara o aviso. */
+    @Test
+    fun canalLimpo_naoAvisaDegradacao() = runTest {
+        val escopo = escopoDeTeste(this)
+        val barramento = BarramentoTatico()
+        val alfa = ParDeRadio("alfa", barramento)
+        val bravo = ParDeRadio("bravo", barramento)
+        val escuta = escutar(bravo, escopo)
+
+        try {
+            alfa.anunciar(anuncio("tx-1"))
+            repeat(80) { alfa.enviar(quadro("tx-1", it, ultimo = it == 79)) }
+            advanceTimeBy(3_000)
+
+            assertEquals(0, escuta.eventos.count { it is EventoRecepcao.CanalDegradado })
+            assertEquals(80, escuta.reproduzidos)
+        } finally {
+            escopo.cancel()
+        }
+    }
+}
