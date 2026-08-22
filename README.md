@@ -167,17 +167,43 @@ metade.
 
 O **modelo do redator não vai no APK** — nunca em `assets/`, porque
 `llama_model_load_from_file` faz `fopen` e asset não tem caminho no sistema de
-arquivos. Ele vive em `filesDir`, com nome fixo `redator.gguf`:
+arquivos. São **770,28 MiB** (807 694 464 B) contra um APK debug de 384,63 MiB.
+
+`RedacaoDoCopiloto.arquivoDoModelo` procura em **dois** lugares, nesta ordem, com
+nome fixo `redator.gguf`. Escolha um:
 
 ```bash
 curl -L -o /tmp/redator.gguf \
   https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf
+
+# (a) RECOMENDADO — uma linha, sem cópia, funciona também em release
+adb push /tmp/redator.gguf \
+  /sdcard/Android/data/com.claryon.field/files/redator.gguf
+
+# (b) diretório privado — só em build debug, e duplica 770 MiB em disco
 adb push /tmp/redator.gguf /data/local/tmp/redator.gguf
 adb shell run-as com.claryon.field cp /data/local/tmp/redator.gguf files/redator.gguf
 ```
 
+**(a) é o caminho do onboarding do dia do evento**, e foi medido em 22/08 no
+emulador arm64 API 35: o llama.cpp carrega direto do armazenamento externo
+(`preparar()` em 2 168 ms) — a dúvida era `mmap` sobre FUSE, e não se confirmou.
+A cópia de (b) custou 908–1 187 ms **além** do push, e fica em disco para sempre.
+
+**(b) vence quando os dois existem**, de propósito: o armazenamento compartilhado
+é gravável por quem tem acesso ao aparelho, e um GGUF trocado é um copiloto
+trocado.
+
 Sem o arquivo, o app decide `LerVerbatim(SEM_MODELO)` no boot e os testes de
-`RedatorNoAparelhoTest` são **pulados** (`Assume`), não verdes.
+`RedatorNoAparelhoTest` e `OrcamentoDaEtapaBNoAparelhoTest` são **pulados**
+(`Assume`), não verdes.
+
+> ⚠️ **A Etapa B está carregada, não ligada.** `RedacaoDoCopiloto.redigir` tem
+> zero chamadores em `src/main`: com ou sem modelo, com a chave ligada ou
+> desligada, o agente ouve a **citação** (`"Art. 306, Lei 9.503"`). Ligá-la
+> sobrepõe o teto de 7 palavras do `CLAUDE.md` §4 e espera decisão humana em
+> `specs/redacao-por-llm-na-fala.spec.md`, que recomenda **não ligar** com o
+> modelo atual.
 
 A Etapa B é **desligável no aparelho, sem recompilar**:
 

@@ -20,11 +20,22 @@ enum class FeatureFlag(val key: String, val default: Boolean) {
     /**
      * **Etapa B da Fase 4: o LLM reescreve o trecho recuperado antes de falar.**
      *
-     * Desligada, o produto lê o trecho *verbatim* — que é a Etapa A e continua
-     * sendo o comportamento correto, não um modo degradado de emergência. É por
-     * isso que o padrão é `true`: a chave existe para **desligar** quando o
-     * modelo decepcionar em pt-BR, como o `ROADMAP.md` prevê, e não para manter
-     * a capacidade dormente até alguém lembrar de acordá-la.
+     * Desligada, o produto responde com a **citação** (`"Art. 306, Lei 9.503"`)
+     * — que é a Etapa A e continua sendo o comportamento correto, não um modo
+     * degradado de emergência. É por isso que o padrão é `true`: a chave existe
+     * para **desligar** quando o modelo decepcionar em pt-BR, como o
+     * `ROADMAP.md` prevê, e não para manter a capacidade dormente até alguém
+     * lembrar de acordá-la.
+     *
+     * **Este KDoc dizia "lê o trecho *verbatim*", e isso nunca existiu em
+     * produção** (corrigido em 22/08): `ConsultaDeNorma.consultar` devolve
+     * `Pair<citacao, norma>` e o texto do artigo não chega a `app`. Leitura
+     * verbatim está **proposta** em `specs/leitura-de-norma.spec.md`.
+     *
+     * **E a chave, hoje, não liga nada.** `RedacaoDoCopiloto.redigir` tem zero
+     * chamadores em `src/main`: ligada ou desligada, o agente ouve a citação.
+     * Ver o KDoc de `RedacaoDoCopiloto` e a medição em
+     * `OrcamentoDaEtapaBNoAparelhoTest`.
      *
      * Desligar não é a única porta: `com.claryon.llm.PoliticaDeRedacao` também
      * recusa por RAM e pela ausência do GGUF em `filesDir`.

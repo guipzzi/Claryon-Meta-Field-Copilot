@@ -1,60 +1,55 @@
-# Onde estamos — 2026-08-21 · Placa por voz e por câmera; Fase 6 quase inteira
+# Onde estamos — 2026-08-22 · Onze defeitos medidos e consertados; o LLM roda e não deve ligar
 
 **Reescrito a cada sessão, nunca acrescentado. Teto duro: 60 linhas.** O resto vai para `DECISIONS.md`.
 
 ## O que funciona hoje
 
-- `./gradlew build` verde. **1163 testes JVM, 0 falhas, 0 pulados** — conferido com `git stash -u`,
-  ou seja, `HEAD` de pé **sozinho**, sem árvore suja.
-- **PTT:** toque→1º quadro **31–48 ms p50** (o p95 é 82 e **126**, e 126 estoura a meta de 120) ·
-  P1 corta em **11 ms** · **WER 3,4%** · REVOGAÇÃO/AUTORIA/CANAL PRIVADO POR JWT. **CICLO DE VOZ:
-  873–945 ms** (aceite ≤4000), **STT sendo 69%** — medido sobre uma RECUSA; o acerto custa mais,
-  porque o Piper expande número por extenso.
-- **CONSULTA DE PLACA, DUAS FORMAS.** **Ditando:** alfabeto militar brasileiro, e a PM dita
-  algarismo por **ORDINAL** (Portaria 071-CG/15 PMBA: *"Quinto; Quarto Dobrado; Oitavo"*). 84
-  elocuções, **40/40**, zero extração errada, zero falso positivo em 44 negativos, **zero placa
-  fabricada** em 1817 trechos — com 93 corridas de sete caracteres reprovadas na validação.
-  **Pela câmera:** **2 frames, 67–180 ms**; quem limita é a câmera (7 fps), não o OCR, e frames
-  vivem em RAM. As duas passam pelo **portão único** de `PlacaValidator`.
-- **BASE VEICULAR** (`0023`): verificação **53/53 testada por mutação**, `procedencia`
-  oficial/demonstração em **toda** resposta — inclusive na que não acha nada, que é onde não há
-  linha para carregar o flag.
-- **FALHA DE CÂMERA FALADA**: as oito causas do SDK viravam "Consulta indisponível."; agora falam
-  por **recuperação** — abrir as hastes, mexer no Meta AI, esperar esfriar, carregar.
-- **SESSÃO DOS ÓCULOS COM DONO DE PROCESSO**, provada no aparelho — e `startSession()` tinha
-  **zero chamadores em `src/main`**: nunca era aberta em produção. **MARCA, ABERTURA E LOGIN**: a
-  abertura do sistema era **BRANCA**, no app que recusa tema claro por visão noturna. **DESIGN**:
-  base croma zero, e `TintaFraca` foi de **2,51:1** (abaixo do AA) para **4,70** — ela é a cor
-  padrão dos rótulos que este projeto brigou para tornar honestos.
-- **ETAPA A DA FASE 4**: 1817 trechos, índice com 1744, e as **14 perguntas de gramatura foram
-  todas recusadas** porque a Lei de Drogas não fixa número. **MEDIDO E OTIMIZADO**: 1ª consulta ao
-  índice **4855→618 ms** · detector **24,9%→4,5%** de um núcleo · earcons **14 476→1,3 µs** ·
-  APK **−884 KB** ao resolver a colisão do ggml.
+- `./gradlew build :app:compileDebugAndroidTestKotlin` verde. **862 testes JVM únicos, 106 classes,
+  0 falhas, 0 pulados.** O número que eu reportava antes (1163) estava **inflado em 63%**: debug e
+  release rodam as mesmas classes e eu somava as duas. E **`build` sozinho NÃO compila `androidTest`** —
+  empurrei um `HEAD` quebrado por esse buraco de verificação.
+- **RÁDIO, os 8 defeitos do caos consertados**, cada um com contra-teste em duas rodadas. O bloqueador:
+  **sobreposição de vozes de 4 640 ms → 60 ms** (232 quadros → 3). O conserto não acrescentou tráfego —
+  o anúncio de P1 **já era difundido e ninguém lia**. Também: `liberar` devolve resultado tipado e a
+  guarnição não fica muda 30 s em silêncio · sem rede deixou de se disfarçar de canal ocupado · fala
+  truncada tem motivo · supressor perdeu `abrir`/`fechar` · quem entra no meio ouve o autor ·
+  `0024` apaga a concessão do ex-membro · piso local fala "Sem servidor".
+- **GPS**: eram **0 linhas persistidas em 20 min** com o Android confirmando entrega. Seis consertos, e o
+  mapa parou de escrever *"ninguém publicando"* quando a culpa é do portador — agora fica **em branco com
+  a posição própria**, e distingue *não publiquei* de *ninguém publicou* de *não estou recebendo*.
+- **PLACA: 0 erradas aceitas em 31 imagens** de campo (ângulo, chuva, contraluz, reflexo, oclusão, noite).
+  Dita: 40/40. Roteador a 93 µs no p50. OCR a p50 8 ms — **quem limita é a câmera de 7 fps**, não ele.
+- **LLM roda no celular, provado**: `adb push`, `mmap` sobre FUSE, carga 2 435 ms, PSS +1,91× o GGUF.
+- **Quatro documentos novos** para os quatro critérios do §11.2 do edital: LGPD art. 38, aderência ao
+  toolkit, prontidão de hardware, e impacto com **entrevista de PM da PMERJ** (autorizada, sem iniciais).
 
 ## O que está quebrado, e nós sabemos
 
-1. **A ETAPA B REPROVA COM 1B.** 300 gerações: **25 de 268 inventam número que a lei não tem**, e o
-   guarda aprovou **23**. A régua de cifras reprovou **zero de 268** — dígito comum já está na
-   fonte, número por extenso não tem dígito, e reatribuição usa cifras da fonte trocadas de
-   grandeza. Some-se a cegueira a negação. Mediana **4680 ms**, que estoura o aceite sozinha.
-2. **Dois aceites são inconsistentes por construção**: câmera gasta até 5,9 s contra os ≤4 s da
-   Fase 4. **Decidido**: a régua se divide — os 4 s valem para o caminho em que o SISTEMA trabalha;
-   a janela de captura é espera pelo HUMANO, e estourá-la é recusa, não latência.
-3. **Falso positivo do earcon 0,99/h** (meta 0,5) e **recall 3/4 locutores** — o gargalo é
-   POSITIVO: 18 elocuções de UM locutor. Mais vozes resolvem; mais podcast, não.
-4. **O deck submetido descreve reconhecimento facial, display e nuvem** — hoje proibições duras, e
-   o §14.1 veda alteração de escopo. Pergunta à organização; as três vão na direção mais restritiva.
-5. **`posicoes_do_grupo` faz `join` com `agent_positions`**: quem nunca publicou posição SOME da
-   lista, e a contagem não sabe dizer quanto menor. O separador de 15 min é hipótese declarada.
-6. **Bateria da `DeviceSession` aberta não medida** (preço direto do dono de processo) ·
-   `RadioViewModel` faz uma requisição a cada **10 s**, 4320 por turno com a tela apagada ·
-   `ModoOperacao` é a constante `ATIVO` em produção.
-7. **110 `assumeTrue` e 14 `@Ignore`** — 124 lugares onde um teste passa sem executar; quatro
-   casos hoje, incluindo `caos_mdk.sh` com "N/N verdes" sobre `tests="0"` · `CaosDoDatTest` falha
-   um por rodada em `HEAD` limpo · P1 não alcança `render` · `security-crypto` em alpha.
+1. **LIGAR O LLM PIORARIA O PRODUTO — medido, e a decisão é humana.** Fica **mudo em 9 de 20** (16 com o
+   aparelho ocupado), rende **1 a 2 utilizáveis em 20**, e nas outras 5 a 6 aprovações diz a lei ao
+   contrário. O achado que governa: **`aprova` e `utilizáveis` andam em sentidos opostos** — a régua de
+   lastro premia casamento lexical, e o jeito mais barato de casar é **copiar**. Aprovação do guarda é
+   indicador de cópia, não de utilidade. Cinco formulações de prompt medidas: os defeitos de forma somem,
+   a utilidade não muda. `redigir()` segue com zero chamadores, e um teste falha se alguém ligar.
+2. **O guarda é cego a NEGAÇÃO.** *"NÃO DEIXOU DE observar as cautelas"* passa com lastro 0,78 sobre um
+   artigo que pune quem **deixa** de observar. É régua de sentido, e não existe.
+3. **Prefill de 500 tokens custa 1 620–2 550 ms contra prazo de 2 500** — `llama_decode` aborta antes de o
+   prompt entrar. Mesma formulação rendeu 14/20 e depois 4/20 só por carga de máquina.
+4. **Falso positivo da ativação: 2,08/h contra meta de 0,5** — e o `0,99` que este arquivo publicava era
+   da cabeça **v3**; a **v5** é que está embarcada. Recall 3/4 locutores, nunca medido por HFP.
+5. **Barro é 0/3 no OCR**, e é onde afrouxar o validador mata: com 6 caracteres, `DEF4567` vira `DEF456`
+   consultado. Farol **piora** a leitura noturna. Três falsos negativos na placa ditada, do parser de extenso.
+6. **Nada foi medido em óculos reais.** O emulador não tem SCO. Bateria dos óculos, térmica, latência
+   boca-a-ouvido e o custo do RPC novo na preempção seguem sem número.
+7. **O mapa fica preto e mudo** se só os tiles forem bloqueados (wifi de evento) — Supabase acessível,
+   `OnStyleLoaded` nunca dispara, sem marcador e sem mensagem. É a única violação viva de "falha nunca é
+   silêncio" na tabela de degradação.
+8. **`ROADMAP` define fases 0 a 5.** Não existe Fase 6 escrita — a leitura de placa foi feita e está
+   ligada, mas sem critério de aceite contra o qual medir. E o deck submetido descreve face, display e
+   nuvem; o §14.1 veda mudança de escopo, mas o §8.1 **permite nuvem explicitamente**.
 
 ## O que vem a seguir
 
-O prazo da Fase 0 (documento no template) **venceu em 22/08**. Depois: decidir o modelo da Etapa B
-— o motor está resolvido, o modelo não —, e a régua do guarda, que tem dois buracos independentes.
-O PDF de contexto está em `~/Downloads/`, fora do repositório.
+A entrega do Segundo Filtro venceu em **22/08** e é o portão: sem ela, nenhuma fase seguinte existe.
+Depois: a régua de sentido do guarda, o truncamento chegando ao balão da tela (fica na UI), o aceite 4 da
+spec de troca de grupo esperando ratificação, e a `0024` aplicada no banco.
