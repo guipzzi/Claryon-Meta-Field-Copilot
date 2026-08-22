@@ -286,9 +286,15 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
     /**
      * Abre o rádio. Chamado quando a tela da guarnição fica visível.
      *
-     * A ordem é a do contrato de boot e não pode ser invertida: **rota de áudio
-     * antes da sessão**. HFP totalmente configurado antes de qualquer streaming;
-     * o inverso produz captura de voz intermitente.
+     * Duas ordens, e nenhuma das duas pode ser invertida:
+     *
+     *  - **rota de áudio antes da sessão** — HFP totalmente configurado antes de
+     *    qualquer streaming; o inverso produz captura de voz intermitente;
+     *  - **fio de voz antes da rota de áudio** — `CanaisDoAgente.registrarRadio`
+     *    roda antes de tudo, e antes de qualquer `return` desta função. Ele não
+     *    depende de HFP, e enquanto dependeu, todo aparelho sem fone pareado ficava
+     *    sem caminho entre o roteador de voz e o rádio. Trava:
+     *    `FioDeVozSemRotaDeAudioTest`.
      */
     fun abrir(canal: String, nomeDoCanal: String, agenteId: String, indicativo: String) {
         // A INTENÇÃO é registrada antes de qualquer trabalho, e é só isso que ela
@@ -298,6 +304,74 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
         credenciais = Credenciais(agenteId, indicativo)
         _canal.value = CanalCorrente(canal, nomeDoCanal, CanaisDoAgente.canalConfirmadoPeloServidor)
         if (radio != null) return
+
+        // **O fio entre o roteador de voz e o rádio, atado ANTES da rota de áudio —
+        // e antes de qualquer outra saída desta função.**
+        //
+        // Ele viveu quinze linhas abaixo do `return@launch` da falha de HFP até
+        // 22/08. Consequência medida por auditoria: em qualquer aparelho sem rota —
+        // óculos não pareados, fone ausente, emulador — `registrarRadio` **nunca
+        // rodava**, `CanaisDoAgente` ficava com `trocador == null` e
+        // `abridor == { false }`, e *"Claryon, guarnição 3 na escuta"* morria sem
+        // chamador com detector, whisper e roteador todos funcionando.
+        //
+        // Nada aqui precisa de HFP: são lambdas que rodam no celular. O que precisa
+        // de rota é o rádio **funcionar**, e isso é o que `noAr` responde — no
+        // instante do comando, não agora. Registrar cedo sem `noAr` seria trocar um
+        // defeito por outro: o fio atado faria a política confirmar "já estamos lá"
+        // e o executor chamaria o abridor, que devolveria `false` cru — falado como
+        // "Canal ocupado." num canal que não está ocupado.
+        //
+        // `radio` é lido a cada chamada (`radio?.`) e não capturado: ele nasce no
+        // `launch` abaixo, é anulado por `fechar()` e volta na reabertura. Capturar
+        // o valor de agora ataria o fio a `null` para sempre.
+        CanaisDoAgente.registrarRadio(
+            trocar = { id -> radio?.trocarDeGrupo(id) ?: false },
+            // Lambda e não valor: a transmissão começa e termina entre o registro e
+            // o comando falado.
+            transmitindoAgora = { radio?.transmitindo == true },
+            // A única fonte da verdade sobre "dá para pôr o agente no ar": o
+            // `RadioTatico` só é publicado em `radio` depois de `entrarEmModoAtivo`,
+            // que exige a `GlassesAudioRoute` por tipo.
+            noAr = { radio != null },
+            // **A SEGUNDA instância do Silero, com teto de 30 s.**
+            //
+            // A do ciclo de voz tem teto de 12 s porque espera um COMANDO. Uma
+            // transmissão de rádio é RELATO e pode durar os 30 s do teto duro de
+            // `SessaoPtt`. Reaproveitar a instância do ciclo cortaria toda
+            // transmissão aos 12 s — e o agente não teria como saber, porque do
+            // lado dele o áudio continuou saindo.
+            //
+            // Construída por abertura, e não guardada: o modelo tem 629 KB e o
+            // handle nativo tem `finalize()`. Ver `SileroVoiceActivityDetector.novoVad`.
+            abrir = {
+                val ativo = radio
+                if (ativo == null) {
+                    // Não deveria ser alcançável: a política recusa por `noAr` antes
+                    // de o executor chegar aqui. Fica como rede — e recusa com log,
+                    // porque um `false` sem rastro é a recusa muda que este arquivo
+                    // acabou de deixar de produzir.
+                    Log.w(TAG, "abertura por voz sem rádio no ar — recusando")
+                    false
+                } else {
+                    ativo.abrirPorVoz(
+                        runCatching {
+                            SileroVoiceActivityDetector(
+                                assets = getApplication<Application>().assets,
+                                sampleRateHz = 16_000,
+                                falaMaximaS = 30.0f,
+                            )
+                        }.onFailure {
+                            // Degradação honesta: sem VAD a transmissão abre e o
+                            // teto duro fecha. Recusar aqui deixaria o agente mudo
+                            // justamente quando ele pediu para falar.
+                            Log.w(TAG, "VAD da transmissão não subiu — fecho só pelo teto", it)
+                        }.getOrNull(),
+                    )
+                }
+            },
+        )
+
         if (!redeConfigurada) {
             _estado.value = EstadoDoPtt.Indisponivel("Servidor não configurado.")
             return
@@ -310,7 +384,34 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
                     // Falha nunca é silêncio, e aqui o canal de aviso é a própria
                     // barra: sem rota não há rádio, e o agente precisa saber antes
                     // de apertar o botão contando com ele.
+                    //
+                    // Pela voz o aviso sai por `CanaisDoAgente`: o fio já está atado
+                    // acima, `noAr` responde `false`, e "guarnição 3 na escuta"
+                    // recusa com `RADIO_FECHADO` — "Abra o rádio primeiro." — em vez
+                    // de não encontrar ninguém para perguntar.
                     _estado.value = EstadoDoPtt.Indisponivel("Sem rota de áudio. Conecte os óculos.")
+
+                    // **O léxico também não depende de HFP, e sem ele a recusa dá o
+                    // motivo errado.**
+                    //
+                    // `carregar` mora lá embaixo, no bloco de reconciliação, e por
+                    // isso não rodava aqui: `lexico` ficava nulo, `ResolvedorDeGrupo`
+                    // devolvia `SemLexico`, e "guarnição 3 na escuta" era recusado
+                    // com *"Sem lista. Entre de novo."* — que manda o agente refazer
+                    // o login por um problema de fone. Com a lista carregada, a mesma
+                    // frase é recusada por `RADIO_FECHADO`: *"Abra o rádio primeiro."*
+                    //
+                    // Idempotente e sem corrida com a reconciliação: uma reabertura
+                    // posterior lê `CanaisDoAgente.grupoCorrenteId` já reconciliado —
+                    // `MainActivity` e `entrarNaEscuta` passam justamente esse id —,
+                    // então `antes == agora` e pular a troca de socket está CERTO,
+                    // porque o `RadioTatico` já nasce no grupo do cadastro.
+                    CanaisDoAgente.carregar(getApplication())
+                    // Sem isto o cabeçalho continuaria no canal provisório enquanto
+                    // `CanaisDoAgente` já sabe o do cadastro — duas verdades sobre em
+                    // que guarnição estamos. `recarregar = false`: não há rádio nem
+                    // histórico para derrubar.
+                    adotarCanalCorrente(recarregar = false)
                     return@launch
                 }
             }
@@ -414,45 +515,12 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
             CopilotService.radioNoAr = { novo.transmitindo }
             transporteAtual = transporte
 
-            // **O registro que torna a troca por voz alcançável em runtime.**
-            //
-            // Sem esta linha, `Intent.TrocarDeGrupo` compila, tem teste e recusa
-            // toda troca com "Abra o rádio primeiro." — construído no sentido de
-            // "escrito", que é o que o `CLAUDE.md` §6 chama de mentira.
-            //
-            // `transmitindoAgora` é lambda e não valor: a transmissão começa e
-            // termina entre o registro e o comando falado.
-            CanaisDoAgente.registrarRadio(
-                trocar = { id -> novo.trocarDeGrupo(id) },
-                transmitindoAgora = { novo.transmitindo },
-                // **A SEGUNDA instância do Silero, com teto de 30 s.**
-                //
-                // A do ciclo de voz tem teto de 12 s porque espera um COMANDO. Uma
-                // transmissão de rádio é RELATO e pode durar os 30 s do teto duro
-                // de `SessaoPtt`. Reaproveitar a instância do ciclo cortaria toda
-                // transmissão aos 12 s — e o agente não teria como saber, porque do
-                // lado dele o áudio continuou saindo.
-                //
-                // Construída aqui, por abertura, e não guardada: o modelo tem
-                // 629 KB e o handle nativo tem `finalize()`. Ver o KDoc de
-                // `SileroVoiceActivityDetector.novoVad`.
-                abrir = {
-                    novo.abrirPorVoz(
-                        runCatching {
-                            SileroVoiceActivityDetector(
-                                assets = getApplication<Application>().assets,
-                                sampleRateHz = 16_000,
-                                falaMaximaS = 30.0f,
-                            )
-                        }.onFailure {
-                            // Degradação honesta: sem VAD a transmissão abre e o
-                            // teto duro fecha. Recusar aqui deixaria o agente mudo
-                            // justamente quando ele pediu para falar.
-                            Log.w(TAG, "VAD da transmissão não subiu — fecho só pelo teto", it)
-                        }.getOrNull(),
-                    )
-                },
-            )
+            // O fio até `CanaisDoAgente` já está atado — ele foi registrado ANTES da
+            // rota, e a partir da linha `radio = novo` acima ele passa a apontar
+            // para este `RadioTatico` sozinho, porque lê o campo e não uma captura.
+            // Reregistrar aqui reintroduziria o defeito de 22/08 pela porta dos
+            // fundos: o segundo registro capturaria `novo`, e a falha de rota (que
+            // retorna antes) voltaria a deixar o aparelho sem fio nenhum.
 
             // O léxico é do processo e carrega uma vez. Aqui e não no login porque
             // é aqui que existe escopo suspenso com sessão garantida — e é

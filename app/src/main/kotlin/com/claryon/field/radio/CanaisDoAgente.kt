@@ -36,14 +36,21 @@ import kotlinx.coroutines.withContext
  * `ESTADO.md` afirmava "RotulosFalados carrega o léxico no cliente" — era falso.
  * O padrão "escrito, não construído" do `CLAUDE.md` §6, pela sétima vez.
  *
- * ## O trocador é registrado, e a ausência dele é audível
+ * ## O fio é atado sempre; o que varia é a resposta
  *
  * Quem detém o `RadioTatico` é o `RadioViewModel`, e ele existe só enquanto a tela
- * da guarnição vive. Então o trocador é **registrado** por quem o tem e limpo no
+ * da guarnição vive. Então o fio é **registrado** por quem o tem e limpo no
  * `onCleared`. Sem registro, [trocar] devolve [FalhaOperacional.RADIO_FECHADO] em
  * vez de fingir sucesso: dizer "Agora na guarnição três" com o rádio fechado seria
  * a pior resposta possível, porque o agente passaria a falar acreditando estar em
  * outro canal.
+ *
+ * **O registro não depende da rota de áudio, e é por isso que ele acontece antes
+ * dela.** Até 22/08 [registrarRadio] morava depois do `return@launch` da falha de
+ * HFP, e num aparelho sem fone pareado o fio nunca era atado: a recusa existia,
+ * mas não tinha motivo para dar. Hoje o fio é atado com o predicado [noAr], e a
+ * ausência de rádio sai como recusa **nomeada** — nunca como um `false` mudo, que o
+ * executor traduziria para *"Canal ocupado."* num canal que não está ocupado.
  *
  * Registro em vez de injeção porque a alternativa — tornar o `RadioTatico` dono de
  * processo — é um refactor grande e com risco próprio (ele carrega escopo, socket e
@@ -123,6 +130,31 @@ object CanaisDoAgente {
     /** Verdadeiro enquanto há transmissão no ar. Ver aceite 5 da spec. */
     private var transmitindo: () -> Boolean = { false }
 
+    /**
+     * **O rádio está no ar?** Lido no instante da decisão, nunca capturado.
+     *
+     * ## Por que "registrado" deixou de significar "no ar"
+     *
+     * Até 22/08 a única pergunta que a política sabia fazer era *"alguém registrou
+     * um trocador?"*, e o registro morava **depois** do `return@launch` da falha de
+     * rota de áudio em `RadioViewModel.abrir`. Em qualquer aparelho sem HFP — óculos
+     * não pareados, fone ausente, emulador — o registro **nunca acontecia**, e o fio
+     * entre o roteador de voz e o rádio simplesmente não existia: detector, whisper
+     * e roteador funcionando, e "guarnição 3 na escuta" morrendo sem chamador.
+     *
+     * O conserto ata o fio **antes** da rota. Mas aí "registrado" passa a ser
+     * verdade sempre, e sozinho ele mentiria: com o fio atado e o rádio ainda fora
+     * do ar, a guarda "já estamos lá" devolveria `Trocado`, o executor chamaria
+     * [abrirTransmissao], o abridor devolveria `false` — e `false` cru vira
+     * *"Canal ocupado."* na boca do copiloto. O canal não está ocupado; o rádio é
+     * que não subiu. Duas coisas diferentes com a mesma frase é a definição de
+     * recusa sem motivo.
+     *
+     * Por isso a disponibilidade é **predicado**, e não valor: entre o registro e o
+     * comando falado o rádio sobe, cai e sobe de novo.
+     */
+    private var noAr: () -> Boolean = { false }
+
     private val resolvedor = ResolvedorDeGrupo { lexico }
 
     /**
@@ -135,24 +167,38 @@ object CanaisDoAgente {
         transmitindo = { transmitindo() },
         grupoCorrenteId = { grupoCorrenteId },
         trocador = { trocador },
+        noAr = { noAr() },
     )
 
     /** Exposto para a tela: a lista que o agente pode abrir pela fala. */
     val grupos: List<GrupoFalado> get() = lexico.orEmpty()
 
     /**
-     * Registra quem sabe trocar. Chamado ao criar o `RadioTatico`.
+     * **Ata o fio entre o roteador de voz e o rádio. Não depende de rota de áudio.**
      *
-     * [transmitindoAgora] é lido no instante da troca, não capturado como valor:
-     * a transmissão começa e termina entre o registro e o comando falado.
+     * Chamado **antes** de o HFP ser tentado, e não depois de ele subir. O fio é
+     * código que roda no celular; o que depende de rota é o rádio *funcionar*, não
+     * o roteador de voz *ter para onde perguntar*. Enquanto esta chamada viveu
+     * depois do `return@launch` da falha de rota, todo aparelho sem fone pareado
+     * ficava com `trocador == null` e `abridor == { false }` — e a recusa não tinha
+     * motivo, porque não havia nada registrado para produzir um.
+     *
+     * Os três lambdas são lidos **no instante do comando**, nunca capturados como
+     * valor: entre o registro e a fala do agente o rádio sobe, transmite e cai.
+     *
+     * @param noAr `false` enquanto o rádio existe mas não pode pôr o agente no ar.
+     *   Sem este predicado, "fio atado" e "rádio pronto" seriam a mesma coisa, e a
+     *   recusa sairia como *"Canal ocupado."* — ver o KDoc de [noAr].
      */
     fun registrarRadio(
         trocar: suspend (String) -> Boolean,
         transmitindoAgora: () -> Boolean,
+        noAr: () -> Boolean,
         abrir: suspend () -> Boolean = { false },
     ) {
         trocador = trocar
         transmitindo = transmitindoAgora
+        this.noAr = noAr
         abridor = abrir
     }
 
@@ -165,6 +211,12 @@ object CanaisDoAgente {
      * `false` quando o piso é de outro, e isso não é erro: é o rádio funcionando.
      * Quem chama transforma em fala, porque o desfecho silencioso é o pior — o
      * agente assume que está no ar e fala para ninguém.
+     *
+     * **`false` aqui significa só "o piso é de outro".** O executor o traduz para
+     * *"Canal ocupado."*, e essa frase só é verdadeira se o rádio estiver no ar —
+     * por isso [PoliticaDeTrocaDeGrupo] recusa antes, por `noAr`, e este ponto nunca
+     * é alcançado com o rádio fechado. Se algum dia for, a recusa volta a ser muda
+     * no sentido que importa: sem motivo verdadeiro.
      */
     suspend fun abrirTransmissao(): Boolean = abridor()
 
@@ -172,6 +224,7 @@ object CanaisDoAgente {
     fun esquecerRadio() {
         trocador = null
         transmitindo = { false }
+        noAr = { false }
         abridor = { false }
     }
 

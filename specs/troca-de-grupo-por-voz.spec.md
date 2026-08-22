@@ -98,9 +98,21 @@ um grupo alheio. É o preço, e é barato — a lista dele está na tela.
 3. `Se` o rótulo não casar nenhum item da lista, `então o sistema deverá` devolver
    `ActionOutcome.GrupoNaoReconhecido` `e` dizer *"Não conheço essa guarnição."*,
    sem revelar se o grupo existe.
-4. `Se` o agente já estiver no grupo pedido, `então o sistema deverá` devolver
-   `ActionOutcome.GrupoTrocado` do grupo corrente `e` **não** derrubar o transporte
-   — trocar para onde já se está não pode custar uma reconexão.
+4. `Se` o agente já estiver no grupo pedido **`e` o rádio estiver no ar**, `então o
+   sistema deverá` devolver `ActionOutcome.GrupoTrocado` do grupo corrente `e`
+   **não** derrubar o transporte — trocar para onde já se está não pode custar uma
+   reconexão.
+
+   > **Refinamento de 2026-08-22, aberto a revisão humana (§7).** A condição "e o
+   > rádio estiver no ar" não estava escrita, e a implementação a omitia: o atalho
+   > devolvia `GrupoTrocado` sem olhar para o rádio. `Intent.AbrirTransmissao` usa o
+   > MESMO `GrupoTrocado` como licença para chamar `abrirTransmissao` em seguida, e
+   > num aparelho sem rota de áudio o abridor só sabe devolver `false` — que o
+   > executor fala como *"Canal ocupado."*. O canal não está ocupado; o rádio é que
+   > não subiu. Com o refinamento, a resposta passa a ser `RADIO_FECHADO` (*"Abra o
+   > rádio primeiro."*), que é o mesmo desfecho que o aceite 4 já produzia para
+   > qualquer **outro** grupo. O custo em reconexão continua zero: a guarda lê um
+   > predicado, não toca no socket.
 5. `Enquanto` houver transmissão de rádio em curso, `o sistema deverá` recusar a
    troca `e` dizer *"Fale depois de encerrar."* Trocar de grupo no meio de uma
    transmissão mandaria o fim da frase para a guarnição errada.

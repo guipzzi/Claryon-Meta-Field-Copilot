@@ -24,7 +24,15 @@ import com.claryon.field.agent.ClaryonIntentExecutor.TrocaDeGrupo
  *    depois de encerrar" para grupo próprio. Dois textos diferentes são um oráculo.
  * 2. **Sem léxico** antes de resolver, porque lista ausente e rótulo ausente pedem
  *    recuperações diferentes do agente: uma é entrar de novo, a outra é repetir.
- * 3. **Grupo repetido** antes de tocar no rádio: `RadioTatico.trocarDeGrupo` derruba
+ * 3. **Rádio no ar** antes de "grupo repetido", e esta ordem é a correção de 22/08.
+ *    Estava invertida: o atalho do grupo corrente devolvia `Trocado` sem olhar para
+ *    o rádio, porque "não tocar no socket" parecia dispensar o socket. Não dispensa
+ *    — o executor usa o MESMO `Trocado` para seguir e chamar `abrirTransmissao`, e
+ *    lá o abridor devolvia `false` cru, que vira *"Canal ocupado."* na fala. Num
+ *    aparelho sem rota de áudio o canal não está ocupado: o rádio é que não subiu.
+ *    Confirmar "já estamos lá" com o rádio fora do ar é a mesma mentira que
+ *    [trocador] `== null` sempre recusou, entrando pela porta do atalho.
+ * 4. **Grupo repetido** antes de tocar no rádio: `RadioTatico.trocarDeGrupo` derruba
  *    receptor, transporte e buffer de jitter. Pagar isso por um comando redundante
  *    deixaria o agente surdo por alguns quadros sem motivo nenhum.
  */
@@ -34,12 +42,25 @@ class PoliticaDeTrocaDeGrupo(
     private val transmitindo: () -> Boolean,
     private val grupoCorrenteId: () -> String,
     /**
-     * Quem sabe mexer no socket, ou `null` se o rádio não está no ar.
+     * Quem sabe mexer no socket, ou `null` se ninguém atou o fio.
      *
      * `null` **não** vira sucesso silencioso: dizer "Agora na guarnição três" com o
      * rádio fechado faria o agente passar a falar acreditando estar em outro canal.
      */
     private val trocador: () -> (suspend (String) -> Boolean)?,
+    /**
+     * **O rádio pode pôr o agente no ar agora?**
+     *
+     * Separado de [trocador] porque as duas perguntas deixaram de ser a mesma. O fio
+     * passou a ser atado **antes** da rota de áudio — senão nenhum aparelho sem HFP
+     * teria fio nenhum —, então "há trocador" virou verdade permanente e parou de
+     * significar "há rádio". Quem responde isto é `CanaisDoAgente`, lendo o
+     * `RadioTatico` no instante da decisão.
+     *
+     * O padrão preserva o comportamento de quem não conhece o parâmetro: sem fio
+     * atado, não há rádio no ar.
+     */
+    private val noAr: () -> Boolean = { trocador() != null },
 ) {
 
     /**
@@ -68,7 +89,14 @@ class PoliticaDeTrocaDeGrupo(
 
             is ResolvedorDeGrupo.Resultado.Encontrado -> {
                 val alvo = r.grupo
-                // Já estamos lá: confirma sem tocar no rádio. Ver guarda 3.
+                // **Guarda 3, e ela vem antes do atalho.** `Trocado` é a licença que
+                // o executor usa para chamar `abrirTransmissao` em seguida; emiti-la
+                // com o rádio fora do ar entrega o comando a um abridor que só sabe
+                // dizer `false`, e `false` cru é falado como "Canal ocupado.".
+                if (!noAr()) {
+                    return Decisao(TrocaDeGrupo.Falhou(FalhaOperacional.RADIO_FECHADO))
+                }
+                // Já estamos lá: confirma sem tocar no rádio. Ver guarda 4.
                 if (alvo.id == grupoCorrenteId()) {
                     return Decisao(TrocaDeGrupo.Trocado(alvo.nome))
                 }
