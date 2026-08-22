@@ -299,16 +299,8 @@ fun BotaoTatico(
     destrutivo: Boolean = false,
     icone: ImageVector? = null,
 ) {
-    val corTexto = when {
-        !habilitado -> Cores.TintaMedia
-        destrutivo -> Cores.FalhaTexto
-        else -> Cores.Vazio
-    }
-    val corFundo = when {
-        !habilitado -> Cores.Elevado
-        destrutivo -> Color.Transparent
-        else -> Cores.Tinta
-    }
+    val corTexto = rotuloDoBotao(habilitado, destrutivo)
+    val corFundo = fundoDoBotao(habilitado, destrutivo)
     // O preenchido não leva contorno: ele já tem limite de sobra (17,01:1 contra o
     // fundo). Contorno em cima de fundo claro só somaria uma linha que ninguém vê.
     val comContorno = !habilitado || destrutivo
@@ -335,6 +327,41 @@ fun BotaoTatico(
         }
         Text(rotulo.uppercase(), style = Tipo.Acao, color = corTexto)
     }
+}
+
+/**
+ * **A escolha de cor do [BotaoTatico], como função pura.**
+ *
+ * Extraída do corpo do composable por uma razão que este projeto já pagou caro
+ * para aprender: enquanto a decisão morava dentro do `@Composable`, o teste de
+ * contraste só conseguia afirmar coisas sobre os **tokens** — *"`TintaMedia` sobre
+ * `Elevado` dá 7,01"* —, e isso continuaria verdadeiro depois de alguém devolver
+ * `TintaFraca` ao botão. Medido: com a regressão reintroduzida de propósito no
+ * `Comuns.kt`, `OrcamentoDeCorTest` passava. Um teste que passa com o defeito de
+ * volta não testa o defeito.
+ *
+ * Agora o teste chama estas duas funções com os três estados reais e mede o par que
+ * o botão de fato desenha.
+ *
+ * `internal` e não público: quem desenha botão usa [BotaoTatico]; quem precisa da
+ * decisão isolada é o teste.
+ */
+internal fun rotuloDoBotao(habilitado: Boolean, destrutivo: Boolean): Color = when {
+    !habilitado -> Cores.TintaMedia
+    destrutivo -> Cores.FalhaTexto
+    else -> Cores.Vazio
+}
+
+/**
+ * O fundo correspondente a [rotuloDoBotao].
+ *
+ * O destrutivo devolve [Color.Transparent], e o teste tem de saber disso: o fundo
+ * **efetivo** dele é o da tela ([Cores.Vazio]), não a transparência.
+ */
+internal fun fundoDoBotao(habilitado: Boolean, destrutivo: Boolean): Color = when {
+    !habilitado -> Cores.Elevado
+    destrutivo -> Color.Transparent
+    else -> Cores.Tinta
 }
 
 /**

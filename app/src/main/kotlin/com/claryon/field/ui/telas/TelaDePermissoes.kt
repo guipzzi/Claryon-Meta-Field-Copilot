@@ -481,8 +481,13 @@ private fun Cabecalho() {
  * [PENDENTE] existe separado de [NEGADA] porque a diferença é a coisa toda: uma é
  * um pedido que ainda não foi feito, a outra é uma recusa. Colapsá-las foi o
  * defeito que pintou cinco linhas de vermelho numa tela em que nada tinha falhado.
+ *
+ * `internal` e não `private` por um motivo só: `OrcamentoDeCorTest` varre estas
+ * quatro entradas e exige que **apenas** [NEGADA] tenha croma. É o contra-teste do
+ * defeito — se alguém repintar [PENDENTE] de vermelho, o build quebra em vez de a
+ * tela voltar a mentir em silêncio.
  */
-private enum class EstadoDaLinha(val rotulo: String, val cor: Color) {
+internal enum class EstadoDaLinha(val rotulo: String, val cor: Color) {
     LIBERADA("Liberado", Cores.TintaMedia),
     PENDENTE("Pendente", Cores.TintaFraca),
     CONSULTANDO("Verificando", Cores.TintaFraca),
