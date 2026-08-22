@@ -30,7 +30,7 @@ class AtivacaoAteEarconTest {
     fun aTransicaoDaAtivacaoTemMetaDeclaradaDeMeioSegundo() {
         val t = TelemetriaDoCicloDeVoz.Transicao.ATIVACAO_ATE_EARCON
         assertTrue(
-            "a meta do roadmap para 'fim de Hey Claryon → earcon' é 500 ms; achei ${t.metaMs}",
+            "a meta do roadmap para 'fim de Claryon → earcon' é 500 ms; achei ${t.metaMs}",
             t.metaMs == META_MS,
         )
     }

@@ -418,7 +418,7 @@ private fun capacidadesDe(
             nome = "Palavra de ativação",
             viva = escuta == EstadoDaEscuta.OUVINDO,
             motivo = when (escuta) {
-                EstadoDaEscuta.OUVINDO -> "Escutando \"Hey Claryon\"."
+                EstadoDaEscuta.OUVINDO -> "Escutando \"Claryon\"."
                 EstadoDaEscuta.EM_PAUSA -> "Em pausa o microfone fica fechado. Volte para o serviço."
                 EstadoDaEscuta.SEM_ROTA -> "Sem rota de áudio. Conecte os óculos ou o fone."
                 EstadoDaEscuta.SEM_MODELO -> "Modelo de ativação ausente no aplicativo."

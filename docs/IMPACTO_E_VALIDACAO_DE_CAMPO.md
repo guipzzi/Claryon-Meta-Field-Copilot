@@ -11,8 +11,9 @@ relatos, pesquisas…)"*. Este documento é a resposta — e ela **não começa 
 
 ## 1. O problema, dito por quem vive nele
 
-**Fonte primária:** entrevista com **M. N.**, policial militar lotado em Batalhão de
-Polícia Rodoviária da **PMERJ**, agosto de 2026.
+**Fonte primária:** entrevista com **um policial militar da PMERJ**, agosto de 2026.
+Citações usadas **com autorização expressa** do entrevistado. Por decisão de projeto, a
+identificação para aqui: sem nome, sem iniciais, sem unidade, sem matrícula.
 
 > *"Pelo menos aqui na polícia do Rio de Janeiro a gente sempre teve historicamente uma
 > dificuldade muito grande na parte da comunicação. […] Tem um rádio-base aqui no meu
@@ -141,7 +142,7 @@ o documento de prontidão de hardware declara o que ainda não foi medido.
 
 ## 7. Como cada pilar do produto responde ao que ele relatou
 
-| O que M. N. relatou | Pilar | Como responde |
+| O que o entrevistado relatou | Pilar | Como responde |
 |---|---|---|
 | Rádio digital não pega; WhatsApp é o substituto | **P1 — rede de comunicação** | PTT sobre IP, com transcrição **na origem**: todos leem o mesmo texto, e o servidor nunca precisa transcrever |
 | Digitar no grupo durante ocorrência | **P1 + P3** | Voz em vez de teclado; mãos no volante e no armamento |
@@ -160,7 +161,7 @@ arquitetural e passa a ser requisito de campo.**
 
 **Diversidade de fontes** (item cobrado pelo workshop de pitch):
 
-- **Relato de campo** — entrevista com M. N., PMERJ (esta seção)
+- **Relato de campo** — entrevista com policial militar da PMERJ (esta seção)
 - **Fonte normativa** — Portaria 071-CG/15 da PMBA, que define a ditagem de algarismo
   por ordinal; 1817 trechos de cinco leis federais indexados
 - **Medição própria** — WER 3,4%; 40/40 em placa ditada; 2 frames e 67–180 ms na câmera
@@ -184,12 +185,13 @@ emprego?"* vale independentemente do que ele ache do Claryon.
 
 Coerente com o [Relatório de Impacto LGPD](RELATORIO_DE_IMPACTO_LGPD.md):
 
-- Identificação reduzida a **iniciais e corporação**. Sem nome, sem batalhão numerado,
-  sem matrícula.
+- **Autorização expressa concedida** pelo entrevistado para uso das citações em
+  material submetido à organização.
+- Identificação reduzida ao mínimo que sustenta a fonte: **"um policial militar da
+  PMERJ"**. Sem nome, **sem iniciais**, sem unidade, sem matrícula. Autorização não é
+  licença para identificar mais do que o necessário — é o princípio da **necessidade**
+  (art. 6º, III), aplicado a nós mesmos.
 - O áudio da entrevista **não** entra no repositório.
-- **Pendente:** registrar aqui a autorização expressa do entrevistado para uso das
-  citações em material submetido à organização. Enquanto não registrada, as citações
-  ficam restritas a uso interno.
 
 ---
 

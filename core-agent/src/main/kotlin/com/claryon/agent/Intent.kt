@@ -95,7 +95,7 @@ sealed interface Intent {
     /**
      * **Consultar a norma (Fase 4, Etapa A): pergunta entra, artigo de lei sai.**
      *
-     * *"Hey Claryon, posso apreender moto sem placa?"* — o copiloto recupera o
+     * *"Claryon, posso apreender moto sem placa?"* — o copiloto recupera o
      * trecho de lei e devolve a **citação**, não uma opinião.
      *
      * ## Três coisas que esta intenção deliberadamente NÃO faz

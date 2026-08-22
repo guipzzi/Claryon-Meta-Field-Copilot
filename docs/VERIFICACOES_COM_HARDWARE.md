@@ -53,7 +53,7 @@ porque trazem o beamforming, mas não são pré-requisito.
    a cláusula das 8 h **e** dá o intervalo de confiança que falta ao falso
    positivo: hoje 1,8 min de leitura retida dão limite superior de ~99 falsos/h, e
    a meta de 0,5/h precisa da ordem de 6 h com zero disparo.
-3. **A ida e volta completa**, com o aparelho no bolso: "Hey Claryon, guarnição 3
+3. **A ida e volta completa**, com o aparelho no bolso: "Claryon, guarnição 3
    na escuta" → earcon → BIP → quadros no ar.
 
 ### O que eu entrego antes disso

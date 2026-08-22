@@ -1018,7 +1018,7 @@ private fun LinhaDeClassificacao(prioridade: Int) {
  * `CopilotService:107` chama `cicloDeVoz(ultimaAtivacao)` a partir da palavra de
  * ativação, medida no aparelho em 1500 quadros / 30,0 s. `grep -rn cicloDeVoz
  * app/src/main` devolve esse chamador, e ele não depende de tela nenhuma estar
- * composta. O botão sempre foi o andaime; "Hey Claryon" é o desenho.
+ * composta. O botão sempre foi o andaime; "Claryon" é o desenho.
  *
  * O que sobra aqui é a ação de maior consequência da tela, sozinha, e ela ganha a
  * faixa inteira: falar com a guarnição precisa ser encontrado sem olhar.

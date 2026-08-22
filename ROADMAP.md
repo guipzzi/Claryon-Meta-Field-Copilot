@@ -239,7 +239,7 @@ abordagem, com uma mão na pistola e outra no volante, não há mão para tocar 
 **Fluxo aprovado, textual:**
 
 ```
-"Hey Claryon"  +  "guarnição 3 na escuta"
+"Claryon"  +  "guarnição 3 na escuta"
   → resolve o talk group "guarnição 3" contra a lista fechada dos grupos DO AGENTE
   → BIP de confirmação: está gravando e transmitindo
   → transmissão ao vivo em quadros de 20 ms
@@ -262,7 +262,7 @@ Duas propriedades desse desenho são invariantes, não preferências:
 
 | Marca | Alvo |
 |---|---|
-| fim de "Hey Claryon" → **início** do earcon `OUVI_VOCE` | p95 ≤ **500 ms** |
+| fim de "Claryon" → **início** do earcon `OUVI_VOCE` | p95 ≤ **500 ms** |
 | fim do enunciado completo → BIP de canal aberto | p95 ≤ **1 200 ms** |
 | fim do enunciado completo → primeiro quadro de 20 ms no ar | p95 ≤ **1 500 ms** |
 | falso aceite que **abre canal** | ≤ 1 por 8 h |
@@ -559,7 +559,7 @@ produziu *"não há nada que aconteça com quem dirige embriagado"*), e o filtro
   exigência a mais — só fala sobre o que recuperou, e sem recuperação acima do limiar diz que
   não sabe — esforço: 0,5 sessão — depende: nada. Revisão humana antes do diff.
 
-**Aceite.** Modo avião, sem rede nenhuma. "Hey Claryon, minha Glock 19 emperrou" produz
+**Aceite.** Modo avião, sem rede nenhuma. "Claryon, minha Glock 19 emperrou" produz
 resposta falada que cita o número do documento de origem, em ≤ 4 s do fim da fala, medido
 por `Telemetry`. Uma pergunta fora do corpus produz "não encontrei procedimento para isso"
 e não uma invenção — verificável com 10 perguntas fora de domínio. `./gradlew build` verde

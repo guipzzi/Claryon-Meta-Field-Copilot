@@ -68,7 +68,7 @@ class RecuperacaoMedidaTest {
         println("\n  montar o índice de ${novo.tamanho} trechos: $montagemMs ms · busca: $porBuscaUs µs")
         assertTrue(
             "Montar o índice levou $montagemMs ms. É pago uma vez, com `lazy`, mas " +
-                "acima de alguns segundos deixa de caber no primeiro 'Hey Claryon' " +
+                "acima de alguns segundos deixa de caber no primeiro 'Claryon' " +
                 "do turno e precisa sair do caminho da pergunta.",
             montagemMs < 5_000,
         )

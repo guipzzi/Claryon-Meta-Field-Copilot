@@ -409,7 +409,7 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
             radio = novo
             // **O portão que cala a palavra de ativação enquanto o agente
             // transmite.** Vive aqui porque é aqui que o `RadioTatico` existe; a
-            // escuta mora no serviço e não tem como alcançá-lo. Um "Hey Claryon"
+            // escuta mora no serviço e não tem como alcançá-lo. Um "Claryon"
             // dito no ar é conversa com pessoas, não comando para o copiloto.
             CopilotService.radioNoAr = { novo.transmitindo }
             transporteAtual = transporte

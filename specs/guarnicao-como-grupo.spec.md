@@ -323,7 +323,7 @@ fun rotuloDaRecusa(causa: RecusaDaTroca): String
   que o agente vai notar.
 - **`fechar()` chama `audio.liberar()`.** A contagem de usuários é de processo
   (`GlassesAudioManagerImpl:439-441`), então a rota só cai se ninguém mais a
-  segurar. **Não medido no aparelho**: se a escuta de "Hey Claryon" for o único
+  segurar. **Não medido no aparelho**: se a escuta de "Claryon" for o único
   outro usuário e ela também soltar, sair do canal pode calar a palavra de
   ativação. Precisa de medida, e está em
   `docs/VERIFICACOES_COM_HARDWARE.md`.

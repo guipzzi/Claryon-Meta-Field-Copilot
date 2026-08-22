@@ -164,7 +164,7 @@ class CopilotService : Service() {
                 ultimaAtivacao = cicloId
                 // **O PRIMEIRO de dois earcons, e eles dizem coisas diferentes.**
                 // Este é "estou ouvindo, pode falar", e é dele que sai a meta `fim de
-                // "Hey Claryon" → earcon ≤ 500 ms` — que só existe se quem confirma a
+                // "Claryon" → earcon ≤ 500 ms` — que só existe se quem confirma a
                 // escuta for quem ouviu a palavra. O `VoiceCycle` emite o segundo no
                 // fechamento do VAD: "ouvi o comando, estou trabalhando". Sem display,
                 // som é o único canal, e calar o segundo deixaria o agente sem

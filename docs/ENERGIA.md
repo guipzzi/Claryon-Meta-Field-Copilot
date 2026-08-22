@@ -427,7 +427,7 @@ TRIM_MEMORY_RUNNING_CRITICAL = 15    TRIM_MEMORY_MODERATE   = 60
 
 **O efeito de campo:** o cenário-alvo do produto é o celular no bolso. Ao ir para
 segundo plano o processo devolve os 77 691 713 B do `ggml-tiny.bin`, e o próximo
-"Hey Claryon" paga a carga inteira dentro de uma meta de 2,0 s — em latência e em E/S
+"Claryon" paga a carga inteira dentro de uma meta de 2,0 s — em latência e em E/S
 de flash.
 
 **A liberação continua certa pelo motivo certo?** Não. O processo segura um FGS com
