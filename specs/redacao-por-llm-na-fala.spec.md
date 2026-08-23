@@ -8,9 +8,11 @@ sobrepoe:
   - "CLAUDE.md §4 — 'Máximo 7 palavras por resposta de TTS operacional', listado entre os invariantes que o compilador ou um teste sustentam"
   - "specs/leitura-de-norma.spec.md — 'THE SYSTEM SHALL NOT produzir Utterance.Ler a partir de texto que tenha passado por um modelo de linguagem'"
 revisada: 2026-08-22 noite (duas pistas medidas: orçamento de prefill e extração por gramática)
+revisada: 2026-08-22 fim de sessão (modelo trocado por decisão humana, sem bancada)
 depende_de:
   - decisão sobre `specs/leitura-de-norma.spec.md` (as duas não se resolvem separadas)
-  - decisão sobre o modelo da Etapa B (o motor está resolvido; o modelo não)
+  - ~~decisão sobre o modelo da Etapa B~~ — RESOLVIDA em 22/08 — `Qwen2.5-1.5B-Instruct-Q4_K_M`
+  - remedição sobre o modelo novo — TODA a tabela desta spec é do modelo que saiu
   - orçamento de prefill — o prazo de 2 500 ms está colado no custo de entrar o prompt
   - régua de sentido — a cegueira a negação continua aberta e tem exemplo de produção
 ---
@@ -40,6 +42,32 @@ Ou seja, ligar a Etapa B exigiria sobrepor a regra dura **duas** vezes na mesma
 sessão: uma para a redação falar, outra para construir o degrau de queda que se
 supunha existir. Nove KDoc de produção afirmavam que esse degrau existia; foram
 corrigidos em 22/08 (ver a lista no fim).
+
+## ⚠️ O modelo mudou depois desta medição, e nada aqui foi remedido
+
+Em 22/08, no fim da sessão, `Llama-3.2-1B-Instruct-Q4_K_M` foi substituído por
+`Qwen2.5-1.5B-Instruct-Q4_K_M` — decisão humana, registrada em `DECISIONS.md`, tomada
+**sem bancada** e sabendo disso.
+
+**Toda tabela desta spec é do modelo que saiu.** Elas ficam porque são o último estado
+conhecido da Etapa B, e porque a maior parte do que elas mediram não é do modelo: o
+guarda cego a negação é da régua, a truncagem é do prazo, o vazamento de andaime era do
+prompt. Mas as três colunas que decidem — `utilizáveis`, `aprova`, `p50` — são do Llama,
+e ninguém deve lê-las como sendo do Qwen.
+
+Três consequências que a troca produz **antes** de qualquer medição, por aritmética:
+
+1. **O prefill piora.** O modelo é 22% maior em disco (986 048 768 B contra
+   807 694 464 B) e tem 28 camadas contra 16. O item que já estourava sozinho o prazo de
+   2 500 ms estoura mais.
+2. **O portão de RAM refuta mais aparelhos.** `PoliticaDeRedacao` multiplica o tamanho do
+   arquivo por 1,90: a exigência sobe de 1 464 MiB para 1 787 MiB de `availMem`.
+3. **A cegueira a negação não muda, e pode ficar mais cara.** Um modelo mais fluente em
+   português constrói negação melhor, e negação bem construída é exatamente a alucinação
+   que a régua de lastro deixa passar.
+
+A recomendação desta spec — **não ligar** — segue de pé, e por motivos que a troca não
+toca. O que a troca fez foi mudar a aposta de qual modelo vale remedir primeiro.
 
 ## A medição que deveria decidir isto
 

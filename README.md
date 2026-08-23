@@ -165,30 +165,44 @@ git clone --depth 1 https://github.com/ggml-org/llama.cpp \
 Ausente, o CMake de `core-llm` falha com a instrução acima em vez de compilar pela
 metade.
 
+O modelo é o **`Qwen2.5-1.5B-Instruct-Q4_K_M`**, Apache-2.0. Ele substituiu o
+`Llama-3.2-1B-Instruct-Q4_K_M` em 22/08 — o porquê está em `DECISIONS.md` e o
+resumo é: cobertura de português nos pesos, e uma licença sem política de uso
+aceitável que vede o caso de uso-bandeira deste produto. **O motor não mudou:**
+continua sendo llama.cpp, que roda GGUF de qualquer família.
+
 O **modelo do redator não vai no APK** — nunca em `assets/`, porque
 `llama_model_load_from_file` faz `fopen` e asset não tem caminho no sistema de
-arquivos. São **770,28 MiB** (807 694 464 B) contra um APK debug de 384,63 MiB.
+arquivos. São **940,36 MiB** (986 048 768 B) contra um APK debug de 384,63 MiB.
 
 `RedacaoDoCopiloto.arquivoDoModelo` procura em **dois** lugares, nesta ordem, com
 nome fixo `redator.gguf`. Escolha um:
 
 ```bash
 curl -L -o /tmp/redator.gguf \
-  https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf
+  https://huggingface.co/bartowski/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf
 
 # (a) RECOMENDADO — uma linha, sem cópia, funciona também em release
 adb push /tmp/redator.gguf \
   /sdcard/Android/data/com.claryon.field/files/redator.gguf
 
-# (b) diretório privado — só em build debug, e duplica 770 MiB em disco
+# (b) diretório privado — só em build debug, e duplica 940 MiB em disco
 adb push /tmp/redator.gguf /data/local/tmp/redator.gguf
 adb shell run-as com.claryon.field cp /data/local/tmp/redator.gguf files/redator.gguf
 ```
+
+O nome no aparelho é `redator.gguf` e **não** o nome do modelo. Foi essa escolha
+que fez a troca de família custar zero linha de Kotlin e zero linha de C++: o
+template de chat vem do próprio GGUF (`llama_model_chat_template`, em
+`redator_jni.cpp`), e o portão de RAM multiplica o tamanho do arquivo em vez de
+carregar uma constante por modelo.
 
 **(a) é o caminho do onboarding do dia do evento**, e foi medido em 22/08 no
 emulador arm64 API 35: o llama.cpp carrega direto do armazenamento externo
 (`preparar()` em 2 168 ms) — a dúvida era `mmap` sobre FUSE, e não se confirmou.
 A cópia de (b) custou 908–1 187 ms **além** do push, e fica em disco para sempre.
+Os dois números são do GGUF de 770 MiB; com os 940 MiB de hoje esperam-se ~22% a
+mais, e isso é regra de três, não medição.
 
 **(b) vence quando os dois existem**, de propósito: o armazenamento compartilhado
 é gravável por quem tem acesso ao aparelho, e um GGUF trocado é um copiloto
@@ -202,8 +216,14 @@ Sem o arquivo, o app decide `LerVerbatim(SEM_MODELO)` no boot e os testes de
 > zero chamadores em `src/main`: com ou sem modelo, com a chave ligada ou
 > desligada, o agente ouve a **citação** (`"Art. 306, Lei 9.503"`). Ligá-la
 > sobrepõe o teto de 7 palavras do `CLAUDE.md` §4 e espera decisão humana em
-> `specs/redacao-por-llm-na-fala.spec.md`, que recomenda **não ligar** com o
-> modelo atual.
+> `specs/redacao-por-llm-na-fala.spec.md`, que recomenda **não ligar**.
+>
+> **A troca de modelo de 22/08 não altera essa recomendação, e não deve dar a
+> impressão de que altera.** O Qwen entrou sem bancada, por decisão explícita de
+> não gastar o dia em medição: o que existe medido — 1 a 2 respostas utilizáveis
+> em 20, guarda cego a negação, prefill colado no prazo — é do Llama, e vale
+> como o último estado conhecido até alguém remedir. Trocar o modelo mudou a
+> **aposta**, não o resultado.
 
 A Etapa B é **desligável no aparelho, sem recompilar**:
 

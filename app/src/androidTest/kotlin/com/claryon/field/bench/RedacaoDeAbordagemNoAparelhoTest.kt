@@ -44,7 +44,7 @@ import org.junit.Assume.assumeTrue
  * ./gradlew :core-knowledge:test --tests '&#42;DespejoDeAbordagemTest&#42;' -i \
  *   | grep TRIPLA | sed -e 's|^ &#42;||' > /tmp/abordagem.tsv
  * adb push /tmp/abordagem.tsv /data/local/tmp/abordagem.tsv
- * adb push Llama-3.2-1B-Instruct-Q4_K_M.gguf /data/local/tmp/redator.gguf
+ * adb push Qwen2.5-1.5B-Instruct-Q4_K_M.gguf /data/local/tmp/redator.gguf
  * ```
  *
  * Sem os dois arquivos os testes **pulam**, não passam — a distinção é o achado

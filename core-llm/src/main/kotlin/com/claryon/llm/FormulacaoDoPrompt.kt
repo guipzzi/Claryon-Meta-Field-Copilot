@@ -224,6 +224,20 @@ class FormulacaoDoPrompt(
          * responder. Quem for decidir a Etapa B tem de olhar para esta coluna, e
          * não para `aprova` — ver o KDoc do teste, onde as duas estão
          * anticorrelacionadas.
+         *
+         * ## ⚠️ A tabela acima é do modelo que SAIU
+         *
+         * Ela foi levantada com `Llama-3.2-1B-Instruct-Q4_K_M`, substituído por
+         * `Qwen2.5-1.5B-Instruct-Q4_K_M` em 22/08 (`DECISIONS.md`). Os cinco braços
+         * **não foram remedidos** — a troca foi feita sem bancada, por decisão
+         * explícita, e este KDoc não pretende que tenham sido.
+         *
+         * [SEM_ROTULO] continua sendo a produção por ser a titular, não por ter
+         * vencido no modelo novo. Isso é escolha defensável (nada medido a
+         * contradiz, e os defeitos que ela fecha — vazamento de andaime, truncagem
+         * — são de prompt e não de pesos) e é **hipótese, não resultado**. Remedir
+         * os cinco braços sobre o Qwen é a primeira tarefa de quem retomar a
+         * Etapa B, antes de qualquer conclusão sobre o modelo novo.
          */
         val PRODUCAO: FormulacaoDoPrompt = SEM_ROTULO
 
@@ -241,6 +255,18 @@ class FormulacaoDoPrompt(
          * melhorar, fica medido que não era — e essa refutação vale, porque
          * "escreva o prompt em inglês" é o conselho mais repetido sobre modelo
          * pequeno e este projeto nunca o tinha medido.
+         *
+         * ## A troca de modelo de 22/08 transformou este braço no CONTROLE dela
+         *
+         * O Llama 3.2 1B saiu e entrou o Qwen2.5 1.5B **por causa desta hipótese**
+         * — a aposta é que o defeito era de cobertura de português nos pesos, não
+         * de tarefa. Se a aposta estiver certa, F5 deixa de ganhar de [SEM_ROTULO]
+         * no modelo novo: um modelo que entende instrução em português não precisa
+         * ouvi-la em inglês.
+         *
+         * Ou seja, este braço passou de curiosidade a **medida de sucesso da
+         * troca**, e com o sinal invertido: F5 continuar vencendo é evidência de
+         * que trocar o modelo não resolveu o que se esperava dela.
          */
         val INSTRUCAO_EM_INGLES: FormulacaoDoPrompt = FormulacaoDoPrompt(
             nome = "F5-instrucao-em-ingles",

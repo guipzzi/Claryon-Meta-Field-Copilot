@@ -123,9 +123,14 @@ object RedacaoDoCopiloto {
      * Carrega. Então o onboarding do dia do evento é uma linha e nenhuma cópia:
      *
      * ```
-     * adb push Llama-3.2-1B-Instruct-Q4_K_M.gguf \
+     * adb push Qwen2.5-1.5B-Instruct-Q4_K_M.gguf \
      *   /sdcard/Android/data/com.claryon.field/files/redator.gguf
      * ```
+     *
+     * O nome no aparelho é `redator.gguf` e **não** o nome do modelo, o que fez o
+     * troca de Llama 3.2 1B para Qwen2.5 1.5B em 22/08 não tocar uma linha de
+     * código deste arquivo. Os 770,28 MiB medidos acima são do GGUF antigo; o
+     * novo tem 940,36 MiB e a cópia de (b) custa proporcionalmente mais.
      *
      * ## A ordem: privado primeiro
      *

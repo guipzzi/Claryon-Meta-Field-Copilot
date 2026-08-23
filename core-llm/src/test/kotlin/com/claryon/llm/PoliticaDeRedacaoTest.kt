@@ -162,4 +162,68 @@ class PoliticaDeRedacaoTest {
             ),
         )
     }
+
+    /**
+     * **A troca de modelo de 22/08 reescalou o portão sozinha — e cobrou por isso.**
+     *
+     * `Llama-3.2-1B-Instruct-Q4_K_M` (807 694 464 B) saiu e entrou
+     * `Qwen2.5-1.5B-Instruct-Q4_K_M` (986 048 768 B). [PoliticaDeRedacao] **não
+     * mudou uma linha**, porque a exigência é `tamanho × FOLGA_SOBRE_O_MODELO` e
+     * não uma constante por modelo:
+     *
+     * ```
+     * Llama  807 694 464 × 1,90 = 1 534 619 481 B  (1 463,5 MiB)
+     * Qwen   986 048 768 × 1,90 = 1 873 492 659 B  (1 786,7 MiB)
+     * ```
+     *
+     * Este teste é o **contra-teste da afirmação de que reescalou**: um portão que
+     * ignorasse o tamanho do arquivo daria a mesma decisão para os dois, e passaria
+     * em qualquer teste que só olhasse um modelo por vez. A asserção exige que as
+     * duas decisões **difiram** com a mesma RAM.
+     *
+     * E ele documenta o preço, que é real e é para o lado ruim: **existe aparelho
+     * que redigia com o modelo antigo e recusa com o novo.** 1,58 GiB de `availMem`
+     * num aparelho de 4 GB é exatamente essa faixa. Não é defeito — é o portão
+     * fazendo o trabalho —, mas quem for medir a Etapa B no aparelho de campo tem
+     * de medir a decisão do portão junto, e não só a latência da geração.
+     */
+    @Test
+    fun aTrocaDeModeloReescalaOPortao_eIssoTemPreco() {
+        val ram = 4L * 1024 * 1024 * 1024
+        val disponivel = 1_700_000_000L        // ~1,58 GiB — entre as duas exigências
+
+        val comLlama = PoliticaDeRedacao.decidir(
+            flagLigada = true,
+            tamanhoDoModeloBytes = 807_694_464L,
+            ramTotalBytes = ram,
+            ramDisponivelBytes = disponivel,
+            sistemaSobPressao = false,
+        )
+        val comQwen = PoliticaDeRedacao.decidir(
+            flagLigada = true,
+            tamanhoDoModeloBytes = 986_048_768L,
+            ramTotalBytes = ram,
+            ramDisponivelBytes = disponivel,
+            sistemaSobPressao = false,
+        )
+
+        assertEquals(
+            "O modelo antigo cabia nesta RAM. Se esta linha falhar, o portão " +
+                "deixou de escalar pelo tamanho do arquivo.",
+            Decisao.Redigir,
+            comLlama,
+        )
+        assertEquals(
+            "O modelo novo NÃO cabe na mesma RAM, e o produto tem de saber disso " +
+                "antes do dia do evento, não durante.",
+            Decisao.LerVerbatim(Motivo.RAM_INSUFICIENTE),
+            comQwen,
+        )
+        assertNotEquals(
+            "Mesma RAM, mesma flag, decisões iguais: o portão parou de olhar o " +
+                "tamanho do GGUF e virou constante disfarçada.",
+            comLlama,
+            comQwen,
+        )
+    }
 }

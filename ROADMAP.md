@@ -513,7 +513,25 @@ fonte, estático, **zero libggml no APK** e **+8,25 MiB de release**. O que a in
 mediu, e que este texto acima não previa, está em `DECISIONS.md` (21/08): a Llama 3.2 1B
 Q4_K_M **erra em pt-BR sobre norma** (chamou infração administrativa de "crime grave" e
 produziu *"não há nada que aconteça com quem dirige embriagado"*), e o filtro de lastro
-**não vê negação**. O motor está resolvido; o **modelo** não.
+**não vê negação**. ~~O motor está resolvido; o **modelo** não.~~
+
+**MODELO DECIDIDO em 22/08 (humano): `Qwen2.5-1.5B-Instruct-Q4_K_M`, Apache-2.0.** Sai o
+Llama, fica o llama.cpp — o motor não mudou, e a distinção importa: o que saiu foram os
+**pesos** da Meta. Os três motivos, na ordem, em `DECISIONS.md` (22/08): cobertura de
+português nos pesos (a hipótese que a medição deixou apontada e nunca testou), a licença
+com AUP que alcança o caso de uso-bandeira deste produto, e o maior salto de qualidade que
+cabe na RAM. **Trocado sem bancada, por decisão explícita com o prazo em cima** — nenhuma
+tabela deste repositório é do modelo novo, e remedir é a primeira tarefa de quem retomar
+a Etapa B.
+
+**E o item 2 acima errou uma previsão, o que vale mais registrado que apagado.** Ele dizia
+que trocar de modelo seria *"trocar de família, tokenizador e prompt — não 'trocar um
+arquivo'"*. Foi trocar um arquivo: **zero linha de Kotlin, zero linha de C++**. Três
+decisões anteriores pagaram isso adiantado — o template de chat vem do próprio GGUF
+(`llama_model_chat_template`), o arquivo chama-se `redator.gguf` e não o nome do modelo, e
+o portão de RAM multiplica bytes em vez de consultar tabela por modelo. A previsão estava
+certa sobre o risco e errada sobre este repositório, porque o risco já tinha sido mitigado
+por desenho.
 
 **Itens**
 
@@ -845,10 +863,14 @@ falham lá.
   depende disso. Mitigação: corpus inicial de material aberto e de manual de fabricante,
   com o desenho deixando a fonte trocável — e o documento dizendo que o corpus é do
   contratante, não do produto.
-- **Licença e política de uso do modelo.** O Llama tem licença própria (não é open source) e
-  política de uso aceitável que veda armas, contra um caso de uso de manejo de pistola. O
-  Qwen3 é Apache-2.0. Mitigação: a licença entra como critério de decisão do motor, não como
-  descoberta posterior.
+- ~~**Licença e política de uso do modelo.**~~ **FECHADO em 22/08.** O Llama tem licença
+  própria (não é open source) e política de uso aceitável que veda armas, contra um caso de
+  uso de manejo de pistola. O modelo passou a ser `Qwen2.5-1.5B-Instruct-Q4_K_M`, e a
+  licença foi **conferida na API do Hugging Face, não escrita de memória**:
+  `Qwen/Qwen2.5-1.5B-Instruct` declara `apache-2.0`, `meta-llama/Llama-3.2-1B-Instruct`
+  declara `llama3.2`. Apache-2.0 não tem AUP. A mitigação prevista aqui — *"a licença entra
+  como critério de decisão, não como descoberta posterior"* — foi o que de fato aconteceu:
+  ela é o motivo nº 2 dos três em `DECISIONS.md` (22/08).
 - **Afirmação falseável no documento.** Dizer "nunca coordenadas" é demonstravelmente falso
   a partir deste repositório: `MapaDeRuas.kt:265` e `:370` reconstroem a coordenada absoluta
   do par com `Geo.destino(minhaLat, minhaLon, distanciaM, rumo)`. Se a banca fizer a conta,
@@ -893,9 +915,12 @@ falham lá.
   whisper.cpp já tem aqui, então não há coordenada, versão nem `javap` a conferir: há um
   submódulo a acrescentar. O custo de "renomear alvos" que este item cobrava **não existe
   mais** — ver o fato 1 acima. **Integrado em 21/08** (`core-llm`, `-DBUILD_SHARED_LIBS=OFF`,
-  zero libggml no APK). O que resta em aberto deixou de ser a licença e passou a ser **qual
-  modelo**: a Llama 3.2 1B medida no emulador erra sobre norma em pt-BR, e o `.gguf` ainda
-  não é submódulo (203 MB contra 43 MB do whisper — decisão de custo, humana).
+  zero libggml no APK). ~~O que resta em aberto deixou de ser a licença e passou a ser
+  **qual modelo**~~ — **também DECIDIDO, em 22/08 (humano): `Qwen2.5-1.5B-Instruct-Q4_K_M`,
+  Apache-2.0**, em lugar da Llama 3.2 1B que errava sobre norma em pt-BR. Este item fecha.
+  O que sobra dele não é decisão e sim dívida: **remedir a Etapa B sobre o modelo novo** (a
+  troca foi sem bancada) e o clone do llama.cpp que ainda não é submódulo (203 MB contra
+  43 MB do whisper — decisão de custo, humana, em aberto).
 - **2. Origem do corpus do RAG.** (material aberto e de fabricante / POP de corporação
   parceira / outro). É o item que trava a Fase 4 inteira e não é resolvível por engenharia.
 - **3. Verificação de locutor por embedding — permitido ou proibido?**

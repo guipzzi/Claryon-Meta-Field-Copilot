@@ -41,8 +41,15 @@ package com.claryon.llm
  * Fechar isso exige comparar *sentido*, não palavras: entailment, ou um segundo
  * passe com o modelo julgando a própria saída (que dobra a latência e usa o
  * mesmo modelo fraco como juiz). Nenhum dos dois entra hoje. Enquanto não
- * entrar, **a Etapa B não deve ser ligada em aparelho de campo com um modelo de
- * 1B** — e a decisão de qual modelo usar precisa levar isto em conta.
+ * entrar, **a Etapa B não deve ser ligada em aparelho de campo.**
+ *
+ * **A troca de modelo de 22/08 não mexe nisto, e pode piorar.** O
+ * `Llama-3.2-1B-Instruct-Q4_K_M` saiu e entrou o `Qwen2.5-1.5B-Instruct-Q4_K_M`
+ * por cobertura de português (`DECISIONS.md`). Este buraco é da **régua**, não do
+ * modelo: ela compara léxico, e inversão de sentido é justamente a alucinação que
+ * reusa o léxico da fonte. Um modelo mais fluente em português produz negação
+ * mais bem construída — que é exatamente a que passa aqui. A frase acima continua
+ * sendo o caso de teste, e o próximo modelo herda o buraco inteiro.
  *
  * ## As duas réguas, e por que uma é absoluta e a outra não
  *

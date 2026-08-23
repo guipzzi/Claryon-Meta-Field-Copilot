@@ -87,7 +87,7 @@ import org.junit.Test
  *
  * ```
  * adb push /tmp/abordagem.tsv /data/local/tmp/abordagem.tsv
- * adb push Llama-3.2-1B-Instruct-Q4_K_M.gguf /data/local/tmp/redator.gguf
+ * adb push Qwen2.5-1.5B-Instruct-Q4_K_M.gguf /data/local/tmp/redator.gguf
  * ```
  *
  * Sem os dois o teste **pula**. Pulado é a resposta honesta; verde seria mentira.

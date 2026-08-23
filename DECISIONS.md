@@ -2252,3 +2252,95 @@ estão no diff.
   a ausência passar por capacidade. E `Confere` não é *inforjável* — a ressalva do R8
   aparece na tela com as mesmas palavras-chave do relatório de impacto, com teste que
   reprova o build se ela sumir de qualquer um dos dois lados.
+
+---
+
+## 2026-08-22 · O modelo da Etapa B deixa de ser Llama e passa a ser Qwen — decisão humana, sem bancada
+
+A decisão em aberto nº 1 do `ROADMAP.md` dizia, desde 21/08, que *"o motor está resolvido;
+o modelo não"*. Ela fecha aqui: sai `Llama-3.2-1B-Instruct-Q4_K_M`, entra
+**`Qwen2.5-1.5B-Instruct-Q4_K_M`** (986 048 768 B, Apache-2.0).
+
+**O motor NÃO mudou, e confundir as duas coisas seria caro.** llama.cpp continua sendo o
+runtime, `core-llm` continua chamando `libclaryonllm.so`, e `RedatorLlamaCpp` continua com
+esse nome — que é o nome do motor, não do modelo. "Tirar o Llama" aqui significa tirar os
+**pesos** da Meta, não tirar o llama.cpp, que roda GGUF de qualquer família e é o motivo
+de a troca ter sido barata.
+
+### Os três motivos, em ordem de peso
+
+1. **Cobertura de português nos pesos.** É a hipótese que a medição de 21–22/08 deixou
+   apontada e nunca testou: das 20 perguntas do banco de abordagem, **1 a 2** produziram
+   resposta utilizável, e os defeitos lidos um a um eram de compreensão de instrução em
+   português — meta-comentário, preâmbulo, número de artigo, tudo isso proibido em
+   português no `system`. `FormulacaoDoPrompt.INSTRUCAO_EM_INGLES` (F5) existe justamente
+   para separar "o modelo não entende a tarefa" de "o modelo não entende o pedido em
+   português", e a troca é a outra metade do mesmo experimento.
+
+2. **Licença e política de uso.** O `ROADMAP.md` já listava isto como risco declarado, com
+   estas palavras: *"O Llama tem licença própria (não é open source) e política de uso
+   aceitável que veda armas, contra um caso de uso de manejo de pistola."* Conferido na
+   API do Hugging Face, não de memória: `meta-llama/Llama-3.2-1B-Instruct` declara
+   `license: llama3.2`; `Qwen/Qwen2.5-1.5B-Instruct` declara `license: apache-2.0`. O caso
+   de uso-bandeira que o próprio usuário levantou nesta sessão — *"estou com a minha Glock
+   emperrada"* — é exatamente o que a AUP do Llama alcança. Apache-2.0 não tem AUP.
+
+3. **Tamanho comparável.** Os modelos maiores foram descartados por conta de RAM na mesma
+   sessão (Qwen2.5-3B e Llama-3.2-3B estouram os 4 GB do aparelho de campo somados ao
+   whisper, ao Piper e ao MapLibre). 1,5B em Q4_K_M é o maior salto de qualidade de
+   português que cabe.
+
+### O que a troca custou em código: nada, e isso foi projetado
+
+Três decisões anteriores fizeram a família do modelo ser um detalhe de arquivo:
+
+- **O template de chat vem do GGUF.** `redator_jni.cpp` chama
+  `llama_model_chat_template(modelo, nullptr)` e passa o resultado a
+  `llama_chat_apply_template`. O KDoc de lá já dizia por quê: *"prompt no formato errado
+  não dá erro: dá resposta pior, em silêncio"*. Llama 3 usa `<|start_header_id|>`, Qwen
+  usa ChatML — e nenhuma dessas strings existe neste repositório.
+- **O arquivo chama-se `redator.gguf`**, não o nome do modelo, nos dois caminhos de
+  embarque.
+- **O portão de RAM multiplica bytes**, não consulta uma tabela por modelo:
+  `PoliticaDeRedacao.FOLGA_SOBRE_O_MODELO × tamanhoDoModeloBytes`. Ele reescalou sozinho
+  de 1 464 MiB para 1 787 MiB de `availMem` exigidos.
+
+O único ponto que precisou ser **reconferido** em vez de simplesmente herdado foi o
+`" "?` opcional na raiz de `GramaticaDaFonte`, escrito olhando o tokenizador do Llama 3.
+Ele sobrevive porque os dois modelos usam BPE em nível de byte, em que o espaço à esquerda
+faz parte do token — é propriedade da família de tokenizador, não do modelo.
+
+### O que a troca NÃO consertou, e está escrito para não virar a próxima mentira
+
+- **A cegueira do guarda a negação.** É da régua, que compara léxico. Um modelo mais
+  fluente em português produz negação mais bem construída, que é precisamente a
+  alucinação que passa. O buraco pode ficar **mais** caro, não menos.
+- **O prefill.** 986 MB e 28 camadas contra 770 MB e 16: o item que já estourava sozinho
+  o prazo de 2 500 ms piora. Nenhum número novo — é aritmética.
+- **A Etapa B continua desligada.** `RedacaoDoCopiloto.redigir` segue com zero chamadores
+  em `src/main`, e o teste que reprova o build se alguém a ligar continua verde.
+
+### Alternativas descartadas
+
+- **Qwen3-1.7B**, também Apache-2.0 e mais novo. Descartado por ser modelo de raciocínio
+  híbrido: ele emite bloco `<think>` por padrão, e desligá-lo depende de o template
+  embutido no GGUF aceitar `enable_thinking`. Num orçamento de 2 500 ms com teto de 7
+  palavras faladas, tokens de raciocínio são o pior gasto possível, e a mitigação
+  dependeria de um detalhe de template que o `redator_jni.cpp` hoje não controla —
+  exatamente o tipo de acoplamento que a troca de 22/08 evitou.
+- **Trocar geração por extração** (`GramaticaDaFonte`, a Pista 2). Não é alternativa: é o
+  caminho concorrente, continua em pé, e é o que a medição de 22/08 favorece. A troca de
+  modelo mede a Pista 1 pelo que ela vale; se a Pista 2 vencer, o modelo importa menos.
+- **Medir antes de trocar.** Descartada **pelo usuário, explicitamente**, com o prazo do
+  Segundo Filtro em cima. O custo está registrado aqui e na spec: nenhuma tabela deste
+  repositório é do modelo novo, e a primeira tarefa de quem retomar a Etapa B é remedir
+  os cinco braços de prompt e o PSS residente sobre o Qwen.
+
+### O custo de imagem, declarado
+
+Este é um hackathon da Meta, e sai da solução o modelo da Meta. O que fica da Meta é o que
+o edital de fato pontua no critério de aderência ao toolkit: os óculos Ray-Ban Meta, o DAT
+0.9.0, `GlassesFacade`, HFP/SCO e a câmera. O LLM nunca foi item de toolkit. E há leitura
+favorável: trocar um modelo por outro com um `adb push`, sem tocar Kotlin nem C++, é
+demonstração de que a arquitetura não está presa a fornecedor — o que é argumento de
+viabilidade técnica, o critério de desempate do §11.3.

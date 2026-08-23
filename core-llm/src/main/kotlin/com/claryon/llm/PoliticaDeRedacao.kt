@@ -46,6 +46,37 @@ object PoliticaDeRedacao {
      * O valor abaixo é esse número medido, arredondado para baixo em favor de
      * permitir a Etapa B onde ela cabe. Trocá-lo exige medir de novo, não
      * estimar de novo.
+     *
+     * ## A troca de modelo de 22/08 não mexeu neste número, e não é sorte
+     *
+     * O fator é **por byte de GGUF**, não por modelo: [decidir] o multiplica pelo
+     * tamanho do arquivo que está no aparelho. Trocar `Llama-3.2-1B-Instruct-Q4_K_M`
+     * (807 694 464 B) por `Qwen2.5-1.5B-Instruct-Q4_K_M` (986 048 768 B) reescala
+     * o portão sozinho: a exigência passa de **1 464 MiB** para **1 787 MiB** de
+     * `availMem` sem uma linha de diff.
+     *
+     * **A consequência é real e é para o lado ruim.** O modelo novo é 22% maior,
+     * então há aparelhos que decidiam [Decisao.Redigir] e passam a decidir
+     * [Motivo.RAM_INSUFICIENTE]. Isso é o portão funcionando, não um defeito — mas
+     * quem medir a Etapa B no Samsung M34 (`docs/PRONTIDAO_DE_HARDWARE.md`) tem de
+     * medir a decisão do portão junto, e não só a latência da geração.
+     *
+     * O fator em si continua valendo porque `1,91×` é razão entre RAM residente e
+     * bytes de peso em Q4_K_M com `n_ctx = 1024`, e o que varia entre arquiteturas
+     * é o KV cache por token. Conferido nos `config.json` dos dois modelos, e não
+     * de memória:
+     *
+     * ```
+     * Llama 3.2 1B   16 camadas ×  8 kv_heads × 64 head_dim × 2 = 16 384 elem/token
+     * Qwen2.5 1.5B   28 camadas ×  2 kv_heads × 128 head_dim × 2 = 14 336 elem/token
+     * ```
+     *
+     * O modelo novo tem 12,5% **menos** KV por token, apesar de ter mais pesos: o
+     * GQA agressivo do Qwen (2 cabeças de KV para 12 de atenção) compensa as 28
+     * camadas. A razão `1,91×` é, se algo, folgada para ele. **Isso é aritmética
+     * sobre a geometria declarada, não medição** — confirmar `Debug.getMemoryInfo`
+     * no aparelho com o GGUF novo continua pendente, e é o primeiro número que a
+     * próxima bancada tem de trazer.
      */
     const val FOLGA_SOBRE_O_MODELO: Double = 1.90
 

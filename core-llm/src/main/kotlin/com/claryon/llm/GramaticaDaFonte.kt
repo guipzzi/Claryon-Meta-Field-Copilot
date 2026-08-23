@@ -73,9 +73,15 @@ package com.claryon.llm
  * cairia no meio de uma palavra — que é justamente a truncagem que a tabela de
  * 22/08 mede em 4 e 6 casos nas formulações F3 e F4.
  *
- * `" "?` na raiz existe porque o primeiro token gerado pelo Llama 3 pode ou não
- * trazer o espaço colado. Sem essa folga, metade das gerações morreria no
- * primeiro token com a gramática rejeitando o vocabulário inteiro.
+ * `" "?` na raiz existe porque o primeiro token gerado pode ou não trazer o
+ * espaço colado. Sem essa folga, metade das gerações morreria no primeiro token
+ * com a gramática rejeitando o vocabulário inteiro.
+ *
+ * **Foi escrito olhando o Llama 3 e sobreviveu à troca para Qwen2.5 em 22/08 por
+ * um motivo, não por sorte:** os dois usam BPE em nível de byte, em que o espaço
+ * à esquerda faz parte do token (`Ġ`). A folga é da família de tokenizador, não
+ * do modelo. Um modelo com tokenizador SentencePiece a tornaria supérflua, nunca
+ * errada — `" "?` aceita as duas formas.
  *
  * As alternativas são escritas em vez de agrupadas com `( … )?` de propósito: o
  * agrupamento faz o parser do llama.cpp **sintetizar uma regra a mais por

@@ -37,7 +37,7 @@ import org.junit.Test
  * arquivos. Antes de rodar:
  *
  * ```
- * adb push Llama-3.2-1B-Instruct-Q4_K_M.gguf /data/local/tmp/redator.gguf
+ * adb push Qwen2.5-1.5B-Instruct-Q4_K_M.gguf /data/local/tmp/redator.gguf
  * ```
  *
  * Este teste copia de lá para o `filesDir` do app na primeira execução. **Sem o
