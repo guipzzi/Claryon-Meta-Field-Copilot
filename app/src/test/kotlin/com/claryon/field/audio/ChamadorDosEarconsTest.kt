@@ -52,7 +52,12 @@ class ChamadorDosEarconsTest {
             .map { File(it, "src/main") }
             .filter { it.isDirectory }
             .flatMap { it.walkTopDown().filter { f -> f.isFile && f.extension == "kt" } }
-            .filterNot { it.path.contains("/cpp/llama/") }
+            // `/cpp/`, e não `/cpp/llama/`: o exemplo vendorizado do whisper.cpp tem
+            // um `MainActivity.kt` que sobrescrevia o deste aplicativo no índice por
+            // nome de [emissoesDe]. Aqui a cegueira dava falso VERMELHO — um earcon
+            // tocado só na raiz de composição apareceria como órfão —, mas é o mesmo
+            // defeito de `ChamadorDaRedacaoTest`, onde a direção é a perigosa.
+            .filterNot { it.path.contains("/cpp/") }
     }
 
     /** Arquivo → linhas que citam `Earcon.NOME`, já sem comentário e sem KDoc. */

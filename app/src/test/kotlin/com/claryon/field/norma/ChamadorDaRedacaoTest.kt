@@ -71,9 +71,17 @@ class ChamadorDaRedacaoTest {
             .filter { it.isDirectory }
         return diretorios
             .flatMap { it.walkTopDown().filter { f -> f.isFile && f.extension == "kt" } }
-            // O llama.cpp vendorizado traz exemplos Kotlin da ARM que não são
-            // deste produto e não podem votar nesta contagem.
-            .filterNot { it.path.contains("/cpp/llama/") }
+            // O llama.cpp **e o whisper.cpp** vendorizados trazem exemplos Kotlin da
+            // ARM que não são deste produto e não podem votar nesta contagem.
+            //
+            // **`/cpp/`, e não `/cpp/llama/`.** O filtro estreito deixava o exemplo
+            // do whisper passar, e um dos arquivos dele se chama `MainActivity.kt`.
+            // Como [chamadasDe] indexa por NOME, ele sobrescrevia a raiz de
+            // composição deste aplicativo — e um `redigir(` ligado em
+            // `MainActivity.kt` ficaria **invisível** para o teste que existe
+            // justamente para vetá-lo. Aqui a cegueira daria falso VERDE, que é a
+            // direção perigosa.
+            .filterNot { it.path.contains("/cpp/") }
     }
 
     /** Arquivo → linhas que casam, já sem as que apenas *declaram* a função. */

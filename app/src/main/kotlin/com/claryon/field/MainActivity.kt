@@ -21,6 +21,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.ui.platform.LocalContext
 import com.claryon.agent.LexicoDeOcorrencias
 import com.claryon.agent.ModoOperacao
+import com.claryon.field.agent.DiarioDaConsultaExterna
 import com.claryon.field.auth.SessaoDoAgente
 import com.claryon.field.local.EstadoDaTransmissao
 import com.claryon.field.local.TransmissaoDePosicao
@@ -207,6 +208,16 @@ private fun Operacao(
     val escuta by CopilotService.estadoDaEscuta.collectAsState()
     val quemMeConsultou: QuemMeConsultouViewModel = viewModel()
     val consultas by quemMeConsultou.estado.collectAsState()
+    // **A procedência das consultas a fonte externa.** O fluxo era escrito por
+    // `LugarPelaRede` a cada resposta do Overpass desde que a cascata foi ligada, e
+    // `grep -rn "DO_PROCESSO.auditoria" app/src/main` devolvia **zero leitores**: o
+    // §4 da `specs/consulta-externa.spec.md` promete que a auditoria "fica
+    // disponível na tela", e a própria spec listava esta tela sob "NÃO construído".
+    //
+    // Vem do PROCESSO, não de um ViewModel, pela mesma razão que a transmissão da
+    // posição logo abaixo: quem escreve é o ciclo de voz, que roda no serviço em
+    // primeiro plano e sobrevive à tela. Um ViewModel teria a metade do histórico.
+    val auditoriaExterna by DiarioDaConsultaExterna.DO_PROCESSO.auditoria.collectAsState()
     // **A perícia da custódia.** Ver `PericiaViewModel`: `verificar()` e
     // `Manifesto.ler()` tinham zero chamadores em `src/main` até 22/08, e este é o
     // caminho que os alcança em runtime.
@@ -364,6 +375,7 @@ private fun Operacao(
                     agoraDoPerfil,
                 ),
                 consultas = consultas,
+                auditoriaExterna = auditoriaExterna,
                 aoSair = aoEncerrarTurno,
                 aoAbrirPericia = { periciando = true },
                 modifier = modifier,

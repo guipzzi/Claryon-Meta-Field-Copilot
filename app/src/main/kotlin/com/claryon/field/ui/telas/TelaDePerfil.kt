@@ -15,6 +15,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import com.claryon.agent.RegistroDeAuditoria
 import com.claryon.field.ui.componentes.BotaoTatico
 import com.claryon.field.ui.componentes.CabecalhoTatico
 import com.claryon.field.ui.componentes.Etiqueta
@@ -57,6 +58,14 @@ fun TelaDePerfil(
     capacidades: List<Capacidade>,
     /** Quem consultou a posição deste agente. Ver `QuemMeConsultouViewModel`. */
     consultas: QuemMeConsultouViewModel.Estado,
+    /**
+     * A procedência das consultas que este aparelho fez a **fonte externa**.
+     *
+     * Vem de `DiarioDaConsultaExterna.DO_PROCESSO.auditoria`, que era escrito por
+     * `LugarPelaRede` e **lido por ninguém em `src/main`** — a própria
+     * `specs/consulta-externa.spec.md` listava esta tela sob *"NÃO construído"*.
+     */
+    auditoriaExterna: List<RegistroDeAuditoria>,
     aoSair: () -> Unit,
     /** Abre a perícia da cadeia de custódia. Ver [TelaDePericia]. */
     aoAbrirPericia: () -> Unit,
@@ -87,6 +96,10 @@ fun TelaDePerfil(
         Box(Modifier.height(Espaco.Secao))
 
         QuemMeConsultou(consultas)
+
+        Box(Modifier.height(Espaco.Secao))
+
+        ConsultasExternas(auditoriaExterna)
 
         Box(Modifier.height(Espaco.Secao))
 
@@ -188,6 +201,87 @@ private fun QuemMeConsultou(estado: QuemMeConsultouViewModel.Estado) {
         )
     }
 }
+
+/**
+ * **A procedência do que veio de fora — o §4 da `specs/consulta-externa.spec.md`.**
+ *
+ * A spec manda registrar, em toda resposta de fonte externa, *"a URL ou o serviço
+ * de origem, o trecho exato que fundamentou a resposta, o carimbo de tempo"*, e
+ * diz que isso *"fica disponível na tela"*. O `StateFlow` existia desde então,
+ * `LugarPelaRede` o alimentava a cada consulta — e **nenhuma tela o observava**. A
+ * própria spec listava esta seção sob *"NÃO construído, e é preciso dizer"*, e o
+ * KDoc de `DiarioDaConsultaExterna` nomeava o risco de declará-la pronta.
+ *
+ * São exatamente os três campos do §4, e nada além deles. [RegistroDeAuditoria]
+ * carrega um quarto, `consultaEmitida` — o que saiu pela rede byte a byte, com a
+ * coordenada do próprio agente arredondada a quatro casas. Ele **fica fora da
+ * tela** porque o §4 não o pede aqui: pô-lo na lista é decisão de produto, não
+ * consequência de ligar o fio, e um campo a mais numa tela de auditoria é um campo
+ * que alguém fotografa.
+ *
+ * **Fica ao lado de "Quem consultou sua posição" de propósito.** As duas respondem
+ * à mesma família de pergunta — o que este aparelho fez com o que é meu —, uma
+ * sobre o que entrou e outra sobre o que saiu.
+ *
+ * Lista vazia é afirmação, não espaço em branco, pela mesma razão que vale ali em
+ * cima. E o rodapé diz que o registro é volátil: são 50 em RAM, por decisão
+ * registrada no `DiarioDaConsultaExterna`, e uma tela de auditoria que deixasse
+ * isso implícito faria o agente contar com um histórico que não existe.
+ */
+@Composable
+private fun ConsultasExternas(registros: List<RegistroDeAuditoria>) {
+    Column(Modifier.padding(horizontal = Espaco.Padrao)) {
+        Etiqueta("Consultas a fonte externa")
+        Box(Modifier.height(Espaco.Curto))
+        if (registros.isEmpty()) {
+            TextoCorpoMenor(
+                "Nenhuma consulta a fonte externa desde que o aplicativo abriu.",
+                cor = Cores.TintaMedia,
+            )
+        } else {
+            registros.take(NA_TELA).forEach { r ->
+                Column(Modifier.fillMaxWidth().padding(vertical = Espaco.Micro)) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        TextoCorpoMenor(r.servico, cor = Cores.Tinta)
+                        TextoCorpoMenor(horaLocal(r.carimboMillis), cor = Cores.TintaFraca)
+                    }
+                    // Trecho vazio é o FATO, não um buraco: a fonte respondeu e a
+                    // resposta foi "nada por perto". Deixar a linha em branco faria
+                    // o agente ler falha de rede onde houve resposta.
+                    TextoCorpoMenor(
+                        r.trecho.ifBlank { "Sem trecho — a fonte respondeu que não há nada por perto." },
+                        cor = Cores.TintaFraca,
+                    )
+                }
+            }
+            // Truncar em silêncio numa tela de auditoria esconde consulta — a mesma
+            // regra que a seção acima aplica sobre as 100 do log de acesso.
+            if (registros.size > NA_TELA) {
+                TextoCorpoMenor(
+                    "e mais ${registros.size - NA_TELA} consultas",
+                    cor = Cores.TintaFraca,
+                )
+            }
+        }
+        Box(Modifier.height(Espaco.Curto))
+        TextoCorpoMenor(
+            "O registro fica neste aparelho e se apaga quando o aplicativo encerra.",
+            cor = Cores.TintaFraca,
+        )
+    }
+}
+
+/**
+ * Quantas consultas cabem na seção antes do "e mais N".
+ *
+ * O diário retém 50 (`DiarioDaConsultaExterna.TETO`); 20 é o mesmo corte que o log
+ * de acesso usa logo acima, e pelo mesmo motivo — o perfil rola, mas quem abre a
+ * tela quer a consulta recente, não o turno inteiro.
+ */
+private const val NA_TELA = 20
 
 @Composable
 private fun LinhaDeDado(rotulo: String, valor: String) {

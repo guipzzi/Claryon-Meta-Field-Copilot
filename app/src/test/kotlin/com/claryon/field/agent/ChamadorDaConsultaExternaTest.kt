@@ -55,7 +55,14 @@ class ChamadorDaConsultaExternaTest {
             .map { File(it, "src/main") }
             .filter { it.isDirectory }
             .flatMap { it.walkTopDown().filter { f -> f.isFile && f.extension == "kt" } }
-            .filterNot { it.path.contains("/cpp/llama/") }
+            // **`/cpp/`, e não `/cpp/llama/`.** O filtro estreito deixava passar os
+            // exemplos Kotlin vendorizados do whisper.cpp — e um deles se chama
+            // `MainActivity.kt`. Como [arquivosQueContem] indexa por NOME de
+            // arquivo, o exemplo da ARM **sobrescrevia a raiz de composição deste
+            // aplicativo** no mapa, e toda fiação ligada em `MainActivity.kt` era
+            // invisível a esta varredura. Uma trava do §6 cega justamente no
+            // arquivo que liga tudo é pior que trava nenhuma: ela dá o verde.
+            .filterNot { it.path.contains("/cpp/") }
     }
 
     /** Arquivos de produção cujas linhas de CÓDIGO (não KDoc) contêm [trecho]. */
@@ -95,6 +102,35 @@ class ChamadorDaConsultaExternaTest {
             "a varredura não achou `consultarNorma =`, que a raiz de composição " +
                 "liga desde a Etapa A — ela não enxerga fiação nenhuma",
             arquivosQueContem("consultarNorma =").isNotEmpty(),
+        )
+    }
+
+    /**
+     * **Nome de arquivo repetido apaga fiação em silêncio.**
+     *
+     * [arquivosQueContem] indexa por `File.name`, e `associate` fica com a ÚLTIMA
+     * entrada de cada chave. Enquanto o filtro de vendorizados era `/cpp/llama/`, o
+     * `MainActivity.kt` dos exemplos do whisper.cpp sobrescrevia o
+     * `MainActivity.kt` **deste** aplicativo — e a raiz de composição, que é onde
+     * quase toda fiação mora, simplesmente não existia para esta varredura. O
+     * sintoma é o pior possível: nenhum erro, só um verde a menos.
+     *
+     * Esta trava fecha a porta em vez de confiar no filtro: se dois arquivos de
+     * produção passarem a dividir um nome, ela falha nomeando os dois.
+     */
+    @Test
+    fun nenhumNomeDeArquivoSeRepeteNaProducao() {
+        val repetidos = fontesDeProducao()
+            .groupBy { it.name }
+            .filterValues { it.size > 1 }
+            .mapValues { (_, arquivos) -> arquivos.map { it.path } }
+        assertEquals(
+            "Dois arquivos de produção dividem o mesmo nome. A varredura desta " +
+                "classe indexa por nome, então um deles some do mapa e a fiação que " +
+                "ele contém vira invisível — sem erro, sem aviso. Ou renomeie, ou " +
+                "troque a chave do índice por caminho relativo:\n$repetidos",
+            emptyMap<String, List<String>>(),
+            repetidos,
         )
     }
 
@@ -159,6 +195,74 @@ class ChamadorDaConsultaExternaTest {
                 "ESCRITA, não construída.",
             emptySet<String>(),
             orfas,
+        )
+    }
+
+    // ── O outro lado do fio: quem LÊ o que a cascata escreve ──────────────────
+
+    /**
+     * **A auditoria tem leitor, e ele está na raiz de composição.**
+     *
+     * Os testes acima guardam a metade que ESCREVE. Esta guarda a que LÊ, e a
+     * distinção não é acadêmica: `DiarioDaConsultaExterna.auditar` tinha chamador
+     * desde que a cascata foi ligada, e `DO_PROCESSO.auditoria` tinha **zero**. A
+     * `specs/consulta-externa.spec.md` §4 promete que a procedência *"fica
+     * disponível na tela"*, e a mesma spec listava a tela sob *"NÃO construído, e é
+     * preciso dizer"*. Um `StateFlow` publicado que ninguém coleta é o §6 inteiro:
+     * escrito, não construído — só que desta vez o defeito estava no consumidor.
+     *
+     * Exigir que o leitor viva no arquivo que constrói a tela amarra "tem chamador"
+     * a "alcançável em runtime". Uma linha `DO_PROCESSO.auditoria` num arquivo que
+     * ninguém compõe seria leitor no `grep` e nada na tela.
+     */
+    @Test
+    fun aAuditoriaTemLeitorNaRaizDeComposicao() {
+        val leitores = arquivosQueContem(
+            "DO_PROCESSO.auditoria",
+            exceto = setOf("DiarioDaConsultaExterna.kt"),
+        )
+        assertTrue(
+            "`DiarioDaConsultaExterna.DO_PROCESSO.auditoria` não tem leitor em " +
+                "src/main. `LugarPelaRede` escreve nele a cada resposta do Overpass e " +
+                "ninguém o observa — o registro do §4 vive 50 entradas em RAM e morre " +
+                "com o processo, sem nunca ter chegado a olho humano.",
+            leitores.isNotEmpty(),
+        )
+
+        val raizes = arquivosQueContem("TelaDePerfil(", exceto = setOf("TelaDePerfil.kt")).keys
+        assertTrue(
+            "`DO_PROCESSO.auditoria` é lido em ${leitores.keys}, e nenhum desses " +
+                "arquivos compõe a `TelaDePerfil` (composta em $raizes). Leitor em " +
+                "arquivo que ninguém compõe é código morto com cara de fiação.",
+            leitores.keys.any { it in raizes },
+        )
+    }
+
+    /**
+     * **A seção existe na tela, e recebe o parâmetro por fora.**
+     *
+     * Sem isto, [aAuditoriaTemLeitorNaRaizDeComposicao] passaria com um
+     * `collectAsState()` colhido e jogado fora — a variável existiria, o `grep`
+     * acharia, e a tela continuaria sem a seção. É a pergunta 3 do §6: se o teste
+     * passaria com o defeito de volta, ele não testa o defeito.
+     */
+    @Test
+    fun aTelaDePerfilRecebeEDesenhaAAuditoria() {
+        val recebe = arquivosQueContem("auditoriaExterna", exceto = emptySet())
+        assertTrue(
+            "`auditoriaExterna` tem de aparecer TANTO em TelaDePerfil.kt (o parâmetro " +
+                "e a seção) QUANTO na raiz que a compõe (o argumento). Achei: " +
+                "${recebe.keys}",
+            "TelaDePerfil.kt" in recebe && recebe.keys.size >= 2,
+        )
+        assertTrue(
+            "TelaDePerfil.kt cita `auditoriaExterna` mas não desenha os três campos " +
+                "que o §4 da spec manda mostrar — serviço, trecho e carimbo. " +
+                "Parâmetro recebido e não desenhado é a mesma capacidade morta com " +
+                "um passo a mais.",
+            arquivosQueContem("r.servico").keys.contains("TelaDePerfil.kt") &&
+                arquivosQueContem("r.trecho").keys.contains("TelaDePerfil.kt") &&
+                arquivosQueContem("r.carimboMillis").keys.contains("TelaDePerfil.kt"),
         )
     }
 
