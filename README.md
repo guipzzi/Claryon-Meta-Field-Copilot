@@ -12,6 +12,10 @@ pareado; os óculos são sensores e alto-falantes.
 > Programa AI Glasses Brasil 2026 · Trilha **Produtividade** · Hackathon
 > presencial em **18/09/2026**.
 
+**Equipe Claryon** — coautores [@guipzzi](https://github.com/guipzzi) e
+[@Lemos021](https://github.com/Lemos021). Os dois constam como `Co-authored-by:`
+em todos os 242 commits do histórico. Detalhes em [`AUTHORS.md`](AUTHORS.md).
+
 ---
 
 ## As cinco restrições que definem todo o projeto
