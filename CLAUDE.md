@@ -146,7 +146,7 @@ evitáveis por leitura, não por esforço. Antes de escrever "pronto":
    depois foi o que quase fechou o achado do `SyncManager`: o `mkdirs()` saiu do
    construtor e os 965 ms continuaram, porque a E/S era do `context.filesDir`.
 
-Ao fechar o bloco: reescreva `ESTADO.md` e **`git push origin master`**.
+Ao fechar o bloco: reescreva `ESTADO.md` e **`git push origin main`**.
 
 ---
 

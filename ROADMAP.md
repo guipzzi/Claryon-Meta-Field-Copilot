@@ -745,7 +745,7 @@ abaixo.
 - [TRANSVERSAL] Ensaio cronometrado dos dois checkpoints obrigatórios, cada um em ≤ 10 min,
   com roteiro escrito e aparelho já pareado — esforço: 1 sessão — depende: o ensaio seco e
   o que ele achar. Agora é **confirmação**, não descoberta.
-- [TRANSVERSAL] Ensaio do pitch, reescrita final de `ESTADO.md`, `git push origin master` —
+- [TRANSVERSAL] Ensaio do pitch, reescrita final de `ESTADO.md`, `git push origin main` —
   esforço: 1 sessão — depende: tudo.
 
 **Aceite.** App instalado do zero num aparelho limpo executa os dois roteiros de checkpoint
