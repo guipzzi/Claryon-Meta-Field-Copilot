@@ -15,7 +15,7 @@
 - **GPS**: eram **0 linhas persistidas em 20 min** com o Android confirmando entrega. Seis consertos, e o
   mapa parou de escrever *"ninguém publicando"* quando a culpa é do portador — agora fica **em branco com
   a posição própria**, e distingue *não publiquei* de *ninguém publicou* de *não estou recebendo*.
-- **PLACA: 0 erradas aceitas em 31 imagens** de campo (ângulo, chuva, contraluz, reflexo, oclusão, noite).
+- **PLACA: 0 erradas aceitas em 31 cenas sintéticas** (chuva, contraluz, oclusão, barro, noite); sem foto real.
   Dita: 40/40. Roteador a 93 µs · OCR a p50 8 ms · os **7 fps são ESCOLHA** (`CameraProfile.OCR`), não teto.
 - **LLM roda no celular, provado**: `adb push`, `mmap` sobre FUSE, carga 2 435 ms, PSS +1,91× o GGUF.
   **MODELO TROCADO** (22/08, humano, sem bancada): sai Llama 3.2 1B, entra **Qwen2.5-1.5B Apache-2.0** —

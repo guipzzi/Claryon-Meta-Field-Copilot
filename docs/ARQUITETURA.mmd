@@ -23,7 +23,7 @@ subgraph CELULAR["CELULAR ANDROID · 100% do processamento · funciona offline"]
     subgraph VISAO["CP1 · Visão — leitura de placa"]
         direction TB
         OCR["ML Kit Text Recognition<br/>modelo Latin on-device · p50 8 ms"]
-        VALID["PlacaValidator · Mercosul ou antigo<br/>31 imagens de campo · 0 erradas aceitas"]
+        VALID["PlacaValidator · Mercosul ou antigo<br/>31 cenas sintéticas · 0 placas erradas aceitas"]
     end
 
     NORMA["ConsultaDeNorma · Etapa A<br/>core-knowledge · 1744 trechos<br/>índice léxico no aparelho"]

@@ -25,7 +25,7 @@ Policial militar de 25 a 45 anos, em blitz de 4 a 6 horas ativas com 6 a 10 agen
 1. O agente, parado atrás de um veículo, diz "Claryon" — o microfone dos óculos está sempre aberto por HFP/SCO e a palavra é detectada 100% no celular por uma cabeça de wake word em ONNX. Earcon grave confirma a escuta.
 2. Ele completa: "leia essa placa". O áudio vai pelo HFP para o celular e é transcrito localmente por whisper.cpp (ggml-small-q5_1, 181 MiB). Nada de áudio sai do aparelho.
 3. O roteador de intenções, determinístico, classifica em 93 µs e aciona a câmera dos óculos pelo Meta Wearables Device Access Toolkit 0.9.0 (`withCamera`, perfil de 7 fps).
-4. Dois frames chegam ao celular. O ML Kit Text Recognition, on-device, lê o plano Y em 8 ms (p50) e um validador estrito confere o padrão Mercosul/antigo. Em 31 imagens de campo — chuva, contraluz, oclusão, noite — nenhuma placa errada foi aceita.
+4. Dois frames chegam ao celular. O ML Kit Text Recognition, on-device, lê o plano Y em 8 ms (p50) e um validador estrito confere o padrão Mercosul/antigo. Em 31 cenas sintéticas com degradação controlada — chuva, contraluz, oclusão, barro, noite — nenhuma placa errada foi aceita. Ainda não medimos em fotografia real.
 5. A placa validada é consultada; o servidor devolve situação, nunca dado de terceiro.
 6. A resposta chega ao ouvido pelo alto-falante dos óculos, sintetizada localmente pelo Piper: "Placa regular, sem restrição." Teto de sete palavras, por regra do produto.
 7. Ciclo completo medido de 873 a 945 ms, do fim da fala ao início do áudio, em emulador arm64 API 35.
@@ -33,7 +33,7 @@ Policial militar de 25 a 45 anos, em blitz de 4 a 6 horas ativas com 6 a 10 agen
 
 ### A4 — Walkthrough de exceção
 
-Placa coberta de barro. (1) O validador rejeita: 6 caracteres não formam padrão Mercosul nem antigo, e afrouxar transformaria DEF4567 em DEF456 — outro carro. (2) O sistema não consulta e não arrisca; degrada para recusa tipada, não para silêncio. (3) O agente ouve um earcon de falha e "Placa ilegível. Aproxime." — em 31 imagens, zero placas erradas aceitas.
+Placa coberta de barro. (1) O validador rejeita: 6 caracteres não formam padrão Mercosul nem antigo, e afrouxar transformaria DEF4567 em DEF456 — outro carro. (2) O sistema não consulta e não arrisca; degrada para recusa tipada, não para silêncio. (3) O agente ouve um earcon de falha e "Placa ilegível. Aproxime." — em 31 cenas sintéticas, zero placas erradas aceitas.
 
 ## A5 — Decisões técnicas e trade-offs
 
@@ -120,7 +120,9 @@ npx -y @mermaid-js/mermaid-cli@11 -i docs/ARQUITETURA.mmd -o arquitetura.png -w 
 
 ## O que este documento não esconde
 
-Todos os números aqui foram medidos em **emulador arm64 API 35**. Nada foi medido
+Todos os números aqui foram medidos em **emulador arm64 API 35**, e o corpus de
+placas é **sintético** — 31 cenas geradas por `Canvas` em tempo de teste, com
+degradação controlada. Não há fotografia de placa no repositório. Nada foi medido
 em óculos reais — não temos o hardware, e o edital não o exige. Onde isso muda a
 leitura de um número, está dito no próprio campo.
 
