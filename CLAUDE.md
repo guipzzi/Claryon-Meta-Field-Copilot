@@ -173,6 +173,10 @@ Ao fechar o bloco: reescreva `ESTADO.md` e **`git push origin main`**.
 | [`docs/COMPLIANCE.md`](docs/COMPLIANCE.md) | O que o edital exige × o que existe |
 | [`docs/VERIFICACOES_COM_HARDWARE.md`](docs/VERIFICACOES_COM_HARDWARE.md) | O que só se mede com óculos e fone reais |
 | [`docs/DIARIO_DE_BORDO.md`](docs/DIARIO_DE_BORDO.md) | Narrativa por marco. **Não contém estado atual** |
+| [`docs/CAPACIDADES_DESLIGADAS.md`](docs/CAPACIDADES_DESLIGADAS.md) | **Antes de dizer que uma capacidade existe.** O que está em `src/main` sem chamador alcançável, separado entre decisão registrada e descuido |
+| [`docs/ENTREGA_SEGUNDO_FILTRO.md`](docs/ENTREGA_SEGUNDO_FILTRO.md) | O que foi submetido ao Segundo Filtro, versionado para não divergir do repositório |
+| [`docs/ARQUITETURA.mmd`](docs/ARQUITETURA.mmd) | O diagrama, em Mermaid. Renderiza com `mermaid-cli` ou em mermaid.live |
+| [`AUTHORS.md`](AUTHORS.md) | Quem assina o projeto, e o que é proveniência de ferramenta |
 | [`README.md`](README.md) | Setup do zero: NDK, modelos, Supabase, emulador |
 
 **Fontes externas:** MCP `search_dat_docs` · repo oficial

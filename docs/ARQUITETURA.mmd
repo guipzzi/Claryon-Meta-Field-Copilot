@@ -1,0 +1,100 @@
+flowchart TD
+
+%% ═══════════ HARDWARE DOS ÓCULOS (sem subgrafo: entram e saem do fluxo) ═══════════
+MIC["CP2 · ÓCULOS — MICROFONE<br/>HFP/SCO · 8 kHz mono<br/>beamforming isola quem veste"]
+CAM["CP2 · ÓCULOS — CÂMERA<br/>Meta DAT 0.9.0 · withCamera<br/>CameraProfile.OCR · 7 fps"]
+SPK["CP3 · ÓCULOS — ALTO-FALANTE<br/>HFP/SCO"]
+ENERGIA["CP5 · BATERIA DOS ÓCULOS · PowerPolicy<br/>Standby fecha o HFP — em SCO é o maior dreno contínuo<br/>Ativo: wake word ligada, câmera desligada por padrão<br/>gatilho, nunca loop: wake word → VAD → STT"]
+
+%% ═══════════ CELULAR ═══════════
+subgraph CELULAR["CELULAR ANDROID · 100% do processamento · funciona offline"]
+    direction TB
+
+    subgraph ENTRADA["Entrada de voz"]
+        direction TB
+        ROTA["GlassesAudioRoute<br/>capturar exige a rota dos óculos<br/>microfone do celular NÃO compila"]
+        VAD["Silero VAD · sherpa-onnx<br/>silero_vad.onnx · 629 KB"]
+        WW["CP1 · Ativação por Claryon<br/>openWakeWord + cabeça logística<br/>melspectrogram.onnx + embedding_model.onnx"]
+        STT["CP1 · whisper.cpp<br/>ggml-small-q5_1 · 181 MiB · pt-BR"]
+    end
+
+    ROTEADOR{"DeterministicIntentRouter<br/>93 us · o LLM NUNCA escolhe ação"}
+
+    subgraph VISAO["CP1 · Visão — leitura de placa"]
+        direction TB
+        OCR["ML Kit Text Recognition<br/>modelo Latin on-device · p50 8 ms"]
+        VALID["PlacaValidator · Mercosul ou antigo<br/>31 imagens de campo · 0 erradas aceitas"]
+    end
+
+    NORMA["ConsultaDeNorma · Etapa A<br/>core-knowledge · 1744 trechos<br/>índice léxico no aparelho"]
+    RADIO["RadioTatico · PTT<br/>transcrição na ORIGEM<br/>Opus · pré-roll só em RAM"]
+    MAPA["MapLibre 11.11<br/>posição própria + grandezas"]
+    COFRE[("EncryptedEvidenceVault<br/>EncryptedFile + Android Keystore<br/>HMAC-SHA256 · cadeia de custódia")]
+    LLM["core-llm · llama.cpp<br/>Qwen2.5-1.5B-Instruct Q4_K_M<br/>embarcado e DESLIGADO por medição"]
+
+    subgraph SAIDA["CP3 · Saída por áudio"]
+        direction TB
+        TTS["Piper VITS · sherpa-onnx<br/>pt_BR-faber-medium int8"]
+        FILA["PrioritySoundQueue + earcons<br/>EMERGENCIA acima de RESPOSTA e INFORMATIVO<br/>teto de 7 palavras por fala"]
+    end
+end
+
+%% ═══════════ FRONTEIRA ═══════════
+FRONTEIRA{{"CP4 · FRONTEIRA DE PRIVACIDADE<br/>NÃO atravessam: áudio, frame, transcrição literal, fala de terceiro<br/>SEM reconhecimento facial e SEM base biométrica · abstenção declarada<br/>LGPD art. 38 · relatório de impacto no repositório"}}
+
+%% ═══════════ NUVEM ═══════════
+subgraph NUVEM["NUVEM · só o que a fronteira deixa passar"]
+    direction LR
+    RT["TransporteRealtime<br/>WebSocket Phoenix · canal privado por JWT"]
+    SUPA[("Supabase Postgres · RLS + JWT<br/>consultar_posicao devolve DISTÂNCIA e RUMO<br/>nunca coordenada de terceiro<br/>consultar_placa · publicar_posicao")]
+    OSM["Overpass · OpenStreetMap<br/>categoria de vocabulário fechado<br/>+ MINHA coordenada a 4 casas · prazo 2 s"]
+end
+
+%% ═══════════ Voz ═══════════
+MIC -->|"PCM 8 kHz"| ROTA
+ROTA --> VAD
+VAD -->|"há voz"| WW
+WW -->|"Claryon detectado"| STT
+STT -->|"texto pt-BR"| ROTEADOR
+
+%% ═══════════ Visão ═══════════
+ROTEADOR -.->|"leia essa placa"| CAM
+CAM -->|"2 frames · plano Y"| OCR
+OCR --> VALID
+VALID -->|"placa válida"| FRONTEIRA
+VALID -.->|"ilegível: recusa falada"| FILA
+ENERGIA -.->|"governa a taxa"| CAM
+
+%% ═══════════ Norma, rádio, mapa, cofre ═══════════
+ROTEADOR --> NORMA
+NORMA -->|"citação do artigo"| TTS
+NORMA -.->|"corpus local não respondeu"| FRONTEIRA
+ROTEADOR --> RADIO
+ROTEADOR --> MAPA
+ROTEADOR --> COFRE
+ROTEADOR --> TTS
+ROTEADOR -.->|"sem chamador em src/main"| LLM
+RADIO -->|"texto JÁ transcrito"| FRONTEIRA
+MAPA -->|"minha posição"| FRONTEIRA
+
+%% ═══════════ Saída ═══════════
+TTS --> FILA
+FILA -->|"áudio"| SPK
+
+%% ═══════════ Nuvem ═══════════
+FRONTEIRA --> RT
+FRONTEIRA --> OSM
+RT --> SUPA
+
+%% ═══════════ Estilo ═══════════
+classDef oculos fill:#ffe3ee,stroke:#e5006d,stroke-width:3px,color:#111111
+classDef checkpoint fill:#ffeef5,stroke:#e5006d,stroke-width:2px,color:#111111
+classDef desligado fill:#eeeeee,stroke:#999999,stroke-width:1px,stroke-dasharray:5 4,color:#555555
+classDef privacidade fill:#fff4d6,stroke:#c98a00,stroke-width:3px,color:#111111
+classDef nuvem fill:#e8f1ff,stroke:#2b6cb0,stroke-width:1.5px,color:#111111
+
+class MIC,CAM,SPK,ENERGIA oculos
+class WW,STT checkpoint
+class LLM desligado
+class FRONTEIRA privacidade
+class RT,SUPA,OSM nuvem
